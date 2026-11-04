@@ -11,7 +11,7 @@ from research_core.coordinator import Coordinator
 from research_core.store import admissions, db, sessions, tasks
 from research_core.store.actors import Actor
 from research_core.store.errors import LeaseError, StoreError
-from research_core.tools.base import ToolContext, run_tool
+from research_core.tools.base import ToolContext, ToolError, run_tool
 from research_core.watcher.hermes_api import FakeHermesRuns
 from tests.test_coordinator_transitions import assigned
 from tests.watcher._support import coordinator, dispatch_inputs, make_ctx, set_setting
@@ -793,3 +793,85 @@ def test_work_status_omits_acknowledged_history(tmp_path):
     owner.reconcile()
     owner.advance_attempts(ctx)
     assert admissions.work_status(ctx.wstore) == []
+
+@pytest.mark.parametrize("action", ["wait", "ask", "release"])
+def test_accepted_worker_report_survives_exit_before_application(tmp_path, monkeypatch, action):
+    ctx = make_ctx(tmp_path)
+    row = assigned(ctx)
+    owner = coordinator(ctx)
+    epoch = ctx.store.one("SELECT lease_epoch FROM tasks WHERE id=1")[0]
+    tool_ctx = ToolContext(
+        role="researcher",
+        actor=Actor.session(row["session_id"], epoch=epoch),
+        workspace=ctx.ws,
+        env=ctx.env,
+    )
+    tool_ctx.store, tool_ctx.wstore = ctx.store, ctx.wstore
+    args = {"action": action, "task": "T-1", "operation_id": "report"}
+    args.update(
+        {
+            "wait": {"kind": "platform", "detail": "Platform unavailable"},
+            "ask": {"question": "Which approach?"},
+            "release": {"reason": "Cannot proceed"},
+        }[action]
+    )
+    with monkeypatch.context() as patch:
+        ticks = iter([0, 16])
+        patch.setattr(transitions.time, "monotonic", lambda: next(ticks))
+        accepted = transitions.request(tool_ctx, "task", args, "report")
+    assert accepted["kind"] == "transition_pending"
+    command_id = accepted["command_id"]
+    command_row = ctx.store.one("SELECT * FROM transition_commands WHERE id=?", (command_id,))
+    assert command_row["issuer_attempt_id"] == row["op_id"]
+    assert command_row["actor_epoch"] == epoch
+    ctx.hermes.complete(row["run_id"])
+    owner.reconcile()
+    owner.advance_attempts(ctx)
+    assert (
+        ctx.wstore.one("SELECT advanced_at FROM client_admissions WHERE op_id=?", (row["op_id"],))[
+            0
+        ]
+        is None
+    )
+    continuation = owner.continue_session(
+        ctx, sessions.read(ctx.wstore, row["session_id"]), "New guidance", key="guidance"
+    )
+    assert continuation["deferred"] and continuation["reason"] == "accepted worker report pending"
+    assert ctx.wstore.one("SELECT count(*) FROM client_admissions")[0] == 1
+    transitions.apply(ctx, "replacement-coordinator")
+    result = transitions.receipt(ctx.store, command_id)
+    assert result["ok"]
+    transitions.apply(ctx, "replacement-coordinator")
+    assert transitions.receipt(ctx.store, command_id) == result
+    owner.advance_attempts(ctx)
+    assert ctx.wstore.one("SELECT count(*) FROM client_admissions WHERE origin='retry'")[0] == 0
+
+
+def test_worker_report_cannot_be_accepted_after_execution_retires(tmp_path):
+    ctx = make_ctx(tmp_path)
+    row = assigned(ctx)
+    ctx.hermes.complete(row["run_id"])
+    coordinator(ctx).reconcile()
+    tool_ctx = ToolContext(
+        role="researcher", actor=Actor.session(row["session_id"]), workspace=ctx.ws, env=ctx.env
+    )
+    tool_ctx.store, tool_ctx.wstore = ctx.store, ctx.wstore
+    with pytest.raises(ToolError, match="no longer has task transition authority"):
+        transitions.request(tool_ctx, "task", {"action": "release", "task": "T-1"}, "late")
+    assert not ctx.store.q("SELECT * FROM transition_commands")
+
+
+def test_durable_command_preserves_explicit_stale_epoch(tmp_path):
+    ctx = make_ctx(tmp_path)
+    row = assigned(ctx)
+    epoch = ctx.store.one("SELECT lease_epoch FROM tasks WHERE id=1")[0]
+    tool_ctx = ToolContext(
+        role="researcher",
+        actor=Actor.session(row["session_id"], epoch=epoch - 1),
+        workspace=ctx.ws,
+        env=ctx.env,
+    )
+    tool_ctx.store, tool_ctx.wstore = ctx.store, ctx.wstore
+    with pytest.raises(LeaseError, match="lease epoch"):
+        transitions.request(tool_ctx, "task", {"action": "release", "task": "T-1"}, "stale")
+    assert not ctx.store.q("SELECT * FROM transition_commands")

@@ -123,7 +123,7 @@ def _wait_on_platform(ctx: ToolContext, route: str, error: PlatformError) -> dic
                 },
             )
         )
-        if result.get("kind") == "transition_pending":
+        if result.get("kind") == "transition_pending" or result.get("ok") is False:
             return {"waiting": False, "transition": result}
 
     except StoreError as problem:

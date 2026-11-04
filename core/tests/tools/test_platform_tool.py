@@ -418,3 +418,26 @@ def test_platform_down_puts_the_held_task_on_wait(call, ctx_factory, workspace_e
     # Another Session (not the holder) gets the refusal without a wait.
     other = call("platform", {"action": "credits"}, role="researcher", session_id="s-other")
     assert other["context"]["waiting"] is False
+
+
+@pytest.mark.parametrize("kind", ["transition_pending", "transition_refused", "transition_failed"])
+def test_platform_failure_does_not_claim_wait_when_command_is_unapplied(
+    tmp_path, monkeypatch, kind
+):
+    from research_core.platform.errors import PlatformError
+    from research_core.tools import task
+    from research_core.tools.base import ToolContext
+    from tests.test_coordinator_transitions import assigned
+    from tests.watcher._support import make_ctx
+
+    tick = make_ctx(tmp_path)
+    row = assigned(tick)
+    ctx = ToolContext(
+        role="researcher", actor=Actor.session(row["session_id"]), workspace=tick.ws, env=tick.env
+    )
+    ctx.store, ctx.wstore = tick.store, tick.wstore
+    result = {"kind": kind, "command_id": "wait", "ok": False, "error": "Unavailable"}
+    monkeypatch.setattr(task, "dispatch", lambda call: result)
+    error = PlatformError("Platform unavailable", status=503)
+    context = wait._wait_on_platform(ctx, "credits", error)
+    assert context == {"waiting": False, "transition": result}

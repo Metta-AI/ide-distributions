@@ -1088,6 +1088,12 @@ class Coordinator:
                 )
                 if row["advanced_at"] is not None or row["execution_uncertain"]:
                     continue
+                if ctx.store is not None and ctx.store.one(
+                    "SELECT 1 FROM transition_commands WHERE issuer_attempt_id=?"
+                    " AND result IS NULL",
+                    (row["op_id"],),
+                ):
+                    continue
                 session = sessions.read(ctx.wstore, row["session_id"])
                 if session["coworld_id"] is not None and (
                     ctx.coworld is None or session["coworld_id"] != ctx.coworld.coworld_id
@@ -1349,6 +1355,15 @@ class Coordinator:
             predecessor = ctx.wstore.one(
                 "SELECT * FROM client_admissions WHERE op_id=?", (assignment["current_attempt_id"],)
             )
+            if ctx.store.one(
+                "SELECT 1 FROM transition_commands WHERE issuer_attempt_id=? AND result IS NULL",
+                (predecessor["op_id"],),
+            ):
+                return {
+                    "session": session["id"],
+                    "deferred": True,
+                    "reason": "accepted worker report pending",
+                }
             if predecessor["execution_uncertain"] or predecessor["resolution_required"]:
                 return {
                     "session": session["id"],

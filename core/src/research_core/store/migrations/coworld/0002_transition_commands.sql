@@ -5,6 +5,8 @@ CREATE TABLE transition_commands (
     args TEXT NOT NULL,
     role TEXT NOT NULL CHECK(role IN ('orchestrator','researcher')),
     actor TEXT NOT NULL,
+    actor_epoch INTEGER,
+    issuer_attempt_id TEXT,
     created_at TEXT NOT NULL,
     deadline TEXT NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0,

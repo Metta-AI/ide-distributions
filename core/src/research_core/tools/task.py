@@ -293,7 +293,12 @@ def execute(call: ToolCall) -> dict:
             " WHERE a.session_id=? AND a.task_id=?",
             (call.ctx.hermes_session_id(), n),
         )
-        if assignment is None or assignment["status"] not in {"queued", "running"}:
+        accepted_attempt = call.ctx.env.get("IDE_TRANSITION_ATTEMPT_ID")
+        if assignment is None or (
+            assignment["current_attempt_id"] != accepted_attempt
+            if accepted_attempt
+            else assignment["status"] not in {"queued", "running"}
+        ):
             raise ToolError("This worker execution no longer has task transition authority")
     if call.action == "workers":
         return {"kind": "available_workers", "workers": workers(call.ctx.env)}

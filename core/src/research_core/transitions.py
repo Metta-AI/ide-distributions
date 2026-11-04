@@ -51,26 +51,57 @@ def request(ctx: ToolContext, tool: str, args: dict, operation_id: str) -> dict:
         )
     )
     payload = json.dumps(args, sort_keys=True)
-    with ctx.store.tx(ctx.actor) as tx:
+    # Acceptance and execution retirement share the admission gate. A persisted report
+    # retains its acceptance authority if its worker exits before application.
+    with admissions.dispatch_lock(ctx.wstore), ctx.store.tx(ctx.actor) as tx:
         prior = tx.one("SELECT * FROM transition_commands WHERE id=?", (command_id,))
         if prior is not None:
-            if (prior["tool"], prior["args"], prior["role"], prior["actor"]) != (
+            if (
+                prior["tool"],
+                prior["args"],
+                prior["role"],
+                prior["actor"],
+                prior["actor_epoch"],
+            ) != (
                 tool,
                 payload,
                 ctx.role,
                 str(ctx.actor),
+                ctx.actor.epoch,
             ):
                 raise StoreError(["operation_id already belongs to a different transition intent"])
         else:
+            issuer_attempt_id = None
+            if (
+                ctx.role == "researcher"
+                and tool == "task"
+                and args["action"] in {"complete", "wait", "ask", "release", "propose_submission"}
+            ):
+                from research_core.store import tasks
+                from research_core.tools import _args as arguments
+
+                task_id = arguments.record_number(args["task"], "task", "task")
+                tasks.require_holder(ctx.store, task_id, ctx.actor)
+                assignment = ctx.wstore.one(
+                    "SELECT a.current_attempt_id,execution.status FROM task_assignments a"
+                    " JOIN client_admissions execution ON execution.op_id=a.current_attempt_id"
+                    " WHERE a.session_id=? AND a.task_id=?",
+                    (ctx.actor.id, task_id),
+                )
+                if assignment is None or assignment["status"] not in {"queued", "running"}:
+                    raise ToolError("This worker execution no longer has task transition authority")
+                issuer_attempt_id = assignment["current_attempt_id"]
             tx.execute(
-                "INSERT INTO transition_commands(id,tool,args,role,actor,created_at,deadline)"
-                " VALUES (?,?,?,?,?,?,?)",
+                "INSERT INTO transition_commands(id,tool,args,role,actor,actor_epoch,"
+                "issuer_attempt_id,created_at,deadline) VALUES (?,?,?,?,?,?,?,?,?)",
                 (
                     command_id,
                     tool,
                     payload,
                     ctx.role,
                     str(ctx.actor),
+                    ctx.actor.epoch,
+                    issuer_attempt_id,
                     tx.at,
                     (parse_iso(tx.at) + timedelta(seconds=120)).isoformat(),
                 ),
@@ -124,7 +155,7 @@ def apply(ctx, instance_id: str) -> None:
                 "UPDATE transition_commands SET attempts=attempts+1,owner_instance=? WHERE id=?",
                 (instance_id, command["id"]),
             )
-        actor = Actor.parse(command["actor"])
+        actor = replace(Actor.parse(command["actor"]), epoch=command["actor_epoch"])
         tool_ctx = ToolContext(
             role=command["role"],
             actor=actor,
@@ -134,6 +165,7 @@ def apply(ctx, instance_id: str) -> None:
                 "IDE_SESSION_ID": actor.id if actor.is_session else "",
                 "IDE_ACTOR": str(actor),
                 "IDE_TRANSITION_ID": command["id"],
+                "IDE_TRANSITION_ATTEMPT_ID": command["issuer_attempt_id"] or "",
             },
             coordinator_instance=instance_id,
         )
@@ -169,6 +201,10 @@ def apply(ctx, instance_id: str) -> None:
                 elif command["tool"] == "store":
                     from research_core.store import cli
 
+                    if args["op"] not in cli.ALLOWED or actor.is_session:
+                        raise StoreError(
+                            ["store commands are restricted to user and harness edits"]
+                        )
                     stores = cli.Stores(ctx.ws, ctx.wstore, ctx.coworld.coworld_id)
                     stores._store = store
                     result = {
