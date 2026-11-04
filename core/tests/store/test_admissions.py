@@ -46,6 +46,22 @@ def test_changed_body_cannot_reuse_a_durable_execution_identity(workspace_store,
     assert workspace_store.one("SELECT count(*) FROM client_admissions")[0] == 1
 
 
+def test_changed_origin_cannot_reuse_a_durable_execution_identity(workspace_store, harness):
+    enqueue(workspace_store, harness)
+    with pytest.raises(StoreError, match="different payload"):
+        admissions.enqueue(
+            workspace_store,
+            harness,
+            key="one-intent",
+            session_id="worker-1",
+            profile="researcher",
+            text="Repair the task",
+            origin="answer",
+        )
+    [row] = workspace_store.q("SELECT origin FROM client_admissions")
+    assert row["origin"] == "assignment"
+
+
 def test_uncommitted_intent_and_wakeup_are_rolled_back_together(workspace_store, harness):
     with pytest.raises(RuntimeError, match="crash before commit"):
         with workspace_store.tx(harness) as tx:

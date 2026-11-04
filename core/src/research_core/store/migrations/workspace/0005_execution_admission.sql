@@ -28,10 +28,6 @@ CREATE TABLE task_assignments (
 CREATE TRIGGER task_assignments_log_insert AFTER INSERT ON task_assignments BEGIN
     INSERT INTO change_log(at,tbl,row_id,op) VALUES (strftime('%Y-%m-%dT%H:%M:%fZ','now'),'task_assignments',NEW.rowid,'insert');
 END;
--- A legacy start with no receipt cannot be replayed without its original auth scope/horizon.
-UPDATE client_admissions SET resolution_required=1,error='legacy admission requires reconciliation'
- WHERE dispatch_started=1 AND run_id IS NULL;
-
 CREATE TRIGGER task_assignments_log_update AFTER UPDATE ON task_assignments BEGIN
     INSERT INTO change_log(at,tbl,row_id,op) VALUES (strftime('%Y-%m-%dT%H:%M:%fZ','now'),'task_assignments',NEW.rowid,'update');
 END;

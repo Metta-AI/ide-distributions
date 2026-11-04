@@ -345,3 +345,23 @@ def test_message_content_migration_preserves_queued_delivery_and_untracked_write
         "content": "hello",
     }
     assert conn.execute("SELECT id FROM change_log WHERE token IS NULL").fetchall() == untracked
+
+
+def test_admission_schema_does_not_activate_legacy_quarantine_before_its_owner_exists():
+    conn = sqlite3.connect(":memory:", isolation_level=None)
+    for number, path in migrate.migration_files("workspace"):
+        if number < 5:
+            migrate._run_migration(conn, number, path)
+    conn.execute(
+        "INSERT INTO client_admissions"
+        "(op_id,kind,request,session_id,message,payload,status,created_at,dispatch_started,error)"
+        " VALUES ('uncertain','message','{}','chat','hello','{}','queued','2026-01-01',1,"
+        "'lost native response')"
+    )
+    untracked = conn.execute("SELECT id FROM change_log WHERE token IS NULL").fetchall()
+    number, path = next(item for item in migrate.migration_files("workspace") if item[0] == 5)
+    migrate._run_migration(conn, number, path)
+    assert conn.execute(
+        "SELECT status,dispatch_started,resolution_required,error FROM client_admissions"
+    ).fetchone() == ("queued", 1, 0, "lost native response")
+    assert conn.execute("SELECT id FROM change_log WHERE token IS NULL").fetchall() == untracked

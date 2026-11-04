@@ -23,7 +23,7 @@ import pytest
 from research_core import intake
 from research_core.client import ScriptedClient, SeamError
 from research_core.serve import SeamServer
-from research_core.store import coworlds, goals, notices, tasks, ui_state
+from research_core.store import admissions, coworlds, goals, notices, tasks, ui_state
 from research_core.store.actors import Actor
 from research_core.store.db import Store, Tx
 from research_core.tools.base import ToolContext
@@ -92,6 +92,53 @@ def context_block(seam, run_id) -> dict:
 
 
 # --- session-open and message -------------------------------------------------------------
+
+
+@pytest.mark.parametrize("origin", ["assignment", "continuation", "planning", "wake"])
+def test_client_dispatcher_leaves_internal_execution_intents_for_their_owner(tmp_path, origin):
+    ctx = make_ctx(tmp_path)
+    native = FakeHermesRuns()
+    server = SeamServer(ws=ctx.workspace, hermes=native)
+    try:
+        # No session exists yet: the client dispatcher must not consume this native intent.
+        op_id = admissions.enqueue(
+            ctx.wstore,
+            HARNESS,
+            key="internal",
+            session_id="worker",
+            profile="researcher",
+            text="Internal work",
+            origin=origin,
+        )
+        server.session_open(
+            {
+                "op_id": str(uuid4()),
+                "session_id": "chat",
+                "client": {"id": "test", "kind": "test"},
+            }
+        )
+        receipt = server.message(
+            {
+                "op_id": str(uuid4()),
+                "session_id": "chat",
+                "message": {"role": "user", "content": "Client work"},
+            }
+        )
+        asyncio.run(server.dispatch_messages())
+        row = ctx.wstore.one("SELECT * FROM client_admissions WHERE op_id=?", (op_id,))
+        assert row["status"] == "queued" and not row["dispatch_started"]
+        assert row["run_id"] is None
+        assert (
+            ctx.wstore.one(
+                "SELECT status FROM client_admissions WHERE op_id=?", (receipt["op_id"],)
+            )[0]
+            == "running"
+        )
+        assert [run.input for run in native.runs.values()] == ["Client work"]
+    finally:
+        server._http.server_close()
+        ctx.store.close()
+        ctx.wstore.close()
 
 
 def test_session_open_registers_a_chat_session_with_its_context(seam, monkeypatch):
