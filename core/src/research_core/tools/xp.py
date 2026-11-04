@@ -528,9 +528,7 @@ def _finish_evaluate(
     results = dict(run.get("results") or {})
     results["evaluate"] = {"log": str(result.log_path), "exit_code": result.exit_code}
     if not result.ok:
-        report_capability(
-            ctx, "evaluate", output=result.output_tail, command=result.command
-        )
+        report_capability(ctx, "evaluate", output=result.output_tail, command=result.command)
         _store_rows(ctx, run, results, f"invalid: evaluate failed (exit {result.exit_code})")
         return None
     try:

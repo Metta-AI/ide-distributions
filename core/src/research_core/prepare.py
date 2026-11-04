@@ -259,7 +259,6 @@ class HermesCli:
         raise _failed(result)
 
 
-
 class HermesConfig(HermesCli):
     """Prepare one profile using the installed Hermes configuration API.
 

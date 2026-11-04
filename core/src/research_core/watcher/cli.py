@@ -31,9 +31,7 @@ NO_HERMES_HOME = (
 
 
 def add_parser(subparsers: argparse._SubParsersAction) -> None:
-    watcher = subparsers.add_parser(
-        "watcher", help="Inspect workspace coordinator status"
-    )
+    watcher = subparsers.add_parser("watcher", help="Inspect workspace coordinator status")
     commands = watcher.add_subparsers(dest="watcher_command", metavar="<subcommand>")
     commands.required = True
     status = commands.add_parser(
