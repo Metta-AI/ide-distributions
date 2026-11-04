@@ -540,7 +540,7 @@ def open_ask(seam, conversation: str, ask_id: str = "ask_1") -> None:
     )
 
 
-def test_ui_action_answer_is_durable_and_waits_for_the_live_run(seam):
+def test_ui_action_answer_is_durable_and_steers_the_live_run(seam):
     session_id = seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
     run = seam.say("propose a submission")
     open_ask(seam, session_id)
@@ -550,11 +550,11 @@ def test_ui_action_answer_is_durable_and_waits_for_the_live_run(seam):
     ask = ui_state.get(seam.wstore, session_id)["doc"]["asks"]["ask_1"]
     assert ask["status"] == "answered" and ask["answer"] == "yes"
     assert ask["answered_by"] == "user:local"
-    assert seam.hermes.steered == {} and seam.starts() == 1
     assert seam.client.answer("ask_1", "yes")["op_id"] == result["op_id"]
-    seam.hermes.complete(run["run_id"])
     delivered = seam.client.wait_admission(result["op_id"])
-    assert seam.run_input(delivered["run_id"]) == "[UI action] answer to ask_1: yes"
+    assert delivered["run_id"] == run["run_id"]
+    assert seam.hermes.steered[run["run_id"]] == ["[UI action] answer to ask_1: yes"]
+    assert seam.starts() == 1
 
 
 def test_ui_action_answer_starts_a_run_when_none_is_live_and_finds_workspace_asks(seam):
