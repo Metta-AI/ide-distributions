@@ -14,7 +14,7 @@ from play.program import Program
 
 PLAYER = "ply_281ba4ec-d1a2-4e37-a609-a391d30421d2"  # a real player id's shape: ply_<uuid>
 SERVER = "https://example.invalid/api"
-# The real GotA starter: Metta-AI/polyworld coworld/gota/players/base.bas (origin/main, sha256
+# The real GotA starter: softmax-universe/polyworld coworld/gota/players/base.bas (origin/main, sha256
 # 6b226d1d36475c7b5de8de602e6447bc0c175178830ed6a458c0997b9da8a1d8), as shipped.
 STARTER = (Path(__file__).parent / "support" / "gota_base.bas").read_bytes()
 STARTER_SHA = hashlib.sha256(STARTER).hexdigest()

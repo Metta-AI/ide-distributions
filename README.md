@@ -36,7 +36,7 @@ under `docs/` carry a banner saying so.
 ## Install
 
 ```bash
-git clone https://github.com/Metta-AI/ide-distributions.git ~/ide-distributions
+git clone https://github.com/softmax-universe/ide-distributions.git ~/ide-distributions
 hermes profile install ~/ide-distributions/orchestrator --name orchestrator --yes
 hermes profile install ~/ide-distributions/researcher --name researcher --yes
 # write each profile's .env (distribution.yaml lists the variables; IDE_WORKSPACE must be the

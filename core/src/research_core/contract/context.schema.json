@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/Metta-AI/ide-distributions/contract/context.schema.json",
+  "$id": "https://github.com/softmax-universe/ide-distributions/contract/context.schema.json",
   "title": "Turn context",
   "description": "The typed context block a client sends with each message (design A.3, A.4). Every field but contract_version is optional. The bridge stamps client and coworld. Unknown fields are dropped; oversize values are refused with a clear error, never truncated.",
   "contract_version": 1,

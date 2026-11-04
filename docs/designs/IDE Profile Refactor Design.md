@@ -496,7 +496,7 @@ New skills cover what nothing teaches today: proposing a submission, reading and
 
 ### Coworld mixins
 
-Each Coworld gets a **mixin**, in the shape established by `Metta-AI/optimizer-seed`: a folder of game-specific knowledge and tooling that plugs into the core skills. The workspace's code repository holds exactly one, vendored when the workspace is created, at `games/<coworld>/`. A mixin has:
+Each Coworld gets a **mixin**, in the shape established by `softmax-universe/optimizer-seed`: a folder of game-specific knowledge and tooling that plugs into the core skills. The workspace's code repository holds exactly one, vendored when the workspace is created, at `games/<coworld>/`. A mixin has:
 
 * **`MIXIN.md`**, its manifest: the game, the Coworld and its version, the leagues, where the game's mechanics can be verified, the upstream mixin and commit it was vendored from, and a table of every skill the mixin provides.
 * **Five required binding skills**, which the core skills resolve through that table: `ab` (the metrics that matter, how to split them, and the statistical tests and sample floors for comparing versions), `survey` (what a batch of episodes shows), `replay-inspection` (how to open and decode the game's replays), `eval-design` (rosters, episode counts and pacing for hosted evaluations), and `diagnosis` (the game's failure vocabulary and diagnostic instruments).
