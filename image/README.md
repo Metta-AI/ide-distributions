@@ -135,7 +135,8 @@ remain separate gates; the smoke's deliberately unavailable platform does not pr
 
 The startup comparison workflow builds the PR base and candidate from their own source and
 lockfile on one Linux runner.
-Each image runs one fresh boot and five retained boots with the same smoke command. This
+Each image runs one fresh boot and five retained boots with the same smoke command and
+the hosted workspace limit of two CPU cores and 2 GiB memory. This
 isolates packaging changes; it does not compare different application revisions. Both build
 identities, the baseline Dockerfile, and all per-boot timing reports are retained as artifacts.
 

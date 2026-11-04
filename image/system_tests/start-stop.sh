@@ -30,6 +30,7 @@ docker run --rm --user 0 --entrypoint /bin/sh -v "$volume:/workspace" "$image" -
 sentinel="retained-$name"
 for cycle in $(seq 1 "$cycles"); do
   docker run -d --name "$name" --read-only --cap-drop ALL --security-opt no-new-privileges \
+    --cpus 2 --memory 2g \
     --tmpfs /tmp:rw,size=1g --mount "type=volume,src=$volume,dst=/workspace" \
     --mount "type=bind,src=$scratch/bootstrap.json,dst=/run/workspace/bootstrap.json,readonly" "$image"
   ready=false
