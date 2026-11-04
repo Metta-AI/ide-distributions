@@ -268,3 +268,66 @@ def test_slow_transcript_handoff_does_not_hold_chat_admission_lock(tmp_path):
         finally:
             release.set()
         future.result(timeout=5)
+
+
+@pytest.mark.parametrize("lost_reply", [False, True])
+def test_release_before_start_receipt_retains_execution_authority(tmp_path, lost_reply):
+    from types import SimpleNamespace
+
+    from research_core.watcher.hermes_api import RunsUnavailable
+
+    ctx = make_ctx(tmp_path)
+    owner = Coordinator(ctx.ws, ctx.hermes, "original-runtime")
+    original = ctx.hermes.start
+    accepted = []
+
+    def start(**kwargs):
+        run_id = original(**kwargs)
+        accepted.append(run_id)
+        with (
+            db.Store.open(ctx.ws.store_path, kind="workspace") as wstore,
+            db.Store.open(ctx.coworld.store_path, kind="coworld") as store,
+        ):
+            row = wstore.one("SELECT * FROM client_admissions")
+            with wstore.tx(Actor.harness()) as tx:
+                tx.execute("UPDATE client_admissions SET runtime_id='original-runtime'")
+            command = SimpleNamespace(
+                store=store,
+                wstore=wstore,
+                actor=Actor.session(row["session_id"]),
+                coworld=lambda: ctx.coworld,
+                hermes_session_id=lambda: row["session_id"],
+            )
+            owner.request_release(command, 1, "finished before receipt")
+            owner.finish_assignments(wstore)
+            assert tasks.read(store, 1)["held_by"] == row["session_id"]
+            assert wstore.one("SELECT count(*) FROM task_assignments")[0] == 1
+            assert ctx.hermes.status(run_id, profile="researcher").status == "running"
+        if lost_reply:
+            raise RunsUnavailable("start reply lost")
+        return run_id
+
+    ctx.hermes.start = start
+    assigned(ctx)
+    row = ctx.wstore.one("SELECT * FROM client_admissions")
+    if lost_reply:
+        assert row["run_id"] is None
+        # A new coordinator in the same private namespace cannot release after a crash.
+        owner = Coordinator(ctx.ws, ctx.hermes, "original-runtime")
+        owner.finish_assignments(ctx.wstore)
+        assert ctx.wstore.one("SELECT count(*) FROM task_assignments")[0] == 1
+        with ctx.wstore.tx(Actor.harness()) as tx:
+            tx.execute("UPDATE task_assignments SET recovery_deadline='2000-01-01T00:00:00Z'")
+        owner.finish_assignments(ctx.wstore)
+        assert ctx.wstore.one("SELECT execution_uncertain FROM client_admissions")[0] == 1
+        assert ctx.wstore.one("SELECT count(*) FROM task_assignments")[0] == 1
+        replacement = Coordinator(ctx.ws, ctx.hermes, "replacement-runtime")
+        replacement.reconcile_inputs(ctx.wstore)
+        replacement.finish_assignments(ctx.wstore)
+    else:
+        assert row["run_id"] == accepted[0]
+        owner.finish_assignments(ctx.wstore)  # stop request is not termination evidence
+        assert tasks.read(ctx.store, 1)["status"] == "in-progress"
+        owner.finish_assignments(ctx.wstore)
+    assert tasks.read(ctx.store, 1)["status"] == "unclaimed"
+    assert not ctx.wstore.q("SELECT * FROM task_assignments")

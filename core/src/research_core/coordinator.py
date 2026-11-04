@@ -1597,7 +1597,8 @@ class Coordinator:
     def finish_assignments(self, store: Store) -> None:
         """Finish release requests and failed legacy reservations without operator intervention."""
         for assignment in store.q(
-            "SELECT t.*,a.status,a.error,a.runtime_id,a.op_id AS attempt_id FROM task_assignments t"
+            "SELECT t.*,a.status,a.error,a.runtime_id,a.run_id AS attempt_run_id,"
+            "a.dispatch_started,a.op_id AS attempt_id FROM task_assignments t"
             " JOIN client_admissions a ON a.op_id=t.current_attempt_id"
             " WHERE NOT EXISTS (SELECT 1 FROM client_admissions obligation"
             " JOIN sessions s ON s.id=obligation.session_id"
@@ -1607,13 +1608,17 @@ class Coordinator:
             " (a.status IN ('failed','interrupted','cancelled')"
             " AND a.run_id IS NULL))"
         ):
-            session = sessions.read(store, assignment["session_id"])
             excluded = (
                 self.runtime_id is not None
                 and assignment["runtime_id"] is not None
                 and self.runtime_id != assignment["runtime_id"]
             )
-            if session["run_id"] and not excluded and assignment["status"] in {"queued", "running"}:
+            status = None
+            if (
+                assignment["dispatch_started"]
+                and not excluded
+                and assignment["status"] in {"queued", "running"}
+            ):
                 if assignment["recovery_deadline"] and parse_iso(store.now()) >= parse_iso(
                     assignment["recovery_deadline"]
                 ):
@@ -1626,7 +1631,11 @@ class Coordinator:
                         "Native stop deadline expired; private runtime exclusion required",
                     )
                     continue
-                status = self.native.status(session["run_id"], profile=assignment["profile"])
+                if assignment["attempt_run_id"] is None:
+                    continue
+                status = self.native.status(
+                    assignment["attempt_run_id"], profile=assignment["profile"]
+                )
                 if status.status == "unknown":
                     self.close_unreplayable(
                         store,
@@ -1638,17 +1647,43 @@ class Coordinator:
                     )
                     continue
                 if not status.terminal:
-                    self.native.stop(session["run_id"], profile=assignment["profile"])
+                    self.native.stop(assignment["attempt_run_id"], profile=assignment["profile"])
                     continue
             coworld = self.ws.coworld(assignment["coworld_id"])
             with Store.open(coworld.store_path, kind="coworld") as task_store:
                 with admissions.dispatch_lock(store):
                     latest = store.one(
-                        "SELECT current_attempt_id AS op_id FROM task_assignments WHERE op_id=?",
+                        "SELECT t.*,a.status,a.dispatch_started,a.run_id,a.runtime_id"
+                        " FROM task_assignments t JOIN client_admissions a"
+                        " ON a.op_id=t.current_attempt_id WHERE t.op_id=?",
                         (assignment["op_id"],),
                     )
-                    if latest["op_id"] != assignment["attempt_id"]:
+                    if latest is None or latest["current_attempt_id"] != assignment["attempt_id"]:
                         continue
+                    if store.one(
+                        "SELECT 1 FROM client_admissions a JOIN sessions s ON s.id=a.session_id"
+                        " WHERE s.coworld_id=? AND s.task_id=?"
+                        " AND (a.execution_uncertain=1 OR a.resolution_required=1)",
+                        (latest["coworld_id"], latest["task_id"]),
+                    ):
+                        continue
+                    excluded = (
+                        self.runtime_id is not None
+                        and latest["runtime_id"] is not None
+                        and self.runtime_id != latest["runtime_id"]
+                    )
+                    if (
+                        latest["dispatch_started"]
+                        and latest["status"] in {"queued", "running"}
+                        and not excluded
+                        and not (
+                            status is not None
+                            and status.terminal
+                            and status.run_id == latest["run_id"]
+                        )
+                    ):
+                        continue
+                    assignment = dict(assignment) | dict(latest)
                     task = tasks.read(task_store, assignment["task_id"])
                     if (
                         task["held_by"] == assignment["session_id"]

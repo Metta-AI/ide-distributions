@@ -26,6 +26,7 @@ class Work:
     attempts: tuple[Attempt, ...] = (Attempt(),)
     holder: int = 0
     outcome: str = ""
+    release_requested: bool = False
 
 
 @dataclass(frozen=True)
@@ -62,6 +63,15 @@ def actions(state, budget):
             return replace(state, tasks=tuple(tasks))
 
         current = len(task.attempts) - 1
+        if not task.release_requested and not task.outcome:
+            active = task.attempts[current]
+            if active.native == "active":
+                tasks = list(state.tasks)
+                tasks[task_id] = replace(task, release_requested=True)
+                yield (
+                    f"task {task_id}: request release before/after receipt",
+                    replace(state, tasks=tuple(tasks)),
+                )
         for attempt_id, attempt in enumerate(task.attempts):
             prefix = f"task {task_id}, attempt {attempt_id}: "
             # Before commit/notification and duplicate wakeup: state unchanged.
@@ -116,7 +126,14 @@ def actions(state, budget):
                 )
             if attempt_id != current or attempt.phase != "settled" or attempt.disposition:
                 continue
-            if task.outcome:
+            if task.release_requested and not task.outcome:
+                yield (
+                    prefix + "release after terminal or exclusion evidence",
+                    update(
+                        attempt_id, replace(attempt, disposition="released"), outcome="released"
+                    ),
+                )
+            elif task.outcome:
                 yield (
                     prefix + "acknowledge terminal task",
                     update(attempt_id, replace(attempt, disposition=task.outcome)),
@@ -171,8 +188,10 @@ def invariant(previous, state, budget):
                     assert a.phase == "settled"
                 if previous.paused and old.phase == "queued":
                     assert a.phase == "queued"  # pause closes the sole admission edge
+        if task.outcome == "released":
+            assert all(a.native != "active" and a.phase == "settled" for a in task.attempts)
         if task.outcome:
-            assert task.outcome in {"succeeded", "failed"}
+            assert task.outcome in {"succeeded", "failed", "released"}
         if previous.tasks[task_id].outcome:
             assert task.outcome == previous.tasks[task_id].outcome
 
