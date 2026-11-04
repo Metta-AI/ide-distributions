@@ -47,8 +47,8 @@ terminal:
     - IDE_PLATFORM
     - IDE_FAKE_FAULTS
     - TMPDIR
-# prepare.py fills these: the core skills (common and this role), and the active Coworld's
-# mixin skills; the active Coworld's code repository is trusted for skill overrides.
+# prepare.py installs shared core skills for this role.
+# Game mixin paths and terminal directories are session scoped.
 skills:
   external_dirs: []
   trusted_project_dirs: []

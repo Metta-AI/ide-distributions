@@ -608,6 +608,20 @@
             "title": "Context",
             "type": "object"
           },
+          "coworld": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Coworld"
+          },
           "instructions": {
             "anyOf": [
               {
@@ -620,6 +634,20 @@
             ],
             "default": null,
             "title": "Instructions"
+          },
+          "league": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "League"
           },
           "message": {
             "$ref": "#/components/schemas/UserMessage"
@@ -693,6 +721,34 @@
       "Messages": {
         "additionalProperties": false,
         "properties": {
+          "coworld": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Coworld"
+          },
+          "league": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "League"
+          },
           "limit": {
             "default": 50,
             "maximum": 100,
@@ -837,10 +893,14 @@
           "session_id": {
             "title": "Session Id",
             "type": "string"
+          },
+          "session_scope": {
+            "$ref": "#/components/schemas/SessionScope"
           }
         },
         "required": [
-          "session_id"
+          "session_id",
+          "session_scope"
         ],
         "title": "OpenReply",
         "type": "object"
@@ -865,6 +925,47 @@
           },
           "client": {
             "$ref": "#/components/schemas/Client"
+          },
+          "coworld": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Coworld"
+          },
+          "league": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "League"
+          },
+          "message_op_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Message Op Id"
           },
           "session_context": {
             "anyOf": [
@@ -1083,9 +1184,93 @@
         "title": "RunReply",
         "type": "object"
       },
+      "SessionScope": {
+        "additionalProperties": true,
+        "properties": {
+          "coworld": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Coworld"
+          },
+          "league": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "League"
+          },
+          "scope": {
+            "enum": [
+              "workspace",
+              "coworld"
+            ],
+            "title": "Scope",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope",
+          "coworld",
+          "league"
+        ],
+        "title": "SessionScope",
+        "type": "object"
+      },
       "Snapshot": {
         "additionalProperties": false,
         "properties": {
+          "coworld": {
+            "anyOf": [
+              {
+                "maxLength": 120,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Coworld"
+          },
+          "league": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "League"
+          },
+          "session_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "default": null,
+            "title": "Session Id"
+          },
           "store": {
             "enum": [
               "workspace",
@@ -1190,7 +1375,7 @@
   },
   "info": {
     "title": "IDE agent application contract",
-    "version": "2.1.0"
+    "version": "2.3.0"
   },
   "openapi": "3.1.0",
   "paths": {}

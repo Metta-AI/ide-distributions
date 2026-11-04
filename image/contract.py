@@ -12,18 +12,24 @@ from pydantic.json_schema import models_json_schema
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "core" / "src"))
 from research_core.messages import UserMessage  # noqa: E402
 
-VERSION = "2.1.0"
+VERSION = "2.3.0"
 
 
 class Arguments(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
 
-class Snapshot(Arguments):
+class SessionSelection(Arguments):
+    coworld: str | None = Field(default=None, min_length=1, max_length=120)
+    league: str | None = Field(default=None, min_length=1, max_length=200)
+
+
+class Snapshot(SessionSelection):
     store: Literal["workspace", "coworld"]
+    session_id: str | None = Field(default=None, min_length=1, max_length=200)
 
 
-class Messages(Arguments):
+class Messages(SessionSelection):
     session_id: str = Field(min_length=1, max_length=200)
     offset: int = Field(default=0, ge=0)
     limit: int = Field(default=50, ge=1, le=100)
@@ -55,14 +61,15 @@ class Client(Arguments):
     kind: str = Field(min_length=1, max_length=40)
 
 
-class OpenSession(Arguments):
+class OpenSession(SessionSelection):
+    message_op_id: UUID | None = None
     session_id: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{1,200}$")
     client: Client
     session_context: dict[str, JsonValue] | None = None
     capabilities: dict[str, JsonValue] | None = None
 
 
-class Message(Arguments):
+class Message(SessionSelection):
     session_id: str = Field(min_length=1, max_length=200)
     message: UserMessage
     instructions: str | None = Field(default=None, max_length=64000)
@@ -145,8 +152,15 @@ class Reply(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+class SessionScope(Reply):
+    scope: Literal["workspace", "coworld"]
+    coworld: str | None
+    league: str | None
+
+
 class OpenReply(Reply):
     session_id: str
+    session_scope: SessionScope
 
 
 class MessageReply(Reply):

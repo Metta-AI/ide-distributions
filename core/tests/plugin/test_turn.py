@@ -10,7 +10,12 @@ NOW = datetime(2026, 10, 28, 12, 0, tzinfo=UTC)
 
 def make_ctx(tmp_path, session_id="chat1", coworld=True):
     ctx = ToolContext.from_env(
-        "orchestrator", {"IDE_WORKSPACE": str(tmp_path), "IDE_SESSION_ID": session_id}
+        "orchestrator",
+        {
+            "IDE_WORKSPACE": str(tmp_path),
+            "IDE_SESSION_ID": session_id,
+            "IDE_COWORLD_ID": "cow_fake" if coworld else "",
+        },
     )
     ctx.workspace.ensure_dirs()
     if coworld:
@@ -40,10 +45,12 @@ def test_context_block_bad_input_never_crashes():
 def test_notices_appear_once_and_changed_since_note(tmp_path):
     ctx = make_ctx(tmp_path)
     harness = Actor.parse("harness")
-    notices.add(ctx.wstore, harness, text="Submitted V-1 to the league", refs=["V-1"])
+    notices.add(
+        ctx.wstore, harness, text="Submitted V-1 to the league", refs=["V-1"], coworld_id="cow_fake"
+    )
     first = turn.render_turn(ctx, "chat1", is_first_turn=True, now=NOW)
     assert "[notices since your last turn]" in first and "Submitted V-1" in first
-    assert "[active Coworld] cow_fake" in first
+    assert "[session Coworld] cow_fake" in first
     assert "[changed since" not in first  # no earlier turn to compare with
 
     with ctx.store.tx(harness) as tx:
@@ -79,13 +86,21 @@ def test_pre_llm_call_only_for_orchestrator_chat_sessions(tmp_path, monkeypatch)
     )
     hook = turn.make_pre_llm_call("orchestrator")
     assert hook(session_id="wake1", user_message="x", is_first_turn=True) is None
+    sessions.register(
+        ctx.wstore,
+        Actor.harness(),
+        session_id="chat9",
+        profile="orchestrator",
+        kind="chat",
+        coworld_id="cow_fake",
+    )
     result = hook(session_id="chat9", user_message="hello", is_first_turn=True)
-    assert "[active Coworld] cow_fake" in result["context"]
+    assert "[session Coworld] cow_fake" in result["context"]
     assert sessions.read(ctx.wstore, "chat9")["kind"] == "chat"
     assert turn.make_pre_llm_call("researcher")(session_id="chat9", user_message="x") is None
 
 
-def test_session_context_section(tmp_path):
+def test_session_context_section(tmp_path, monkeypatch):
     ctx = make_ctx(tmp_path, coworld=False)
     sessions.register(
         ctx.wstore,
@@ -101,7 +116,10 @@ def test_session_context_section(tmp_path):
     assert '"research"' in text and '"replay"' in text and len(text) <= 3800
     none = session_context.render(ctx, "unknown")
     assert "No session context" in none and "No client capabilities" in none
-    assert session_context.make_section("researcher")({"session_id": "chat1"}) == ""
+    monkeypatch.setattr("research_core.plugin.executor.profile_env", lambda **_: ctx.env)
+    assert "[session context]" in session_context.make_section("researcher")(
+        {"session_id": "chat1"}
+    )
 
 
 def test_reactions_reach_the_agent_at_its_next_turn(tmp_path):

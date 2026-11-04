@@ -4,7 +4,7 @@ import logging
 import time
 from contextlib import asynccontextmanager
 from urllib.parse import quote
-from uuid import UUID
+from uuid import NAMESPACE_URL, UUID, uuid5
 
 import httpx
 from inference import Availability
@@ -74,6 +74,18 @@ async def response(
         )
         yield httpx.Response(503, json=refusal.model_dump(mode="json", exclude={"detail"}))
         return
+    if isinstance(args, Messages | Message):
+        selected = await seam.get(
+            "/snapshot",
+            params={
+                "store": "workspace",
+                **args.model_dump(include={"session_id", "coworld", "league"}, exclude_none=True),
+            },
+            timeout=10,
+        )
+        if selected.status_code != 200:
+            yield selected
+            return
     if isinstance(args, Messages):
         opening = await seam.get(
             "/session-pending", params={"session_id": args.session_id}, timeout=10
@@ -89,15 +101,27 @@ async def response(
     body = None
     match args:
         case Snapshot():
-            client, path, params = seam, "/snapshot", {"store": args.store}
+            client, path, params = seam, "/snapshot", args.model_dump(exclude_none=True)
         case OpenSession() | Message():
             client = seam
             path = "/session-open" if isinstance(args, OpenSession) else "/message"
             method = "POST"
-            body = args.model_dump(mode="json", exclude_none=True) | {
+            body = args.model_dump(
+                mode="json", exclude_none=True, exclude={"coworld", "league", "message_op_id"}
+            ) | {
                 "op_id": str(operation.op_id),
                 "actor": "user:ide-next",
             }
+            if isinstance(args, OpenSession):
+                body["session_context"] = {
+                    **(args.session_context or {}),
+                    "contract_version": 1,
+                    "scope": "coworld" if args.coworld else "workspace",
+                    "coworld": args.coworld,
+                    "league": args.league,
+                }
+                if args.message_op_id is not None:
+                    body["op_id"] = str(uuid5(NAMESPACE_URL, f"session-open:{args.message_op_id}"))
         case Cancel():
             client, path, method = seam, "/message-cancel", "POST"
             body = {"op_id": str(args.op_id), "actor": "user:ide-next"}

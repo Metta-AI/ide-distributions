@@ -504,7 +504,12 @@ def handle_repair_failed_twice(ctx: TickContext, event: Event, store: Store) -> 
     if payload.get("what_failed"):
         text += f" Last failure: {payload['what_failed']}"
     notice = notices.add(
-        ctx.wstore, ctx.actor, text=text, refs=[task] if task else [], urgency="high"
+        ctx.wstore,
+        ctx.actor,
+        text=text,
+        refs=[task] if task else [],
+        urgency="high",
+        coworld_id=ctx.coworld.coworld_id if ctx.coworld else None,
     )
     return {"notice": notice["id"], "capability": name}
 

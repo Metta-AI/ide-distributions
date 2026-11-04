@@ -54,7 +54,7 @@ def test_unmarked_writes_in_the_coworld_store_are_reported_once(tmp_path):
     assert event["subject"] == "cow_fake" and event["payload"]["store"] == "cow_fake"
     assert event["payload"]["count"] == 2 and event["payload"]["tables"] == ["directives"]
     assert [row["op"] for row in event["payload"]["rows"]] == ["insert", "update"]
-    [notice] = notices.unread(ctx.wstore)
+    [notice] = notices.unread(ctx.wstore, coworld_id="cow_fake")
     assert "Coworld cow_fake" in notice["text"] and "directives" in notice["text"]
     assert ctx.store.unmarked_changes() == []
     assert store_checks.run(ctx) == {"workspace": {}, "cow_fake": {}}
@@ -201,12 +201,16 @@ def test_the_tick_keeps_running_its_paused_steps_without_the_newer_store(tmp_pat
     from research_core.watcher import context
 
     store_checks.repair_unopenable(env)
-    observed = context.build(env)
+    observed = context.build(env, coworld_id="cow_fake")
     first = Coordinator(observed.ws, observed.hermes).advance(observed)
     second = Coordinator(observed.ws, observed.hermes).advance(observed)
     assert settings.get(observed.wstore, "paused") is True
     assert first["store_checks"] == {"workspace": {}, "cow_fake": {"schema_newer": 99}}
-    assert set(second) == {"store_checks", "heartbeat", "context_panel"}
+    assert set(second) == {"store_checks", "heartbeat", "context_panel", "drain"}
+    assert second["drain"]["errors"] == [
+        {"coworld": "cow_fake", "error": "store schema is newer than this runtime"}
+    ]
+    assert observed.wstore.get_meta("paused_drained") != "1"
     observed.wstore.close()
     assert_newer_store_untouched(store_path)
     with Store.open(wstore_path, kind="workspace") as wstore:

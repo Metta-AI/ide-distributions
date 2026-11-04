@@ -31,8 +31,13 @@ def handle(call: ToolCall) -> dict:
         raise ToolError(f"method must be one of {', '.join(METHODS)}, not {method!r}")
     route = f"{method} {path}"
     if identity == "user" and method not in READ_METHODS:
+        coworld = ctx.coworld_or_none()
         notices.add(
-            ctx.wstore, ctx.actor, text=f"Acted as your User identity: {method} {path}", refs=()
+            ctx.wstore,
+            ctx.actor,
+            coworld_id=coworld.coworld_id if coworld else None,
+            text=f"Acted as your User identity: {method} {path}",
+            refs=(),
         )
     platform = ctx.platform()
     try:

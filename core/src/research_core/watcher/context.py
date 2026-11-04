@@ -84,16 +84,22 @@ def build(
     hermes: Any = None,
     platform: Any = None,
     now: datetime | None = None,
+    coworld_id: str | None = None,
 ) -> TickContext:
     """A context from the environment: the stores, the active Coworld, Hermes and the platform."""
-    from research_core.store import coworlds
+    from research_core.store import sessions
 
     env = dict(os.environ if env is None else env)
     ws = layout.from_env(env)
     ws.ensure_dirs()
     wstore = Store.open(ws.store_path, kind="workspace")
-    active = coworlds.active(wstore)
-    coworld = ws.coworld(active["coworld_id"]) if active else None
+    session_id = env.get("IDE_SESSION_ID") or env.get("HERMES_SESSION_ID")
+    if session_id:
+        session = sessions.read(wstore, session_id)
+        coworld_id = session["coworld_id"] if session is not None else None
+    else:
+        coworld_id = coworld_id or env.get("IDE_COWORLD_ID")
+    coworld = ws.coworld(coworld_id) if coworld_id else None
     store = _open_coworld_store(coworld) if coworld else None
     profile_home = Path(env["HERMES_HOME"]) if env.get("HERMES_HOME") else None
     if hermes is None:

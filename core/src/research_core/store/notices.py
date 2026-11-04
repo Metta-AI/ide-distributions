@@ -30,6 +30,7 @@ def add(
     text: str,
     refs: Sequence[str] = (),
     urgency: str = "normal",
+    coworld_id: str | None = None,
 ) -> dict[str, Any]:
     """Write a notice and its ``notice`` event."""
     _require_workspace(store)
@@ -44,22 +45,39 @@ def add(
     if problems:
         raise StoreError(problems)
     refs = list(refs)
+    if actor.is_session:
+        from research_core.store import sessions
+
+        session = sessions.read(store, actor.id)
+        if session is not None:
+            bound = session["coworld_id"]
+            if coworld_id is not None and coworld_id != bound:
+                raise StoreError(["notice Coworld differs from its session"])
+            coworld_id = bound
     with store.tx(actor) as tx:
         cursor = tx.execute(
-            "INSERT INTO notices(text, refs, urgency, created, created_by) VALUES (?, ?, ?, ?, ?)",
-            (text, json_field(refs), urgency, tx.at, str(actor)),
+            "INSERT INTO notices(text, refs, urgency, created, created_by, coworld_id)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (text, json_field(refs), urgency, tx.at, str(actor), coworld_id),
         )
         record = _record(tx.one("SELECT * FROM notices WHERE id = ?", (cursor.lastrowid,)))
-        tx.event("notice", record["id"], {"text": text, "refs": refs, "urgency": urgency})
+        tx.event(
+            "notice",
+            record["id"],
+            {"text": text, "refs": refs, "urgency": urgency, "coworld_id": coworld_id},
+        )
         return record
 
 
-def unread(store: Store, limit: int = 20) -> list[dict[str, Any]]:
+def unread(store: Store, limit: int = 20, *, coworld_id: str | None = None) -> list[dict[str, Any]]:
     """The newest ``limit`` unread notices, oldest first."""
     _require_workspace(store)
     if not (_is_int(limit) and limit >= 1):
         raise StoreError(["limit is a positive integer"])
-    rows = store.q("SELECT * FROM notices WHERE read_at IS NULL ORDER BY id DESC LIMIT ?", (limit,))
+    rows = store.q(
+        "SELECT * FROM notices WHERE read_at IS NULL AND coworld_id IS ? ORDER BY id DESC LIMIT ?",
+        (coworld_id, limit),
+    )
     return [_record(row) for row in reversed(rows)]
 
 

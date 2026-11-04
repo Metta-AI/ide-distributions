@@ -14,7 +14,11 @@ COWORLD = "cow_fake"
 
 @pytest.fixture
 def workspace_env(tmp_path):
-    return {"IDE_WORKSPACE": str(tmp_path / "ws"), "IDE_PLATFORM": "fake"}
+    return {
+        "IDE_WORKSPACE": str(tmp_path / "ws"),
+        "IDE_PLATFORM": "fake",
+        "IDE_COWORLD_ID": COWORLD,
+    }
 
 
 @pytest.fixture
@@ -23,7 +27,7 @@ def ctx_factory(workspace_env):
     created = {}
 
     def make(role="orchestrator", session_id="s1", coworld=COWORLD):
-        env = dict(workspace_env, IDE_SESSION_ID=session_id)
+        env = dict(workspace_env, IDE_SESSION_ID=session_id, IDE_COWORLD_ID=coworld or "")
         ctx = ToolContext.from_env(role, env)
         ctx.coordinator_instance = "coordinator:unit"
         ctx.workspace.ensure_dirs()

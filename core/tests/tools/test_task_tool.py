@@ -182,7 +182,13 @@ def test_claim_takes_the_run_id_from_the_session_row(call, ctx_factory, goal, co
     call("task", task_args())
     wstore = ctx_factory().wstore
     sessions.register(
-        wstore, Actor.harness(), session_id="r1", profile="researcher", kind="task", task_id=1
+        wstore,
+        Actor.harness(),
+        coworld_id="cow_fake",
+        session_id="r1",
+        profile="researcher",
+        kind="task",
+        task_id=1,
     )
     sessions.set_run(wstore, Actor.harness(), "r1", "run-42")
     claimed = claim(call)

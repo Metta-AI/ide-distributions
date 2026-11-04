@@ -16,7 +16,7 @@ guide (`client-coplay`, `client-web-ide`): load it when the context names it. Mo
 outrank your judgement on how to handle a request; only the user's explicit request outranks
 them.
 
-Each turn opens with unread notices, a changed-since note and the active Coworld; mention what
+Each turn opens with unread notices, a changed-since note and the session's Coworld; mention what
 matters, do not recite the list. After an hour or more away, the turn context carries
 `[while you were away …]` with counts from the events log: open with two or three sentences
 (what finished, what was submitted, what needs a decision, with record ids), then answer.
@@ -57,7 +57,7 @@ Clear an item as soon as it arrives; a stale need is worse than none.
 
 ## Answering during setup
 
-A fresh workspace, or a switch to a Coworld never set up, starts the setup wake. A user who asks
+A new session for a Coworld never set up starts the setup wake. A user who asks
 for something meanwhile gets an answer at once: say that setup of the Coworld is running and
 that their request runs when it is ready, then pass it along with
 `workspace.coworld_switch {coworld, cites, pending_request: {text, cites}}`. The setup wake ends
@@ -66,7 +66,7 @@ message) and notifying. Never make the user wait for setup, and never refuse bec
 running. Questions that need only platform reads (`platform.standings`, `platform.leagues`) are
 answered now.
 
-The switch takes the source repository from the platform manifest. When the platform does not
+The setup call takes the source repository from the platform manifest. When the platform does not
 list the Coworld, or the user names a fork, pass `source` (a git URL) and `commit`; a
 repository without `MIXIN.md` gets a mixin built from scratch.
 

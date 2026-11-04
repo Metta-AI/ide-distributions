@@ -348,7 +348,7 @@ SPEC = durable_tool(
     ToolSpec(
         name="workspace",
         description=(
-            "The workspace itself: switch the active Coworld, open a change worktree, run the "
+            "The workspace itself: set up the session Coworld, open a change worktree, run the "
             "health check (doctor), list capabilities or ask for a new check, and read the "
             "environment guide (the first thing to consult when unsure about the environment)."
         ),
@@ -358,7 +358,7 @@ SPEC = durable_tool(
         actions=(
             ActionSpec(
                 "coworld_switch",
-                "Make a Coworld the active one; setup starts when it was never set up.",
+                "Set up this session's Coworld; another Coworld requires a new session.",
                 {
                     "coworld": a.string("The platform Coworld id, such as cow_fake."),
                     "cites": a.string("The user's message reference when the user asked."),

@@ -72,7 +72,7 @@ from research_core.store._common import parse_iso
 from research_core.store.actors import Actor
 from research_core.store.db import Store, change_version, wait_for_change
 from research_core.store.errors import StoreError
-from research_core.tools.ui import WORKSPACE_CONVERSATION, pointer_token
+from research_core.tools.ui import coworld_conversation, pointer_token
 from research_core.watcher import context, hermes_api
 from research_core.watcher.heartbeat import HAS_WORK_KEY, HAS_WORK_REASONS_KEY, HEARTBEAT_KEY
 from research_core.watcher.hermes_api import HermesRuns, RunsBusy, RunsError
@@ -270,31 +270,32 @@ class SeamServer:
             await asyncio.to_thread(wait_for_change, change_version(), 0.5)
 
     def coordinate_once(self) -> None:
-        if not self.env.get("HERMES_HOME"):
-            from research_core import transitions
+        with self.stores() as stores:
+            coworld_ids = [row["coworld_id"] for row in coworlds.list(stores.wstore)]
+        for coworld_id in [None, *coworld_ids]:
+            if not self.env.get("HERMES_HOME"):
+                from research_core import transitions
 
-            with self.stores() as stores:
-                ctx = context.TickContext(
-                    ws=self.ws,
-                    wstore=stores.wstore,
-                    store=None if stores.coworld_id is None else stores.store(),
-                    coworld=None
-                    if stores.coworld_id is None
-                    else self.ws.coworld(stores.coworld_id),
-                    hermes=self.coordinator,
-                    platform=None,
-                    env=self.env,
-                    now=datetime.now(UTC),
-                )
-                transitions.apply(ctx, self.coordinator.instance_id)
-            return
-        ctx = context.build(self.env, hermes=self.coordinator)
-        try:
-            self.coordinator.advance(ctx)
-        finally:
-            ctx.wstore.close()
-            if ctx.store is not None:
-                ctx.store.close()
+                with self.stores(coworld_id) as stores:
+                    ctx = context.TickContext(
+                        ws=self.ws,
+                        wstore=stores.wstore,
+                        store=None if coworld_id is None else stores.store(),
+                        coworld=None if coworld_id is None else self.ws.coworld(coworld_id),
+                        hermes=self.coordinator,
+                        platform=None,
+                        env=self.env,
+                        now=datetime.now(UTC),
+                    )
+                    transitions.apply(ctx, self.coordinator.instance_id)
+                continue
+            ctx = context.build(self.env, hermes=self.coordinator, coworld_id=coworld_id)
+            try:
+                self.coordinator.advance(ctx)
+            finally:
+                ctx.wstore.close()
+                if ctx.store is not None:
+                    ctx.store.close()
 
     def shutdown(self) -> None:
         """Stop accepting requests and end every open stream; safe to call more than once."""
@@ -305,11 +306,10 @@ class SeamServer:
     # --- stores ---------------------------------------------------------------------------
 
     @contextmanager
-    def stores(self) -> Iterator[store_cli.Stores]:
-        """The workspace store and, on first use, the active Coworld's; closed on exit."""
+    def stores(self, coworld_id: str | None = None) -> Iterator[store_cli.Stores]:
+        """The workspace store and an explicitly selected Coworld; closed on exit."""
         wstore = Store.open(self.ws.store_path, kind="workspace")
-        active = coworlds.active(wstore)
-        with store_cli.Stores(self.ws, wstore, active["coworld_id"] if active else None) as s:
+        with store_cli.Stores(self.ws, wstore, coworld_id) as s:
             yield s
 
     @staticmethod
@@ -344,6 +344,22 @@ class SeamServer:
             age_s = None
             if heartbeat is not None:
                 age_s = round((datetime.now(UTC) - parse_iso(heartbeat)).total_seconds(), 1)
+            pending_transitions = []
+            for registered in coworlds.list(wstore):
+                coworld = self.ws.coworld(registered["coworld_id"])
+                store = context._open_coworld_store(coworld)
+                if store is None:
+                    continue
+                try:
+                    pending_transitions.extend(
+                        {"coworld_id": coworld.coworld_id, **dict(row)}
+                        for row in store.q(
+                            "SELECT id,tool,actor,owner_instance,attempts,last_error,retry_at"
+                            " FROM transition_commands WHERE result IS NULL"
+                        )
+                    )
+                finally:
+                    store.close()
             return {
                 "ok": True,
                 "heartbeat": heartbeat,
@@ -366,15 +382,7 @@ class SeamServer:
                 "blocked_executions": admissions.problems(wstore),
                 "work": admissions.work_status(wstore, self.inference_lease_file),
                 "coordinator_instance": wstore.get_meta("coordinator_instance"),
-                "pending_transitions": []
-                if stores.coworld_id is None
-                else [
-                    dict(row)
-                    for row in stores.store().q(
-                        "SELECT id,tool,actor,owner_instance,attempts,last_error,retry_at"
-                        " FROM transition_commands WHERE result IS NULL"
-                    )
-                ],
+                "pending_transitions": pending_transitions,
                 "restart_required": admissions.restart_required(wstore),
                 "runtime_recovery_count": int(wstore.get_meta("runtime_recovery_count") or "0"),
             }
@@ -399,15 +407,49 @@ class SeamServer:
         actor = _actor(body.get("actor"))
         op_id = str(UUID(_text(body, "op_id")))
         validated = time.monotonic()
-        with self.stores() as stores:
+        raw_context = body.get("session_context")
+        if raw_context is not None and not isinstance(raw_context, dict):
+            raise Refused(HTTPStatus.BAD_REQUEST, "session_context must be an object")
+        session_context, context_problems = contract.validate_context(raw_context or {})
+        problems.extend(context_problems)
+        coworld_id = session_context.get("coworld")
+        scope = session_context.get("scope")
+        if scope == "workspace" and (
+            coworld_id is not None or session_context.get("league") is not None
+        ):
+            raise Refused(
+                HTTPStatus.BAD_REQUEST, "workspace sessions cannot select a Coworld or league"
+            )
+        if scope == "coworld" and not coworld_id:
+            raise Refused(
+                HTTPStatus.BAD_REQUEST, "Coworld sessions require session_context.coworld"
+            )
+        with self.stores(coworld_id) as stores:
             opened = time.monotonic()
+            if coworld_id is not None:
+                coworlds.register(
+                    stores.wstore, actor, coworld_id, folder=layout.folder_name_for(coworld_id)
+                )
+                self.ws.coworld(coworld_id).ensure_dirs()
             session_id = (
                 _text(body, "session_id") if "session_id" in body else hermes_api.mint_session_id()
             )
+            existing = sessions.read(stores.wstore, session_id)
+            if existing is not None:
+                previous_context = existing["session_context"] or {}
+                if (existing["coworld_id"], previous_context.get("league")) != (
+                    coworld_id,
+                    session_context.get("league"),
+                ):
+                    raise Refused(
+                        HTTPStatus.CONFLICT,
+                        "a session's Coworld and league cannot change",
+                        kind="scope_mismatch",
+                    )
             registration = intake.OpenRegistration(
                 profile=self.profile,
                 coworld_id=stores.coworld_id,
-                session_context=body.get("session_context"),
+                session_context=session_context,
                 client_capabilities=body.get("capabilities"),
             )
             metadata = time.monotonic()
@@ -437,7 +479,12 @@ class SeamServer:
             return {
                 "session_id": session_id,
                 "client": client,
-                "coworld": stores.coworld_id,
+                "coworld": coworld_id,
+                "session_scope": {
+                    "scope": "coworld" if coworld_id else "workspace",
+                    "coworld": coworld_id,
+                    "league": session_context.get("league"),
+                },
                 "contract_version": contract.CONTRACT_VERSION,
                 "problems": problems,
             }
@@ -800,7 +847,7 @@ class SeamServer:
                 allowed = ", ".join(sorted(store_cli.ALLOWED))
                 raise store_cli.Refusal(f"{op!r} is not an op store apply runs; allowed: {allowed}")
             op_args = store_cli.parse_op_args(json.dumps(args))
-            with self.stores() as stores:
+            with self.stores(body.get("coworld")) as stores:
                 kind = body.get("store") or store_cli.store_kind_for(op, op_args)
                 if kind not in store_cli.STORE_KINDS:
                     raise store_cli.Refusal(
@@ -835,13 +882,56 @@ class SeamServer:
             with Store.open(self.ws.coworld(coworld_id).store_path, kind="coworld") as store:
                 return receipt(store, command_id)
 
-    def snapshot(self, kind: str) -> dict:
-        started = time.monotonic()
-        log.info("Snapshot started: store=%s", kind)
-        with self.stores() as stores:
-            result = store_cli.snapshot(self.store_for(stores, kind), stores.coworld_id)
-        log.info("Snapshot completed: store=%s seconds=%.3f", kind, time.monotonic() - started)
-        return result
+    def snapshot(
+        self,
+        kind: str,
+        coworld_id: str | None = None,
+        *,
+        session_id: str | None = None,
+        league: str | None = None,
+    ) -> dict:
+        if kind == "coworld" and coworld_id is None:
+            raise Refused(HTTPStatus.BAD_REQUEST, "coworld is required for a Coworld snapshot")
+        with self.stores(coworld_id) as stores:
+            if kind == "workspace" and (session_id or coworld_id or league):
+                with stores.wstore.read_tx():
+                    if session_id:
+                        session = self._require_session(stores, session_id)
+                        if (
+                            session["coworld_id"],
+                            (session["session_context"] or {}).get("league"),
+                        ) != (coworld_id, league):
+                            raise Refused(
+                                HTTPStatus.CONFLICT,
+                                "this session belongs to a different Coworld or league",
+                                kind="scope_mismatch",
+                            )
+                        selected = [session]
+                    else:
+                        selected = [
+                            sessions.read(stores.wstore, row["id"])
+                            for row in stores.wstore.q(
+                                "SELECT id FROM sessions WHERE kind='chat' AND parent IS NULL"
+                                " AND coworld_id IS ?"
+                                " AND json_extract(session_context, '$.league') IS ?"
+                                " ORDER BY rowid",
+                                (coworld_id, league),
+                            )
+                        ]
+                    return {
+                        "store": "workspace",
+                        "seq": stores.wstore.last_seq(),
+                        "records": {
+                            "sessions": selected,
+                            "admissions": admissions.snapshot(stores.wstore, session_id)
+                            if session_id
+                            else [],
+                        },
+                        "ui_state": [],
+                    }
+            if coworld_id is not None:
+                coworlds.read(stores.wstore, coworld_id)
+            return store_cli.snapshot(self.store_for(stores, kind), stores.coworld_id)
 
     def run_status(self, run_id: str) -> dict:
         return dataclasses.asdict(self.hermes.status(run_id, profile=self.profile))
@@ -940,14 +1030,23 @@ class SeamServer:
         block = {**kept, "contract_version": contract.CONTRACT_VERSION}
         if client is not None:
             block["client"] = client
-        if stores.coworld_id is not None:
-            shown = kept.get("coworld")
-            if shown and shown != stores.coworld_id:
-                problems.append(
-                    f"context.coworld: the client shows {shown}; the active Coworld is"
-                    f" {stores.coworld_id} (stamped)"
+        session = self._require_session(stores, session_id)
+        coworld_id = session["coworld_id"]
+        declared = session["session_context"] or {}
+        for field, expected in (
+            ("scope", declared.get("scope", "coworld" if coworld_id else "workspace")),
+            ("coworld", coworld_id),
+            ("league", declared.get("league")),
+        ):
+            shown = kept.get(field)
+            if shown is not None and shown != expected:
+                raise Refused(
+                    HTTPStatus.CONFLICT,
+                    f"context.{field} differs from this session; open a new session",
+                    kind="scope_mismatch",
                 )
-            block["coworld"] = stores.coworld_id
+            if expected is not None and (field != "scope" or "scope" in declared):
+                block[field] = expected
         return block, problems
 
     def _answer(
@@ -1000,7 +1099,9 @@ class SeamServer:
     @staticmethod
     def _ask_conversation(wstore: Store, session_id: str, ask_id: str) -> str:
         """Where the ask lives (A3.5): the chat's own conversation, else ``workspace``."""
-        for conversation in (session_id, WORKSPACE_CONVERSATION):
+        session = sessions.read(wstore, session_id)
+        shared = coworld_conversation(session["coworld_id"] if session else None)
+        for conversation in (session_id, shared):
             if ask_id in ui_state.get(wstore, conversation)["doc"].get("asks", {}):
                 return conversation
         raise Refused(
@@ -1071,7 +1172,15 @@ class _Handler(BaseHTTPRequestHandler):
                     HTTPStatus.OK, seam.command_status(query["coworld_id"], query["command_id"])
                 )
             elif url.path == "/snapshot":
-                self._json(HTTPStatus.OK, seam.snapshot(query.get("store", "workspace")))
+                self._json(
+                    HTTPStatus.OK,
+                    seam.snapshot(
+                        query.get("store", "workspace"),
+                        query.get("coworld"),
+                        session_id=query.get("session_id"),
+                        league=query.get("league"),
+                    ),
+                )
             elif url.path == "/session-pending":
                 self._json(HTTPStatus.OK, seam.session_pending(query["session_id"]))
             elif url.path == "/stream":
@@ -1184,7 +1293,7 @@ class _Handler(BaseHTTPRequestHandler):
             raise Refused(
                 HTTPStatus.BAD_REQUEST, f"after must be an integer seq, not {after_text!r}"
             ) from None
-        with seam.stores() as stores:
+        with seam.stores(query.get("coworld")) as stores:
             store = seam.store_for(stores, kind)
             self.send_response(HTTPStatus.OK)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")

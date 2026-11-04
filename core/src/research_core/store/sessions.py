@@ -17,6 +17,7 @@ by migration 0002). ``set_run`` clears it: a new run is live and a later end is 
 
 from __future__ import annotations
 
+import json
 from collections.abc import Sequence
 from typing import Any
 
@@ -103,7 +104,18 @@ def register_in_transaction(
         raise StoreError(problems)
     context = None if session_context is None else json_field(session_context)
     capabilities = None if client_capabilities is None else json_field(client_capabilities)
-    created = tx.one("SELECT 1 FROM sessions WHERE id = ?", (session_id,)) is None
+    existing = tx.one(
+        "SELECT coworld_id, session_context FROM sessions WHERE id = ?", (session_id,)
+    )
+    if existing is not None:
+        if coworld_id is not None and coworld_id != existing["coworld_id"]:
+            raise StoreError(["a session's Coworld cannot change; open a new session"])
+        previous_context = json.loads(existing["session_context"] or "{}")
+        if session_context is not None and session_context.get("league") != previous_context.get(
+            "league"
+        ):
+            raise StoreError(["a session's league cannot change; open a new session"])
+    created = existing is None
     if created:
         tx.execute(
             "INSERT INTO sessions(id, profile, kind, coworld_id, task_id, goal_id, event,"

@@ -646,6 +646,7 @@ NOTICE = _spec(
     [
         _f("id", "id", "The notice's id, shown as N-<n>."),
         _f("text", "text", "The notice, in plain language.", required=True),
+        _f("coworld_id", "text", "The Coworld this notice belongs to; null for workspace news."),
         _f("refs", "list", "Records the notice is about."),
         _f("urgency", "enum", "low, normal or high.", enum=("low", "normal", "high")),
         _created,

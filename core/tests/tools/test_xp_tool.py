@@ -286,7 +286,13 @@ def researcher_task(ctx):
     holder = Actor.session("r1")
     tasks.claim(ctx.store, holder, task["id"], run_id="run-1", worktree="/w/task-1", branch="t/1")
     sessions.register(
-        ctx.wstore, holder, session_id="r1", profile="researcher", kind="task", task_id=1
+        ctx.wstore,
+        holder,
+        coworld_id="cow_fake",
+        session_id="r1",
+        profile="researcher",
+        kind="task",
+        task_id=1,
     )
     return task
 

@@ -67,7 +67,7 @@ def test_user_post_writes_one_notice_and_one_event(call, ctx_factory):
     result = call("softmax_api", {"method": "POST", "path": path, "identity": "user"})
     assert result["ok"] is True
     assert result["response"]["identity"] == "user"
-    (notice,) = notices.unread(ctx.wstore)
+    (notice,) = notices.unread(ctx.wstore, coworld_id="cow_fake")
     assert notice["text"] == f"Acted as your User identity: POST {path}"
     (event,) = request_events(ctx.store)
     assert event == {

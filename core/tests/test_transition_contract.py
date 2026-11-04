@@ -83,6 +83,14 @@ def test_domain_command_and_acknowledgment_survive_crash_cut(tmp_path, monkeypat
 
 def test_real_tool_handoff_reaches_coordinator_and_returns_durable_result(tmp_path):
     ctx = make_ctx(tmp_path)
+    sessions.register(
+        ctx.wstore,
+        Actor.harness(),
+        session_id="planner",
+        profile="orchestrator",
+        kind="wake",
+        coworld_id=ctx.coworld.coworld_id,
+    )
     version = db.change_version()
 
     def invoke():
@@ -440,7 +448,11 @@ def test_slow_transcript_handoff_does_not_hold_chat_admission_lock(tmp_path):
     ctx.hermes.session_messages = history
 
     def advance():
-        other = build({"IDE_WORKSPACE": str(ctx.ws.root), "IDE_PLATFORM": "fake"}, hermes=owner)
+        other = build(
+            {"IDE_WORKSPACE": str(ctx.ws.root), "IDE_PLATFORM": "fake"},
+            hermes=owner,
+            coworld_id=ctx.coworld.coworld_id,
+        )
         try:
             owner.advance_attempts(other)
         finally:
@@ -983,6 +995,14 @@ def test_repeated_capability_failures_coalesce_until_repair(tmp_path, monkeypatc
 
     ctx = make_ctx(tmp_path)
     monkeypatch.setattr(transitions, "REQUEST_WAIT_SECONDS", 0)
+    sessions.register(
+        ctx.wstore,
+        Actor.harness(),
+        session_id="worker",
+        profile="researcher",
+        kind="chat",
+        coworld_id=ctx.coworld.coworld_id,
+    )
     worker = ToolContext(role="researcher", actor=Actor.session("worker"), workspace=ctx.ws, env={})
     worker.store, worker.wstore = ctx.store, ctx.wstore
     first = transitions.report_capability(worker, "build", output="First failure", command="build")

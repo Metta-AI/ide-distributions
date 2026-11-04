@@ -271,7 +271,10 @@ def test_researcher_dispatch_defers_without_using_an_attempt_until_the_block_lap
     from research_core.coordinator import Coordinator
     from research_core.tools.base import ToolContext
 
-    command = ToolContext.from_env("orchestrator", {"IDE_WORKSPACE": str(ctx.ws.root)})
+    command = ToolContext.from_env(
+        "orchestrator",
+        {"IDE_WORKSPACE": str(ctx.ws.root), "IDE_COWORLD_ID": ctx.coworld.coworld_id},
+    )
     reserved = Coordinator.reserve(
         command,
         task_id=1,
