@@ -159,8 +159,53 @@ def test_second_apply_is_a_noop():
 
 def test_apply_migrations_returns_the_version_it_reached():
     conn = sqlite3.connect(":memory:", isolation_level=None)
-    assert migrate.apply_migrations(conn, "workspace") == 7
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
+    assert migrate.apply_migrations(conn, "workspace") == 8
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
+
+
+def test_admission_waiting_migration_keeps_rows_and_adds_no_hold():
+    """0008 adds the hold columns; existing rows keep every earlier column (the native message
+    id, the JSON payload and the 0005 execution columns) and get no class, no hold and no
+    resumes. A waiting admission is stored as 'queued', so the status CHECK is unchanged."""
+    conn = sqlite3.connect(":memory:", isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    for number, path in migrate.migration_files("workspace")[:7]:
+        migrate._run_migration(conn, number, path)
+    payload = '{"input":[{"role":"user","content":"hi"}],"instructions":"be brief","context":null}'
+    conn.execute(
+        "INSERT INTO client_admissions (rowid,op_id,kind,request,session_id,message,payload,"
+        "status,run_id,dispatch_started,error,created_at,native_message_id,origin)"
+        " VALUES (7,'op','message','{}','s','hi',?,'failed','run_1',1,'boom','t',42,'client')",
+        (payload,),
+    )
+    assert migrate.apply_migrations(conn, "workspace") == 8
+    row = conn.execute("SELECT rowid, * FROM client_admissions").fetchone()
+    assert (row["rowid"], row["op_id"], row["status"], row["error"]) == (7, "op", "failed", "boom")
+    assert (row["payload"], row["native_message_id"], row["origin"]) == (payload, 42, "client")
+    assert (row["error_class"], row["resume_after"], row["resumes"]) == (None, None, 0)
+    assert (
+        migrate.schema_diff(migrate.expected_schema("workspace"), migrate.actual_schema(conn)) == []
+    )
+
+
+def test_only_a_hold_may_clear_an_execution_receipt():
+    """0008 narrows the immutable receipt: a hold clears it, nothing else changes or clears it."""
+    conn = sqlite3.connect(":memory:", isolation_level=None)
+    migrate.apply_migrations(conn, "workspace")
+    conn.execute(
+        "INSERT INTO client_admissions (op_id,kind,request,session_id,message,payload,status,"
+        "run_id,dispatch_started,created_at)"
+        " VALUES ('op','message','{}','s','hi','{}','running','run_1',1,'t')"
+    )
+    with pytest.raises(sqlite3.IntegrityError, match="execution receipt cannot change"):
+        conn.execute("UPDATE client_admissions SET run_id='run_2'")
+    with pytest.raises(sqlite3.IntegrityError, match="execution receipt cannot change"):
+        conn.execute("UPDATE client_admissions SET run_id=NULL")
+    with pytest.raises(sqlite3.IntegrityError, match="execution receipt cannot change"):
+        conn.execute("UPDATE client_admissions SET run_id=NULL,status='queued'")
+    conn.execute("UPDATE client_admissions SET run_id=NULL,status='queued',resume_after='t2'")
+    conn.execute("UPDATE client_admissions SET run_id='run_2',status='running',resume_after=NULL")
+    assert conn.execute("SELECT run_id FROM client_admissions").fetchone()[0] == "run_2"
 
 
 def test_migrations_apply_in_numeric_order_and_only_pending_ones(tmp_path, monkeypatch):

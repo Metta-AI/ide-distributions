@@ -106,6 +106,54 @@ the bridge answers 503 with `Retry-After: 1` and the client retries. A reaction 
 run: it is a UI state change under `/reactions/<message id>` of the conversation, which the
 agent sees at its next turn.
 
+## Message admissions
+
+Each queued message is an admission in the workspace snapshot (`records.admissions`): `{op_id,
+session_id, message, status, run_id, error, error_class, resume_after, created_at, client_id}`.
+`status` is `queued` until its run starts, then `running`, and ends `completed`, `cancelled`,
+`failed` or `interrupted`. A run that fails for a reason that passes on its own leaves the
+admission `waiting`: not finished, and not to be retried by the client. The bridge resumes it by
+itself once `resume_after` has passed and model work may start again, with a fixed continuation
+prompt in the same Session (beginning `Your previous run stopped because`), not the user's text
+again; if the resumed run fails the same way, the admission waits again, each time for longer
+(the hold doubles per resume, up to 30 minutes). The resumed run keeps the admission's
+`instructions` and context. Its continuation prompt is a new user message in the native
+transcript; `/messages/context` joins the admission's context to the user's original message,
+so the continuation shows `client_context: null`. A `waiting` admission holds its Session: later
+messages stay `queued` behind it until it resumes, and a text message among them then joins the
+resumed run, as any follow-up joins a live run. A message that had joined the run that failed
+ends `failed` with the class rather than waiting: the one resume continues the whole
+conversation, that message included. `POST /message-cancel` cancels a `waiting` admission at
+once; a cancelled message never waits.
+
+`run_id` is the admission's current run: `null` while it is `waiting`, and a new run on each
+resume. A client follows the admission's `status` until it is `completed`,
+`cancelled`, `failed` or `interrupted`, and tracks whichever run `run_id` names at the time, not
+the first run it saw.
+
+`GET /status`'s `has_work` counts `queued` and `running` admissions, but neither `waiting` ones
+nor the messages queued behind one in the same Session, on purpose: a budget wait lasts until the daily refill, and must not keep the workspace awake that
+long. The workspace may sleep; a waiting admission resumes once the workspace is awake again
+(for example, when the user's next message wakes it).
+
+`error_class` names why a `waiting` or `failed` admission's run failed, when that is known
+(`null` otherwise); `error` keeps Hermes's own text. A resuming admission is `queued` again and
+keeps the class of the run that failed until its new run starts, when the class is cleared:
+
+| `error_class` | Status | What the client can say |
+|---|---|---|
+| `budget_exhausted` | `waiting` | Out of budget until `resume_after` (the refill time) |
+| `rate_limited` | `waiting` | Busy, retrying |
+| `provider_unavailable` | `waiting` | Model provider down, retrying |
+| `too_large` | `failed` | Conversation too long; start a new one |
+| `misconfigured` | `failed` | Workspace misconfigured |
+
+A message whose cancel was requested never waits: with any of the first three classes it ends
+`failed`, keeping the class.
+
+`resume_after` is the earliest time a `waiting` admission resumes (ISO time; `null` for any
+other status). A budget wait can last past it, until the workspace's new key arrives.
+
 ## Profile models
 
 Each profile's model belongs to the profile, not to the host: a new install starts with what the
