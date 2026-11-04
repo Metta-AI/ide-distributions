@@ -489,6 +489,7 @@ def test_definitely_rejected_worker_messages_get_immutable_redelivery(tmp_path):
 
     ctx = make_ctx(tmp_path)
     ctx.hermes = RejectedSteer()
+    set_setting(ctx, "recovery.max_attempts", 3)
     initial = assigned(ctx)
     owner = coordinator(ctx)
     tasks.message(ctx.store, HARNESS, 1, text="Preserve this message", direction="to_researcher")

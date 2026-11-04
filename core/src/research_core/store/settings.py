@@ -173,7 +173,7 @@ SETTINGS: dict[str, SettingSpec] = {
             2,
             "workspace",
             "the watcher",
-            "Failed execution attempts before the Task reaches an explicit failed outcome.",
+            "Failed execution or rejected-delivery attempts before an explicit failed outcome.",
             minimum=0,
         ),
         _s(

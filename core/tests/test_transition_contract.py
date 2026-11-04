@@ -292,6 +292,7 @@ def test_release_before_start_receipt_retains_execution_authority(tmp_path, lost
             with wstore.tx(Actor.harness()) as tx:
                 tx.execute("UPDATE client_admissions SET runtime_id='original-runtime'")
             command = SimpleNamespace(
+                env=ctx.env,
                 store=store,
                 wstore=wstore,
                 actor=Actor.session(row["session_id"]),
@@ -331,3 +332,140 @@ def test_release_before_start_receipt_retains_execution_authority(tmp_path, lost
         owner.finish_assignments(ctx.wstore)
     assert tasks.read(ctx.store, 1)["status"] == "unclaimed"
     assert not ctx.wstore.q("SELECT * FROM task_assignments")
+
+
+@pytest.mark.parametrize("rejection", ["auth", "busy", "draining", "false"])
+@pytest.mark.parametrize("permanent", [False, True])
+@pytest.mark.parametrize("with_messages", [False, True])
+def test_rejected_event_guidance_has_bounded_durable_redelivery(
+    tmp_path, permanent, with_messages, rejection
+):
+    from research_core.store import events
+    from research_core.watcher.hermes_api import RunsAuthError, RunsBusy, RunsUnavailable
+
+    ctx = make_ctx(tmp_path)
+    row = assigned(ctx)
+    owner = coordinator(ctx)
+    set_setting(ctx, "recovery.max_attempts", 3)
+    reject = True
+    steer = ctx.hermes.steer
+
+    def rejected(run_id, text, *, profile):
+        if reject:
+            if rejection == "auth":
+                raise RunsAuthError("Credentials rejected", status=403)
+            if rejection == "busy":
+                raise RunsBusy("Rate limited", status=429)
+            if rejection == "draining":
+                raise RunsUnavailable("Gateway draining", status=503, code="gateway_draining")
+            return False
+        return steer(run_id, text, profile=profile)
+
+    ctx.hermes.steer = rejected
+    with ctx.store.tx(Actor.harness()) as tx:
+        seq = tx.event("task.wait_resolved", "T-1", {"kind": "user", "note": "approved"})
+    if with_messages:
+        tasks.message(
+            ctx.store, Actor.harness(), 1, text="Retain this guidance", direction="to_researcher"
+        )
+    owner.advance_events(ctx)
+    assert not events.unhandled(ctx.store, {"task.wait_resolved"})
+    assert ctx.store.one("SELECT count(*) FROM handled_events WHERE seq=?", (seq,))[0] == 1
+    dispatch_inputs(ctx)
+    owner.deliver_worker_messages(ctx)  # A second producer runs before failed-row advancement.
+    assert (
+        ctx.wstore.one("SELECT count(*) FROM client_admissions WHERE origin='continuation'")[0] == 1
+    )
+    rejected_row = ctx.wstore.one("SELECT * FROM client_admissions WHERE origin='continuation'")
+    assert rejected_row["status"] == "failed" and not rejected_row["dispatch_started"]
+    assert bool(json.loads(rejected_row["delivery_ids"])) == with_messages
+    if not permanent:
+        reject = False
+    for _ in range(8):
+        owner.advance_attempts(ctx)
+        owner.advance_events(ctx)
+        owner.deliver_worker_messages(ctx)
+        dispatch_inputs(ctx)
+    deliveries = ctx.wstore.q("SELECT * FROM client_admissions WHERE origin='continuation'")
+    assert len(ctx.hermes.runs) == 1
+    assert bool(tasks.pending_messages(ctx.store, 1, "to_researcher")) == (
+        permanent and with_messages
+    )
+    if permanent:
+        assert len(deliveries) == 3
+        assert all(attempt["status"] == "failed" for attempt in deliveries)
+        assert deliveries[-1]["disposition"] == "delivery retries exhausted"
+        assert deliveries[-1]["advanced_at"] is not None
+        assert deliveries[-1]["successor_id"] is None
+        reject = False
+        for _ in range(3):
+            owner.advance_attempts(ctx)
+            owner.deliver_worker_messages(ctx)
+            dispatch_inputs(ctx)
+        assert (
+            ctx.wstore.one("SELECT count(*) FROM client_admissions WHERE origin='continuation'")[0]
+            == 3
+        )
+        assert not ctx.hermes.steered.get(row["run_id"])
+    else:
+        assert len(deliveries) == 2
+        assert len(ctx.hermes.steered[row["run_id"]]) == 1
+        assert ctx.hermes.steered[row["run_id"]][0].startswith(
+            "Your wait on user resolved: approved. Continue."
+        )
+        if with_messages:
+            assert ctx.hermes.steered[row["run_id"]][0].count("Retain this guidance") == 1
+        assert deliveries[0]["successor_id"] == deliveries[1]["op_id"]
+        assert deliveries[0]["disposition"] == "delivery retry queued"
+        assert deliveries[1]["delivery_failures"] == 1
+    assert ctx.store.one("SELECT count(*) FROM handled_events WHERE seq=?", (seq,))[0] == 1
+
+
+def test_uncertain_event_guidance_is_not_replayed(tmp_path):
+    from research_core.watcher.hermes_api import RunsUnavailable
+
+    ctx = make_ctx(tmp_path)
+    row = assigned(ctx)
+    owner = coordinator(ctx)
+    steer = ctx.hermes.steer
+
+    def reply_lost(run_id, text, *, profile):
+        steer(run_id, text, profile=profile)
+        raise RunsUnavailable("Steer reply lost after acceptance")
+
+    ctx.hermes.steer = reply_lost
+    with ctx.store.tx(Actor.harness()) as tx:
+        tx.event("task.wait_resolved", "T-1", {"kind": "user", "note": "approved"})
+    owner.advance_events(ctx)
+    for _ in range(5):
+        dispatch_inputs(ctx)
+        owner.advance_attempts(ctx)
+        owner.advance_events(ctx)
+    assert len(ctx.hermes.steered[row["run_id"]]) == 1
+    [delivery] = ctx.wstore.q("SELECT * FROM client_admissions WHERE origin='continuation'")
+    assert delivery["dispatch_started"] and delivery["status"] == "interrupted"
+    assert delivery["successor_id"] is None
+
+
+def test_target_end_redelivery_does_not_spend_zero_failure_budget(tmp_path):
+    ctx = make_ctx(tmp_path)
+    row = assigned(ctx)
+    owner = coordinator(ctx)
+    session = sessions.read(ctx.wstore, row["session_id"])
+    owner.continue_session(ctx, session, "Guidance", key="original-event")
+    with ctx.wstore.tx(Actor.harness()) as tx:
+        tx.execute(
+            "UPDATE client_admissions SET status='cancelled',"
+            "disposition='target ended before delivery' WHERE native_key='original-event'"
+        )
+    set_setting(ctx, "recovery.max_attempts", 0)
+    result = owner.continue_session(ctx, session, "Guidance", key="original-event")
+    assert result["key"] == "original-event:after-end"
+    dispatch_inputs(ctx)
+    assert ctx.hermes.steered[row["run_id"]] == ["Guidance"]
+    assert (
+        ctx.wstore.one(
+            "SELECT delivery_failures FROM client_admissions WHERE native_key=?", (result["key"],)
+        )[0]
+        == 0
+    )

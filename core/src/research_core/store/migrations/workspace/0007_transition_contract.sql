@@ -41,3 +41,4 @@ CREATE TRIGGER transition_effects_log_delete AFTER DELETE ON transition_effects 
     INSERT INTO change_log(at,tbl,row_id,op) VALUES (strftime('%Y-%m-%dT%H:%M:%fZ','now'),'transition_effects',OLD.rowid,'delete');
 END;
 ALTER TABLE task_assignments ADD COLUMN recovery_deadline TEXT;
+ALTER TABLE client_admissions ADD COLUMN delivery_failures INTEGER NOT NULL DEFAULT 0;

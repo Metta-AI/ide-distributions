@@ -213,7 +213,7 @@ class Coordinator:
                                 (snapshot["run_id"], op_id),
                             )
                     steer_text = text if isinstance(text, str) else text[-1]["content"]
-                    # Release the reservation on a definite rejection; propagate the error.
+                    # Settle definite rejection so durable advancement bounds redelivery.
                     # Generic server errors and missing replies may follow acceptance.
                     # Keep those delivery receipts unconfirmed; their target run stays known.
                     call_returned = False
@@ -235,7 +235,10 @@ class Coordinator:
                         if not call_returned and rejected:
                             with store.tx(ACTOR) as tx:
                                 tx.execute(
-                                    "UPDATE client_admissions SET dispatch_started=0 WHERE op_id=?",
+                                    "UPDATE client_admissions SET dispatch_started=0,"
+                                    "status=CASE WHEN status IN ('queued','running')"
+                                    " THEN 'failed' ELSE status END"
+                                    " WHERE op_id=?",
                                     (op_id,),
                                 )
                     with admissions.dispatch_lock(store), store.tx(ACTOR) as tx:
@@ -253,7 +256,9 @@ class Coordinator:
                             )
                         else:
                             tx.execute(
-                                "UPDATE client_admissions SET dispatch_started=0 WHERE op_id=?",
+                                "UPDATE client_admissions SET dispatch_started=0,status=CASE WHEN"
+                                " status IN ('queued','running') THEN 'failed' ELSE status END,"
+                                "error='Run refused steering' WHERE op_id=?",
                                 (op_id,),
                             )
                     if not accepted:
@@ -1012,7 +1017,14 @@ class Coordinator:
                     ctx.coworld is None or session["coworld_id"] != ctx.coworld.coworld_id
                 ):
                     continue
-                if row["disposition"] == "target ended before delivery":
+                reroute = row["disposition"] == "target ended before delivery"
+                rejected = (
+                    row["delivery_mode"] == "steer"
+                    and row["status"] in {"failed", "interrupted", "cancelled"}
+                    and not row["dispatch_started"]
+                    and not row["cancel_requested"]
+                )
+                if reroute or rejected:
                     assignment = ctx.wstore.one(
                         "SELECT * FROM task_assignments WHERE coworld_id=? AND task_id=?",
                         (session["coworld_id"], session["task_id"]),
@@ -1024,7 +1036,8 @@ class Coordinator:
                             ctx,
                             target,
                             json.loads(row["payload"])["input"],
-                            key=f"reroute:{row['op_id']}",
+                            key=f"reroute:{row['op_id']}" if reroute else row["native_key"],
+                            delivery_failures=row["delivery_failures"],
                             with_pending_messages=False,
                             delivery_ids=tuple(json.loads(row["delivery_ids"])),
                         )
@@ -1036,9 +1049,14 @@ class Coordinator:
                         )
                         with ctx.wstore.tx(ctx.actor) as tx:
                             tx.execute(
-                                "UPDATE client_admissions SET disposition='delivery rerouted',"
+                                "UPDATE client_admissions SET disposition=?,"
                                 "successor_id=?,advanced_at=? WHERE op_id=?",
-                                (successor["op_id"], tx.at, row["op_id"]),
+                                (
+                                    "delivery rerouted" if reroute else "delivery retry queued",
+                                    successor["op_id"],
+                                    tx.at,
+                                    row["op_id"],
+                                ),
                             )
                         continue
                 # A steer is a delivery to an existing attempt, not a new worker attempt.
@@ -1160,6 +1178,7 @@ class Coordinator:
         with_pending_messages: bool = True,
         key: str | None = None,
         delivery_ids: tuple[int, ...] = (),
+        delivery_failures: int = 0,
         history: tuple[dict, ...] | list[dict] = (),
     ) -> dict[str, Any]:
         """Persist continuation intent; the one admission dispatcher performs delivery.
@@ -1193,6 +1212,25 @@ class Coordinator:
                 and not previous["cancel_requested"]
             )
         ):
+            delivery_failures = previous["delivery_failures"] + int(
+                previous["disposition"] != "target ended before delivery"
+            )
+            if previous[
+                "disposition"
+            ] != "target ended before delivery" and delivery_failures >= int(
+                settings.get(ctx.stores, "recovery.max_attempts")
+            ):
+                with ctx.wstore.tx(ctx.actor) as tx:
+                    tx.execute(
+                        "UPDATE client_admissions SET disposition='delivery retries exhausted',"
+                        "advanced_at=COALESCE(advanced_at,?) WHERE op_id=?",
+                        (tx.at, previous["op_id"]),
+                    )
+                return {
+                    "session": previous["session_id"],
+                    "deferred": True,
+                    "reason": "delivery retries exhausted",
+                }
             key = (
                 key + ":after-end"
                 if previous["disposition"] == "target ended before delivery"
@@ -1268,6 +1306,10 @@ class Coordinator:
                 text=text,
                 origin="continuation",
                 delivery_ids=tuple(message_ids),
+            )
+            tx.execute(
+                "UPDATE client_admissions SET delivery_failures=? WHERE op_id=?",
+                (delivery_failures, successor_id),
             )
             if predecessor is not None:
                 tx.execute(
