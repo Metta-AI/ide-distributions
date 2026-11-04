@@ -66,4 +66,10 @@ def digest(*parts: str) -> str:
 
 def notice_user_write(call: ToolCall, identity: str, what: str) -> None:
     if identity == "user":
-        notices.add(call.ctx.wstore, call.ctx.actor, text=f"Acted as your User identity: {what}")
+        coworld = call.ctx.coworld_or_none()
+        notices.add(
+            call.ctx.wstore,
+            call.ctx.actor,
+            coworld_id=coworld.coworld_id if coworld else None,
+            text=f"Acted as your User identity: {what}",
+        )

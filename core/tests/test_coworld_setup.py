@@ -23,6 +23,7 @@ def env(tmp_path):
         "IDE_WORKSPACE": str(tmp_path / "ws"),
         "IDE_PLATFORM": "fake",
         "IDE_SESSION_ID": "s1",
+        "IDE_COWORLD_ID": COWORLD,
         "SOFTMAX_PLAYER_ID": "ply_test",
     }
 
@@ -222,19 +223,15 @@ def test_import_caps_long_summaries_at_forty_words(ctx, upstream):
 # --- switch -----------------------------------------------------------------------------------
 
 
-def test_switch_twice_flips_active_and_emits_setup_needed_once(ctx, upstream, tmp_path):
+def test_setup_is_idempotent_and_cannot_rebind_a_session(ctx, upstream, tmp_path):
     repo, sha = upstream
     request = {"text": "submit the starter as my champion", "cites": "msg-1"}
-    drained = []
 
-    first = coworld_setup.switch(
-        ctx, COWORLD, cites="msg-1", pending_request=request, drain=lambda: drained.append(1)
-    )
-    assert drained == [1] and first["switched_from"] is None
+    first = coworld_setup.switch(ctx, COWORLD, cites="msg-1", pending_request=request)
     assert first["code"]["initialized"] is True
     assert first["setup"]["status"] == "needed" and first["setup"]["fetch"]["mixin"] is not None
     assert first["profile_config"]["note"].startswith("HERMES_HOME is not set")
-    assert coworlds.active(ctx.wstore)["coworld_id"] == COWORLD
+    assert coworlds.active(ctx.wstore) is None
     assert coworlds.read(ctx.wstore, COWORLD)["pending_request"] == request
     events = setup_events(ctx)
     assert len(events) == 1 and events[0].seq == first["setup"]["event_seq"]
@@ -247,8 +244,8 @@ def test_switch_twice_flips_active_and_emits_setup_needed_once(ctx, upstream, tm
         "cites": "msg-1",
         "problems": [],
     }
-    notice = notices.unread(ctx.wstore)
-    assert len(notice) == 1 and notice[0]["text"].startswith("Switching to cow_fake;")
+    notice = notices.unread(ctx.wstore, coworld_id=COWORLD)
+    assert len(notice) == 1 and notice[0]["text"].startswith("Setting up cow_fake")
     assert notice[0]["refs"] == ["msg-1"] and first["notice"] == notice[0]["id"]
 
     # A second switch to the same Coworld while its setup is pending changes nothing more.
@@ -259,27 +256,13 @@ def test_switch_twice_flips_active_and_emits_setup_needed_once(ctx, upstream, tm
     assert len(setup_events(ctx)) == 1
     assert coworlds.read(ctx.wstore, COWORLD)["pending_request"]["text"] == "new"
 
-    # Switching to another Coworld flips the active row; its own setup is announced once.
-    other, other_sha = make_fakegame_repo(tmp_path / "other", coworld_id="cow_other")
-    third = coworld_setup.switch(ctx, "cow_other", source=other.as_uri(), commit=other_sha)
-    assert third["switched_from"] == COWORLD
-    assert coworlds.active(ctx.wstore)["coworld_id"] == "cow_other"
-    assert third["setup"]["status"] == "needed"
-    assert third["setup"]["fetch"]["mixin"]["skills"][0]["to"] == "cow_other-ab"
-    assert any("no manifest for cow_other" in p for p in third["setup"]["fetch"]["problems"])
-    assert len(setup_events(ctx, "cow_other")) == 1 and len(setup_events(ctx)) == 1
-    assert ctx.store.path == ctx.workspace.coworld("cow_other").store_path
-    assert ctx.store.one("SELECT COUNT(*) FROM claims")[0] == 4
+    # The same session must never change games, even when explicitly asked through a tool.
+    from research_core.tools.base import ToolError
 
-    back = coworld_setup.switch(ctx, COWORLD)
-    assert back["switched_from"] == "cow_other" and back["setup"]["status"] == "pending"
-    assert coworlds.active(ctx.wstore)["coworld_id"] == COWORLD
-    switched = [e.payload for e in ctx.wstore.events_after(0) if e.kind == "coworld.switched"]
-    assert switched == [
-        {"from": None, "to": COWORLD},
-        {"from": COWORLD, "to": "cow_other"},
-        {"from": "cow_other", "to": COWORLD},
-    ]
+    with pytest.raises(ToolError, match="cannot change"):
+        coworld_setup.switch(ctx, "cow_other")
+    assert ctx.store.path == ctx.workspace.coworld(COWORLD).store_path
+    assert coworlds.active(ctx.wstore) is None
 
 
 def test_switch_refuses_a_bad_id_and_a_bad_pending_request(ctx):
@@ -348,7 +331,7 @@ def test_apply_profile_config_sets_the_keys_in_every_profile(tmp_path, env):
     )
     coworld = ctx.workspace.coworld(COWORLD)
     skills = coworld.mixin / "skills"
-    result = coworld_setup.apply_profile_config(ctx, coworld, mixin_skills_dir=skills, run=run)
+    result = coworld_setup.apply_profile_config(ctx, run=run)
 
     assert result["problems"] == [
         "profile missing: no profile home at " + str(profiles / "missing")
@@ -365,19 +348,18 @@ def test_apply_profile_config_sets_the_keys_in_every_profile(tmp_path, env):
         dirs = json.loads(
             next(argv[4] for h, argv in sets if h == home and argv[3].endswith("dirs"))
         )
-        assert dirs[-1] == str(skills) and dirs[0].endswith("skills/common")
+        assert str(skills) not in dirs and dirs[0].endswith("skills/common")
         assert dirs[1].endswith(f"skills/{role}")
     cwd = next(argv[4] for _, argv in sets if argv[3] == "terminal.cwd")
     trusted = next(argv[4] for _, argv in sets if argv[3] == "skills.trusted_project_dirs")
-    assert cwd == str(coworld.code) and json.loads(trusted) == [str(coworld.code)]
+    assert cwd == str(ctx.workspace.root) and json.loads(trusted) == []
     assert len(result["applied"]) == 9
 
 
 def test_apply_profile_config_without_a_hermes_executable(tmp_path, env, monkeypatch):
     monkeypatch.setattr(coworld_setup.shutil, "which", lambda name: None)
     ctx = ToolContext.from_env("orchestrator", {**env, "HERMES_HOME": str(tmp_path / "p")})
-    coworld = ctx.workspace.coworld(COWORLD)
-    result = coworld_setup.apply_profile_config(ctx, coworld, mixin_skills_dir=coworld.mixin)
+    result = coworld_setup.apply_profile_config(ctx)
     assert result["applied"] == [] and "hermes executable not found" in result["note"]
 
 
@@ -428,7 +410,6 @@ def test_install_toolchains_supports_python_and_reports_the_rest(ctx):
 
 
 def test_setup_status_reports_the_mixin_and_pending_request(ctx, upstream):
-    assert coworld_setup.setup_status(ctx)["coworld"] is None
     request = {"text": "go", "cites": "msg-1"}
     coworld_setup.switch(ctx, COWORLD, pending_request=request)
     status = coworld_setup.setup_status(ctx)

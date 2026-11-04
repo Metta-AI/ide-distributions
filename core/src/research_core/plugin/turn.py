@@ -3,7 +3,7 @@
 Before each model call in a chat Session, Hermes's ``pre_llm_call`` hook adds to the user's
 message: the validated client context block when the message carries one, the unread notices
 (the only channel background work has to the user), a short note of what changed in the store
-since this conversation's last turn, the active Coworld, and, on the first turn of a new chat
+since this conversation's last turn, the session's Coworld, and, on the first turn of a new chat
 after an hour away, a summary of what happened meanwhile. Wake and task Sessions get nothing.
 Stdlib only: this runs inside Hermes and must never fail a turn.
 """
@@ -120,8 +120,8 @@ def _reaction_lines(event: Any, session_id: str) -> list[str]:
 
 
 def render_turn(ctx: Any, session_id: str, *, is_first_turn: bool, now: datetime) -> str:
-    """Notices, the changed-since note, the active Coworld and the away summary, as text."""
-    from research_core.store import coworlds, notices
+    """Notices, the changed-since note, the session's Coworld and the away summary, as text."""
+    from research_core.store import notices
 
     wstore = ctx.wstore
     parts: list[str] = []
@@ -131,8 +131,12 @@ def render_turn(ctx: Any, session_id: str, *, is_first_turn: bool, now: datetime
         " ORDER BY seq DESC LIMIT 1",
         (session_id,),
     )
+    coworld = ctx.coworld_or_none()
+    coworld_id = coworld.coworld_id if coworld else None
     last_any = wstore.one(
-        "SELECT at FROM events WHERE kind = 'turn.rendered' ORDER BY seq DESC LIMIT 1"
+        "SELECT at FROM events WHERE kind = 'turn.rendered'"
+        " AND json_extract(payload, '$.coworld_id') IS ? ORDER BY seq DESC LIMIT 1",
+        (coworld_id,),
     )
     import json
 
@@ -140,15 +144,11 @@ def render_turn(ctx: Any, session_id: str, *, is_first_turn: bool, now: datetime
     since_w = int(last_payload.get("wseq") or 0)
     since_c = int(last_payload.get("cseq") or 0)
 
-    active = coworlds.active(wstore)
-    coworld_store = None
-    if active is not None:
-        try:
-            coworld_store = ctx.store
-        except Exception:
-            coworld_store = None
+    coworld_store = ctx.store if coworld is not None else None
 
-    unread = notices.unread(wstore, limit=MAX_NOTICES)
+    unread = notices.unread(
+        wstore, limit=MAX_NOTICES, coworld_id=coworld.coworld_id if coworld else None
+    )
     if unread:
         lines = [
             f"- {n['text']}" + (f" ({', '.join(n['refs'])})" if n.get("refs") else "")
@@ -167,7 +167,8 @@ def render_turn(ctx: Any, session_id: str, *, is_first_turn: bool, now: datetime
             if event.kind == "ui.patch":
                 reactions.extend(_reaction_lines(event, session_id))
                 continue
-            if event.kind in ("turn.rendered", "watcher.heartbeat", "notice"):
+            # Workspace bookkeeping spans games. Only this Coworld's events describe its work.
+            if store is wstore:
                 continue
             changed[event.kind] += 1
     if last is not None and changed:
@@ -182,14 +183,18 @@ def render_turn(ctx: Any, session_id: str, *, is_first_turn: bool, now: datetime
         if summary:
             parts.append(summary)
 
-    if active is not None:
-        parts.append(f"[active Coworld] {active['coworld_id']}")
+    if coworld is not None:
+        parts.append(f"[session Coworld] {coworld.coworld_id}")
     else:
-        parts.append("[active Coworld] none yet; workspace.coworld_switch selects one")
+        parts.append("[session Coworld] none; the client must open a session for a Coworld")
 
     wseq, cseq = wstore.last_seq(), (coworld_store.last_seq() if coworld_store else 0)
     with wstore.tx(ctx.actor) as tx:
-        tx.event("turn.rendered", session_id, {"wseq": wseq, "cseq": cseq, "first": is_first_turn})
+        tx.event(
+            "turn.rendered",
+            session_id,
+            {"wseq": wseq, "cseq": cseq, "first": is_first_turn, "coworld_id": coworld_id},
+        )
     return "\n\n".join(parts)
 
 
@@ -214,14 +219,18 @@ def _away_summary(wstore: Any, coworld_store: Any, since: datetime, now: datetim
     )
 
 
+_bound_terminals: set[tuple[str, str]] = set()
+
+
 def make_pre_llm_call(role: Role) -> Callable[..., dict | None]:
     def pre_llm_call(
         session_id: str = "",
+        task_id: str = "",
         user_message: str = "",
         is_first_turn: bool = False,
         **_: Any,
     ) -> dict | None:
-        if role != "orchestrator" or not session_id:
+        if not session_id:
             return None
         try:
             from research_core.plugin.executor import profile_env
@@ -230,6 +239,18 @@ def make_pre_llm_call(role: Role) -> Callable[..., dict | None]:
 
             env = profile_env(IDE_SESSION_ID=session_id)
             ctx = ToolContext.from_env(role, env)
+            coworld = ctx.coworld_or_none()
+            if task_id and coworld is not None:
+                from tools.terminal_tool import register_task_env_overrides
+
+                key = (role, task_id)
+                if key not in _bound_terminals:
+                    register_task_env_overrides(
+                        task_id, {"cwd": str(coworld.code), "cwd_source": "session"}
+                    )
+                    _bound_terminals.add(key)
+            if role != "orchestrator":
+                return None
             session = sessions.read(ctx.wstore, session_id)
             if session is not None and session.get("kind") != "chat":
                 return None

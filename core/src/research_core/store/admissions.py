@@ -76,7 +76,7 @@ def read(store: Store, op_id: str, kind: str, request: dict) -> dict | None:
     return dict(row)
 
 
-def snapshot(store: Store) -> list[dict]:
+def snapshot(store: Store, session_id: str | None = None) -> list[dict]:
     return [
         asdict(Admission(**{**dict(row), "input": json.loads(row["input"])}))
         for row in store.q(
@@ -87,7 +87,9 @@ def snapshot(store: Store) -> list[dict]:
             " ELSE status END AS status,run_id,error,error_class,resume_after,created_at,"
             " json_extract(payload, '$.context.client.id') AS client_id"
             " FROM client_admissions WHERE kind = 'message'"
-            " AND origin IN ('client','answer') ORDER BY rowid"
+            " AND origin IN ('client','answer')"
+            " AND (? IS NULL OR session_id=?) ORDER BY rowid",
+            (session_id, session_id),
         )
     ]
 

@@ -9,7 +9,9 @@ from tests.watcher._support import advance, events_of, make_ctx, make_goal, work
 
 
 def panel(ctx) -> dict:
-    return ui_state.get(ctx.wstore, "workspace")["doc"]["panels"]["agent-context"]
+    return ui_state.get(ctx.wstore, "coworld:cow_fake" if ctx.coworld else "workspace")["doc"][
+        "panels"
+    ]["agent-context"]
 
 
 def test_panel_written_once_and_only_again_on_change(tmp_path):
@@ -54,7 +56,7 @@ def test_panel_keeps_the_agents_needs_and_other_panels(tmp_path):
     ui_state.patch(
         ctx.wstore,
         ctx.actor,
-        "workspace",
+        "coworld:cow_fake",
         [
             {"op": "add", "path": "/panels", "value": {"notes": {"kind": "markdown"}}},
             {
@@ -68,7 +70,7 @@ def test_panel_keeps_the_agents_needs_and_other_panels(tmp_path):
         ],
     )
     assert context_panel.run(ctx) == {"written": True}
-    doc = ui_state.get(ctx.wstore, "workspace")["doc"]
+    doc = ui_state.get(ctx.wstore, "coworld:cow_fake")["doc"]
     assert doc["panels"]["notes"] == {"kind": "markdown"}
     content = doc["panels"]["agent-context"]["content"]
     assert content["needs"] == ["a Softmax User token"]

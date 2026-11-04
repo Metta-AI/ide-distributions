@@ -48,7 +48,7 @@ from research_core import layout
 from research_core.client import ScriptedClient
 from research_core.platform.fake import FakePlatform
 from research_core.serve import SeamServer
-from research_core.store import coworlds, notices
+from research_core.store import notices, sessions
 from research_core.store.db import Store
 from research_core.watcher.hermes_api import HermesRuns, mint_session_id
 from tests.fixtures.fakegame_repo import COWORLD_ID, make_fakegame_repo
@@ -63,8 +63,8 @@ FAKE_PLAYER_ID = "ply_canary"
 KEEP = os.environ.get("IDE_E2E_KEEP") == "1"
 SCENARIO = os.environ.get("IDE_E2E_SCENARIO", "1") != "0"
 PLATFORM = os.environ.get("IDE_E2E_PLATFORM", "fake")
-REAL_REQUIRED = ("SOFTMAX_PLAYER_ID", "SOFTMAX_PLAYER_CREDENTIAL")
-REAL_OPTIONAL = ("COGAMES_API_URL", "IDE_DEFAULT_COWORLD")
+REAL_REQUIRED = ("SOFTMAX_PLAYER_ID", "SOFTMAX_PLAYER_CREDENTIAL", "IDE_E2E_COWORLD")
+REAL_OPTIONAL = ("COGAMES_API_URL",)
 
 __all__ = ["openrouter_key"]  # the module-scoped fixture is reused from the spike
 
@@ -211,7 +211,16 @@ def run_scenario(
 ) -> None:
     """The acceptance scenario: one request, coordinator works until a submission exists."""
     player_id = env["SOFTMAX_PLAYER_ID"]
-    client.open("canary", "web-ide")
+    selected_coworld = COWORLD_ID if PLATFORM == "fake" else env["IDE_E2E_COWORLD"]
+    client.open(
+        "canary",
+        "web-ide",
+        session_context={
+            "contract_version": 1,
+            "scope": "coworld",
+            "coworld": selected_coworld,
+        },
+    )
     reply = client.say(REQUEST, {"contract_version": 1, "on_screen": []}, wait=True)
     print(f"chat run {reply['run_id']} ({reply['delivered']})")
 
@@ -230,22 +239,19 @@ def run_scenario(
 
     wstore = Store.open(ws.store_path, kind="workspace")
     try:
-        active = coworlds.active(wstore)
-        texts = [n["text"] for n in notices.unread(wstore, limit=50)]
+        session = sessions.read(wstore, client.session_id)
+        texts = [n["text"] for n in notices.unread(wstore, limit=50, coworld_id=selected_coworld)]
     finally:
         wstore.close()
     submissions = watch.new()
-    print(f"active Coworld: {active and active['coworld_id']}\nnotices: {texts}")
+    print(f"session Coworld: {session['coworld_id']}\nnotices: {texts}")
     print(f"submissions by Player: {submissions}")
     assert submissions, f"no submission after {elapsed} s; gateway log {host.log}, notices {texts}"
     assert submissions.get(player_id), (
         f"the submission was not made as the profile's Player {player_id}: {submissions}; "
         "the profile .env did not reach the tools"
     )
-    assert active is not None, "no active Coworld after the scenario"
-    expected = COWORLD_ID if PLATFORM == "fake" else env.get("IDE_DEFAULT_COWORLD")
-    if expected:
-        assert active["coworld_id"] == expected, active
+    assert session["coworld_id"] == selected_coworld, session
 
 
 def keep_running(
@@ -261,7 +267,16 @@ def keep_running(
     so the caller can stop the seam server and the gateway."""
     with capsys.disabled():
         if client.session_id is None:
-            client.open("keep", "web-ide")
+            selected_coworld = COWORLD_ID if PLATFORM == "fake" else env["IDE_E2E_COWORLD"]
+            client.open(
+                "keep",
+                "web-ide",
+                session_context={
+                    "contract_version": 1,
+                    "scope": "coworld",
+                    "coworld": selected_coworld,
+                },
+            )
         print(banner(host, ws, env, server, client), flush=True)
         try:
             while True:

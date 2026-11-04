@@ -159,8 +159,8 @@ def test_second_apply_is_a_noop():
 
 def test_apply_migrations_returns_the_version_it_reached():
     conn = sqlite3.connect(":memory:", isolation_level=None)
-    assert migrate.apply_migrations(conn, "workspace") == 8
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 8
+    assert migrate.apply_migrations(conn, "workspace") == 9
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
 
 
 def test_admission_waiting_migration_keeps_rows_and_adds_no_hold():
@@ -178,7 +178,7 @@ def test_admission_waiting_migration_keeps_rows_and_adds_no_hold():
         " VALUES (7,'op','message','{}','s','hi',?,'failed','run_1',1,'boom','t',42,'client')",
         (payload,),
     )
-    assert migrate.apply_migrations(conn, "workspace") == 8
+    assert migrate.apply_migrations(conn, "workspace") == 9
     row = conn.execute("SELECT rowid, * FROM client_admissions").fetchone()
     assert (row["rowid"], row["op_id"], row["status"], row["error"]) == (7, "op", "failed", "boom")
     assert (row["payload"], row["native_message_id"], row["origin"]) == (payload, 42, "client")
@@ -186,6 +186,20 @@ def test_admission_waiting_migration_keeps_rows_and_adds_no_hold():
     assert (
         migrate.schema_diff(migrate.expected_schema("workspace"), migrate.actual_schema(conn)) == []
     )
+
+
+def test_scoped_notices_upgrade_keeps_existing_workspace_notices():
+    conn = sqlite3.connect(":memory:", isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    for number, path in migrate.migration_files("workspace")[:8]:
+        migrate._run_migration(conn, number, path)
+    conn.execute(
+        "INSERT INTO notices(text,refs,urgency,created,created_by)"
+        " VALUES ('Existing news','[]','normal','t','harness')"
+    )
+    assert migrate.apply_migrations(conn, "workspace") == 9
+    row = conn.execute("SELECT * FROM notices").fetchone()
+    assert row["text"] == "Existing news" and row["coworld_id"] is None
 
 
 def test_only_a_hold_may_clear_an_execution_receipt():

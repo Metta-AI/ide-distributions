@@ -13,6 +13,7 @@ import json
 from typing import Any
 
 JSON_TYPES = {
+    "null": type(None),
     "string": str,
     "integer": int,
     "number": (int, float),
@@ -34,11 +35,19 @@ def _resolve(schema: dict, root: dict) -> dict:
 def _check(value: Any, schema: dict, root: dict, path: str, problems: list[str]) -> Any:
     """Return the kept value (unknown object fields dropped) or ``None`` when refused."""
     schema = _resolve(schema, root)
-    expected = JSON_TYPES.get(schema.get("type", ""))
+    declared_type = schema.get("type", "")
+    expected = (
+        tuple(JSON_TYPES[name] for name in declared_type)
+        if isinstance(declared_type, list)
+        else JSON_TYPES.get(declared_type)
+    )
     if expected is not None and (
         not isinstance(value, expected) or (expected is int and isinstance(value, bool))
     ):
         problems.append(f"{path}: must be {schema['type']}")
+        return None
+    if "enum" in schema and value not in schema["enum"]:
+        problems.append(f"{path}: must be one of {schema['enum']}")
         return None
     if "const" in schema and value != schema["const"]:
         problems.append(f"{path}: must be {schema['const']!r}")

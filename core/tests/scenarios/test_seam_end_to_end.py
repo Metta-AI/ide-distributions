@@ -24,7 +24,8 @@ from research_core.client import ScriptedClient
 from research_core.platform.fake import FakePlatform
 from research_core.scripted_agent import CITES, REQUEST, ScriptedAgent
 from research_core.serve import SeamServer
-from research_core.store import coworlds, notices
+from research_core.store import coworlds, notices, sessions
+from research_core.store.actors import Actor
 from research_core.tools.base import ToolContext, run_tool
 from research_core.watcher import context as watcher_context
 from research_core.watcher.hermes_api import FakeHermesRuns
@@ -36,6 +37,7 @@ class Scenario:
         self.env = {
             "IDE_WORKSPACE": str(tmp_path / "ws"),
             "IDE_PLATFORM": "fake",
+            "IDE_COWORLD_ID": COWORLD_ID,
             "IDE_RESEARCHER_PROFILES": "researcher",
             "SOFTMAX_PLAYER_ID": "ply_test",
         }
@@ -46,10 +48,12 @@ class Scenario:
         self.agent = ScriptedAgent(self.env, source, commit, coworld_id=COWORLD_ID)
         self.hermes = FakeHermesRuns(script=self.agent)
         self.agent.hermes = self.hermes
-        self.server = SeamServer(ws=self.ws, hermes=self.hermes)
+        self.server = SeamServer(ws=self.ws, hermes=self.hermes, env=self.env)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.client = ScriptedClient(self.server.url)
-        self.session_id = self.client.open("scripted", "web-ide")
+        self.session_id = self.client.open(
+            "scripted", "web-ide", session_context={"contract_version": 1, "coworld": COWORLD_ID}
+        )
 
     def tick(self) -> dict:
         self.observed_at += timedelta(seconds=60)
@@ -110,8 +114,8 @@ def test_acceptance_submit_starter(scenario):
 
     # The Coworld is active, the request reached the user as a notice, and the submission
     # event cites the user's message.
-    assert coworlds.active(ctx.wstore)["coworld_id"] == COWORLD_ID
-    texts = [n["text"] for n in notices.unread(ctx.wstore, limit=20)]
+    assert coworlds.active(ctx.wstore) is None
+    texts = [n["text"] for n in notices.unread(ctx.wstore, limit=20, coworld_id=COWORLD_ID)]
     assert any("Submitted V-1" in t for t in texts), texts
     submitted = [
         json.loads(row["payload"])
@@ -136,7 +140,7 @@ def test_notice_opens_next_turn(scenario):
     rendered = scenario.agent.rendered[reply["run_id"]]
     assert "[notices since your last turn]" in rendered
     assert "Submitted V-1" in rendered
-    assert "[active Coworld] cow_fake" in rendered
+    assert "[session Coworld] cow_fake" in rendered
     # Read once: the next turn does not repeat it.
     again = scenario.client.say("anything else?", wait=True)
     assert "Submitted V-1" not in scenario.agent.rendered[again["run_id"]]
@@ -182,3 +186,25 @@ def test_concurrent_chat_and_wakes_never_touch_the_chat_session(scenario):
     assert third["delivered"] == "queued" and third["run_id"] != first["run_id"]
     dispatched_second = scenario.client.wait_admission(second["op_id"])
     assert "Submitted V-1" in scenario.agent.rendered[dispatched_second["run_id"]]
+
+
+def test_management_wake_without_heading_preserves_chat_notices(scenario):
+    ctx = scenario.ctx()
+    wake_id = "management-wake"
+    sessions.register(
+        ctx.wstore,
+        Actor.harness(),
+        session_id=wake_id,
+        profile="orchestrator",
+        kind="wake",
+        coworld_id=COWORLD_ID,
+    )
+    notices.add(ctx.wstore, Actor.harness(), text="Game news", coworld_id=COWORLD_ID)
+    run_id = scenario.hermes.start(
+        profile="orchestrator",
+        session_id=wake_id,
+        text="Assign research work using task.assign.",
+    )
+    assert run_id not in scenario.agent.rendered
+    assert scenario.hermes.runs[run_id].status == "completed"
+    assert [n["text"] for n in notices.unread(ctx.wstore, coworld_id=COWORLD_ID)] == ["Game news"]

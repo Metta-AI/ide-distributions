@@ -51,7 +51,7 @@ def test_wiki_conflict_and_user_identity_notice(call, ctx_factory):
     )
     assert stale["ok"] is False and stale["conflict"] is True and stale["current_body"] == "v1"
     ctx = ctx_factory("orchestrator")
-    before = len(notices.unread(ctx.wstore, limit=50))
+    before = len(notices.unread(ctx.wstore, limit=50, coworld_id="cow_fake"))
     env = dict(ctx.env, SOFTMAX_USER_CREDENTIAL="user-token")
     import json
 
@@ -66,7 +66,7 @@ def test_wiki_conflict_and_user_identity_notice(call, ctx_factory):
         )
     )
     assert out["ok"] is True and out["identity"] == "user"
-    assert len(notices.unread(ctx.wstore, limit=50)) == before + 1
+    assert len(notices.unread(ctx.wstore, limit=50, coworld_id="cow_fake")) == before + 1
     denied = call(
         "forum_post",
         {"action": "post", "title": "u", "body": "x", "identity": "user"},

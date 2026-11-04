@@ -113,8 +113,8 @@ class ScriptedClient:
 
     # --- the stream and snapshots ---------------------------------------------------------
 
-    def snapshot(self, store: str = "workspace") -> dict:
-        return self._get("/snapshot", {"store": store})
+    def snapshot(self, store: str = "workspace", *, coworld: str | None = None) -> dict:
+        return self._get("/snapshot", {"store": store, **({"coworld": coworld} if coworld else {})})
 
     def events(
         self,
@@ -124,11 +124,14 @@ class ScriptedClient:
         idle: float = 1.0,
         until: Callable[[dict], bool] | None = None,
         timeout: float | None = None,
+        coworld: str | None = None,
     ) -> list[dict]:
         """Events after ``after`` from ``/stream``, read until the stream is idle for ``idle``
         seconds, ``until(event)`` is true, or ``timeout`` seconds passed. Each event carries
         ``store`` and its ``seq`` (the SSE id)."""
-        url = f"{self.base_url}/stream?" + urllib.parse.urlencode({"store": store, "after": after})
+        url = f"{self.base_url}/stream?" + urllib.parse.urlencode(
+            {"store": store, "after": after, **({"coworld": coworld} if coworld else {})}
+        )
         request = urllib.request.Request(url, headers={"Accept": "text/event-stream"})
         events: list[dict] = []
         deadline = None if timeout is None else time.monotonic() + timeout
@@ -174,9 +177,17 @@ class ScriptedClient:
         """React to a message: feedback for the agent's next turn; starts no run."""
         return self._ui_action("reaction", {"message_id": message_id, "value": value}, session_id)
 
-    def apply(self, actor: str, op: str, args: dict, store: str | None = None) -> dict:
+    def apply(
+        self,
+        actor: str,
+        op: str,
+        args: dict,
+        store: str | None = None,
+        *,
+        coworld: str | None = None,
+    ) -> dict:
         """``POST /store/apply``: one allowed library function as ``actor`` (``user:<id>``)."""
-        body: dict[str, Any] = {"actor": actor, "op": op, "args": args}
+        body: dict[str, Any] = {"actor": actor, "op": op, "args": args, "coworld": coworld}
         if store is not None:
             body["store"] = store
         return self._post("/store/apply", body)

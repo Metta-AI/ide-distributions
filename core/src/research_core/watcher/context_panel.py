@@ -38,7 +38,8 @@ from research_core.store.db import Store
 if TYPE_CHECKING:  # pragma: no cover
     from research_core.watcher.context import TickContext
 
-CONVERSATION = "workspace"
+from research_core.tools.ui import coworld_conversation
+
 PANEL = "agent-context"
 PANEL_PATH = f"/panels/{PANEL}"
 VERSION_LIMIT = 5
@@ -55,7 +56,7 @@ def run(ctx: TickContext) -> dict[str, Any]:
 def compute(ctx: TickContext) -> dict[str, Any]:
     """The workspace part of the panel, as JSON-ready data."""
     env = ctx.env
-    active = coworlds.active(ctx.wstore)
+    active = coworlds.read(ctx.wstore, ctx.coworld.coworld_id) if ctx.coworld else None
     heartbeat = ctx.meta("heartbeat")
     alive = heartbeat is not None and ctx.now - parse_iso(heartbeat) <= HEARTBEAT_ALIVE
     computed: dict[str, Any] = {
@@ -78,7 +79,8 @@ def compute(ctx: TickContext) -> dict[str, Any]:
 
 def write(ctx: TickContext, computed: dict[str, Any]) -> bool:
     """Patch the panel when ``computed`` differs from the stored part; keep ``needs``."""
-    doc = ui_state.get(ctx.wstore, CONVERSATION)["doc"]
+    conversation = coworld_conversation(ctx.coworld.coworld_id if ctx.coworld else None)
+    doc = ui_state.get(ctx.wstore, conversation)["doc"]
     panels = doc.get("panels") if isinstance(doc.get("panels"), dict) else None
     current = panels.get(PANEL) if panels is not None else None
     content = current.get("content") if isinstance(current, dict) else None
@@ -92,7 +94,7 @@ def write(ctx: TickContext, computed: dict[str, Any]) -> bool:
         ops = [{"op": "add", "path": PANEL_PATH, "value": value}]
     else:
         ops = [{"op": "replace", "path": PANEL_PATH, "value": value}]
-    ui_state.patch(ctx.wstore, ctx.actor, CONVERSATION, ops)
+    ui_state.patch(ctx.wstore, ctx.actor, conversation, ops)
     return True
 
 

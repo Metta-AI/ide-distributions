@@ -37,21 +37,28 @@ def _panel_kinds() -> list[str]:
 PANEL_KINDS = _panel_kinds()
 
 
+def coworld_conversation(coworld_id: str | None) -> str:
+    """The shared UI state of one Coworld; unbound workspace state contains no game work."""
+    return f"coworld:{coworld_id}" if coworld_id else WORKSPACE_CONVERSATION
+
+
 def conversation_for(ctx: ToolContext) -> str:
     """A3.5: a chat Session's own id; ``workspace`` for a wake or an unregistered Session."""
     session_id = ctx.hermes_session_id()
     row = sessions.read(ctx.wstore, session_id) if session_id else None
     if row is not None and row["kind"] == "chat":
         return session_id
-    return WORKSPACE_CONVERSATION
+    return coworld_conversation(row["coworld_id"] if row else None)
 
 
 def handle(call: ToolCall) -> dict:
     ctx = call.ctx
     if call.action == "notify":
+        coworld = ctx.coworld_or_none()
         record = notices.add(
             ctx.wstore,
             ctx.actor,
+            coworld_id=coworld.coworld_id if coworld else None,
             text=call.get("text"),
             refs=call.get("refs") or [],
             urgency=call.get("urgency") or "normal",

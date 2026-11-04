@@ -209,9 +209,7 @@ def _text(sections: list[Section]) -> str:
 def _workspace_status(inputs: Inputs) -> Section:
     from research_core.store import settings
 
-    coworld = inputs.coworld_id or (
-        "none yet (the Orchestrator selects one with workspace.coworld_switch)"
-    )
+    coworld = inputs.coworld_id or ("none; the frontend must open a session for a Coworld")
     paused = "yes" if settings.get(inputs.wstore, "paused") else "no"
     heartbeat = inputs.wstore.get_meta("heartbeat")
     if heartbeat:
@@ -227,7 +225,7 @@ def _workspace_status(inputs: Inputs) -> Section:
     if stale:
         lines.append(stale)
     if inputs.store is None:
-        lines.append("No active Coworld: records, capabilities and Goals appear once one is set.")
+        lines.append("No session Coworld: open a Coworld session to access game work.")
     return Section(lines=lines)
 
 
@@ -377,10 +375,12 @@ def _session_task(inputs: Inputs) -> Section:
     session_coworld = session.get("coworld_id")
     if session_coworld and session_coworld != inputs.coworld_id:
         return Section(
-            lines=[f"Your Task: {shown} is in Coworld {session_coworld}, not the active one"]
+            lines=[
+                f"Your Task: {shown} is in Coworld {session_coworld}, not this session's Coworld"
+            ]
         )
     if inputs.store is None:
-        return Section(lines=[f"Your Task: {shown} (no active Coworld to read it from)"])
+        return Section(lines=[f"Your Task: {shown} (no session Coworld to read it from)"])
     task = tasks.read(inputs.store, task_id)
     goal = f"G-{task['goal_id']}" if task["goal_id"] else "workspace maintenance"
     waiting = task.get("waiting_on")

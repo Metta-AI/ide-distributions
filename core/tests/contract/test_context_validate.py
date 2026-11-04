@@ -60,7 +60,7 @@ def test_bad_types_and_missing_version():
     kept, problems = contract.validate_context({"contract_version": 2, "league": 5})
     assert kept == {}
     assert "context.contract_version: must be 1" in problems
-    assert "context.league: must be string" in problems
+    assert "context.league: must be ['string', 'null']" in problems
     assert "context.contract_version: required" in problems
     assert contract.validate_context("garbage") == ({}, ["context: must be a JSON object"])
     assert contract.validate_context(None)[1] == ["context: must be a JSON object"]

@@ -9,7 +9,7 @@ description: Use when unsure about paths, environments, CLIs or limits.
 
 ## What the guide covers
 
-Where you are (the workspace root and the active Coworld's folder), the image and source commits, the two Python environments, writable and read-only paths, credentials and identities, the CLIs and their versions, how to reach the user, sleep and wake, resource limits, and the last capability check with its age. `workspace.doctor` adds health facts and problems: the watcher heartbeat, store checks, CLI staleness against the lock, stale skill overrides.
+Where you are (the workspace root and the session's Coworld's folder), the image and source commits, the two Python environments, writable and read-only paths, credentials and identities, the CLIs and their versions, how to reach the user, sleep and wake, resource limits, and the last capability check with its age. `workspace.doctor` adds health facts and problems: the watcher heartbeat, store checks, CLI staleness against the lock, stale skill overrides.
 
 ## Two Python environments
 
@@ -19,7 +19,7 @@ Where you are (the workspace root and the active Coworld's folder), the image an
 
 ## Writable and read-only
 
-- Writable: everything in the active Coworld's folder except its bookkeeping: `code/` (commit on a branch in a worktree, never on `main` directly), `documents/` (your files; command logs under `documents/logs/`, artifacts, replays and measurements), `worktrees/`, and `source/` as a clone you read but do not edit.
+- Writable: everything in the session's Coworld's folder except its bookkeeping: `code/` (commit on a branch in a worktree, never on `main` directly), `documents/` (your files; command logs under `documents/logs/`, artifacts, replays and measurements), `worktrees/`, and `source/` as a clone you read but do not edit.
 - Read-only: the profile source checkout (plugin, store library and schema, tools, prompts, cron definitions). Report a bug there; do not patch it. `config.yaml` is writable, but `prepare.py` re-applies the protected keys.
 - Records live in the store and change only through the record tools; direct edits are detected and reported, and every tool returns the updated record, so nothing needs reading back.
 
@@ -35,3 +35,10 @@ Where you are (the workspace root and the active Coworld's folder), the image an
 - The watcher ticks every minute: it resumes Sessions whose wait resolved, runs due checks, merges reviewed Tasks and syncs the champion every ten minutes. A Session that ends on `task.wait` is asleep, not finished.
 - Reaching the user: the Orchestrator through the conversation or `ui.notify`; a Researcher only through its Task (`task.ask`, the result). Wakes never write into a chat.
 - `paused` stops background starts; the user's requests in a turn still run.
+
+## Native terminal store commands
+
+Hermes injects the current session ID into each native terminal command; research resolves that immutable session.
+To name the same Coworld explicitly, use `research store snapshot --store coworld --coworld <session-coworld-id>` and the same
+`--coworld` selector for store events or user edits. Without a session scope or named selector,
+Coworld reads fail. Custom research tool calls already carry the immutable session ID.

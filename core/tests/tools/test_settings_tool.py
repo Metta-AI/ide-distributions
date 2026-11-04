@@ -89,6 +89,6 @@ def test_coworld_key_without_an_active_coworld(ctx_factory):
         )
     )
     assert refused["ok"] is False
-    assert "coworld setting" in refused["error"] and "no active Coworld" in refused["error"]
+    assert "coworld setting" in refused["error"] and "no Coworld" in refused["error"]
     listed = json.loads(run_tool("settings", {"action": "read"}, ctx))
     assert {record["scope"] for record in listed["records"]} == {"workspace"}

@@ -52,7 +52,13 @@ METHODS = {
 
 def make_ctx(tmp_path, role="orchestrator", session_id="chat1", coworld=True, **env):
     ctx = ToolContext.from_env(
-        role, {"IDE_WORKSPACE": str(tmp_path), "IDE_SESSION_ID": session_id, **env}
+        role,
+        {
+            "IDE_WORKSPACE": str(tmp_path),
+            "IDE_SESSION_ID": session_id,
+            "IDE_COWORLD_ID": "cow_fake" if coworld else "",
+            **env,
+        },
     )
     ctx.workspace.ensure_dirs()
     if coworld:
@@ -136,7 +142,13 @@ def test_a_directive_added_after_the_first_render_appears_in_the_next(tmp_path):
         ctx.store, HARNESS, text="Keep XP runs under 50 episodes", scope="goal:1", source="msg:2"
     )
     sessions.register(
-        ctx.wstore, HARNESS, session_id="chat1", profile="orchestrator", kind="chat", goal_id=1
+        ctx.wstore,
+        HARNESS,
+        session_id="chat1",
+        profile="orchestrator",
+        kind="chat",
+        goal_id=1,
+        coworld_id="cow_fake",
     )
     second = briefing.render(ctx, "chat1", role="orchestrator", now=NOW)
     assert 'W-1 (workspace): "Never submit on a Friday"' in second
@@ -249,10 +261,10 @@ def test_workspace_status_capabilities_champion_and_window(tmp_path):
 def test_no_active_coworld_renders_the_workspace_status_only(tmp_path):
     ctx = make_ctx(tmp_path, coworld=False)
     text = briefing.render(ctx, "chat1", role="orchestrator", now=NOW)
-    assert "Workspace: Coworld none yet" in text
+    assert "Workspace: Coworld none" in text
     assert "no heartbeat yet: background work is not running" in text
     assert "credits: unknown" in text
-    assert "No active Coworld" in text
+    assert "No session Coworld" in text
     absent = ("Capability check", "Champion", "Active Goals", "Goals:", "claims", "unavailable")
     for header in absent:
         assert header not in text

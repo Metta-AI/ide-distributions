@@ -452,9 +452,9 @@ def test_prepare_points_every_profile_at_the_active_coworld(homes):
         run=fake.run,
     )
     code = str(ws.coworld("cow_fake").code)
-    assert fake.config["skills.external_dirs"][-1] == str(ws.coworld("cow_fake").mixin / "skills")
+    assert str(ws.coworld("cow_fake").mixin / "skills") not in fake.config["skills.external_dirs"]
     assert fake.config["skills.trusted_project_dirs"] == [code]
-    assert fake.config["terminal.cwd"] == code
+    assert fake.config["terminal.cwd"] == str(ws.root)
     assert ws.coworld("cow_fake").store_path.exists()  # ensure_stores migrated it
 
 
@@ -579,13 +579,7 @@ def test_prepare_bootstraps_the_default_coworld_through_the_workspace_env(homes)
     fake = FakeHermes()
     profile, env = _prepared(homes, fake, IDE_DEFAULT_COWORLD="cow_first")
     switches = [argv for argv, _ in fake.calls if "switch" in argv]
-    assert switches and switches[0][-4:] == [
-        "switch",
-        "cow_first",
-        "--cites",
-        "IDE_DEFAULT_COWORLD",
-    ]
-    assert switches[0][0] == str(layout.from_env(env).venv_python)
+    assert switches == []  # A host default cannot bind the user's sessions.
 
 
 def test_prepare_check_mode_plans_without_writing(homes, capsys):
@@ -611,15 +605,17 @@ def test_apply_skill_dirs_reports_missing_profiles(tmp_path):
     (profiles / "orchestrator").mkdir(parents=True)
     (profiles / "researcher").mkdir()
     fake = FakeHermes()
-    env = {"IDE_RESEARCHER_PROFILES": "researcher,missing", "IDE_CORE_SRC": str(CORE_SRC)}
+    env = {
+        "IDE_RESEARCHER_PROFILES": "researcher,missing",
+        "IDE_CORE_SRC": str(CORE_SRC),
+        "IDE_WORKSPACE": str(tmp_path / "ws"),
+    }
     result = prepare.apply_skill_dirs(
         profiles / "orchestrator",
         "hermes",
-        mixin_skills_dir=tmp_path / "mixin" / "skills",
-        code_dir=tmp_path / "code",
         env=env,
         run=fake.run,
     )
     assert result["problems"] == [f"profile missing: no profile home at {profiles / 'missing'}"]
     assert {a.split(":")[0] for a in result["applied"]} == {"orchestrator", "researcher"}
-    assert fake.config["terminal.cwd"] == str(tmp_path / "code")
+    assert fake.config["terminal.cwd"] == str(tmp_path / "ws")

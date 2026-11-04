@@ -40,10 +40,10 @@ from typing import Any
 from research_core import layout
 from research_core.store import (
     admissions,
-    coworlds,
     directives,
     goals,
     migrate,
+    sessions,
     settings,
     tasks,
     ui_state,
@@ -81,8 +81,7 @@ STORE_KINDS = ("workspace", "coworld")
 # stays in display form until ``_call``, because its prefix names the store.
 ID_ARGUMENTS = {"goal_id": "goal", "task_id": "task"}
 NO_ACTIVE_COWORLD = (
-    "no active Coworld; pass --store workspace, or switch to a Coworld first"
-    " (workspace.coworld_switch)"
+    "no session Coworld; pass --coworld for user edits, or open a session bound to a Coworld"
 )
 OUTPUT_TAIL_CHARS = 2000
 
@@ -110,9 +109,16 @@ class Stores:
         """Open the workspace store under ``IDE_WORKSPACE``; the Coworld is the named or active."""
         ws = layout.from_env()
         wstore = Store.open(ws.store_path, kind="workspace")
-        if coworld_id is None:
-            active = coworlds.active(wstore)
-            coworld_id = active["coworld_id"] if active else None
+        session_id = os.environ.get("IDE_SESSION_ID") or os.environ.get("HERMES_SESSION_ID")
+        if session_id:
+            session = sessions.read(wstore, session_id)
+            bound = session["coworld_id"] if session else None
+            if coworld_id is not None and coworld_id != bound:
+                wstore.close()
+                raise StoreError(["the requested Coworld differs from this session"])
+            coworld_id = bound
+        elif coworld_id is None:
+            coworld_id = os.environ.get("IDE_COWORLD_ID")
         return cls(ws, wstore, coworld_id)
 
     @property
@@ -158,7 +164,7 @@ def run_apply(args: argparse.Namespace) -> int:
                 f"{op!r} is not an op store apply runs; allowed: {', '.join(sorted(ALLOWED))}"
             )
         op_args = parse_op_args(args.args)
-        with Stores.open() as stores:
+        with Stores.open(args.coworld) as stores:
             kind = args.store or store_kind_for(op, op_args)
             record = _call(op, kind, stores, actor, op_args)
             seq = stores.by_kind(kind).last_seq()
@@ -276,7 +282,7 @@ def _call(
             role="orchestrator",
             actor=actor,
             workspace=stores.ws,
-            env={"IDE_WORKSPACE": str(stores.ws.root)},
+            env={"IDE_WORKSPACE": str(stores.ws.root), "IDE_COWORLD_ID": stores.coworld_id},
         )
         ctx.wstore, ctx.store = stores.wstore, store
         args = dict(op_args)
@@ -799,7 +805,7 @@ def _raise_keyboard_interrupt(signum: int, frame: object) -> None:
 
 def run_snapshot(args: argparse.Namespace) -> int:
     try:
-        with Stores.open() as stores:
+        with Stores.open(args.coworld) as stores:
             store = stores.by_kind(args.store)
             print(json.dumps(snapshot(store, stores.coworld_id), ensure_ascii=False))
     except StoreError as error:
@@ -850,7 +856,7 @@ def _record(spec: RecordSpec, row: Any) -> dict[str, Any]:
 
 def run_events(args: argparse.Namespace) -> int:
     try:
-        with Stores.open() as stores:
+        with Stores.open(args.coworld) as stores:
             store = stores.by_kind(args.store)
             return _print_events(store, args)
     except StoreError as error:
@@ -898,6 +904,9 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
             " directive_id must be W-2 (workspace) or D-2 (Goal)."
         ),
     )
+    apply_parser.add_argument(
+        "--coworld", default=None, help="Explicit Coworld for user or harness edits"
+    )
     apply_parser.add_argument("--actor", required=True, help="user:<id> or harness")
     apply_parser.add_argument(
         "--store",
@@ -912,7 +921,9 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
     export_parser = commands.add_parser(
         "export", help="Write every table of the workspace and Coworld stores as JSON lines"
     )
-    export_parser.add_argument("--coworld", default=None, help="A Coworld id; default: the active")
+    export_parser.add_argument(
+        "--coworld", default=None, help="A Coworld id; default: this session's binding"
+    )
     export_parser.add_argument("--out", required=True, help="The output directory")
     export_parser.set_defaults(run=run_export)
 
@@ -975,11 +986,17 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
     snapshot_parser = commands.add_parser(
         "snapshot", help="Print one store's records, settings, UI state and last seq as JSON"
     )
+    snapshot_parser.add_argument(
+        "--coworld", default=None, help="Coworld id; defaults to this session's binding"
+    )
     snapshot_parser.add_argument("--store", choices=STORE_KINDS, default="coworld")
     snapshot_parser.set_defaults(run=run_snapshot)
 
     events_parser = commands.add_parser(
         "events", help="Print one store's events after a seq as JSON lines; --follow tails"
+    )
+    events_parser.add_argument(
+        "--coworld", default=None, help="Coworld id; defaults to this session's binding"
     )
     events_parser.add_argument("--after", type=int, required=True, help="The last seq seen")
     events_parser.add_argument("--store", choices=STORE_KINDS, default="coworld")

@@ -14,12 +14,14 @@ from __future__ import annotations
 
 import importlib
 import json
+from dataclasses import replace
 from datetime import timedelta
 from typing import Any
 
+from research_core.store import coworlds
 from research_core.store._common import now_iso, parse_iso
 from research_core.watcher import wakes
-from research_core.watcher.context import TickContext
+from research_core.watcher.context import TickContext, _open_coworld_store
 
 HEARTBEAT_KEY = "heartbeat"
 HAS_WORK_KEY = "has_work"
@@ -33,7 +35,22 @@ def run(ctx: TickContext) -> dict[str, Any]:
     # The stamp goes first: it is the liveness signal, so a has-work failure cannot hide it.
     stamp = now_iso(lambda: ctx.now)
     ctx.set_meta(HEARTBEAT_KEY, stamp)
-    reasons = compute_work_reasons(ctx)
+    reasons = set(compute_work_reasons(ctx))
+    if ctx.coworld is not None and ctx.store is None:
+        reasons.add(f"store:{ctx.coworld.coworld_id}:schema_newer")
+    for registered in coworlds.list(ctx.wstore):
+        coworld = ctx.ws.coworld(registered["coworld_id"])
+        if ctx.coworld is not None and coworld.coworld_id == ctx.coworld.coworld_id:
+            continue
+        store = _open_coworld_store(coworld)
+        if store is None:
+            reasons.add(f"store:{coworld.coworld_id}:schema_newer")
+            continue
+        try:
+            reasons.update(compute_work_reasons(replace(ctx, coworld=coworld, store=store)))
+        finally:
+            store.close()
+    reasons = sorted(reasons)
     has_work = bool(reasons)
     ctx.set_meta(HAS_WORK_KEY, "1" if has_work else "0")
     ctx.set_meta(HAS_WORK_REASONS_KEY, json.dumps(reasons))

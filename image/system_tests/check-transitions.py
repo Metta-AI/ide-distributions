@@ -7,6 +7,8 @@ Run last: the system harness discards this container and fixture volume afterwar
 
 import json
 import os
+import time
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -33,6 +35,23 @@ def post(path, body):
         return json.load(response)
 
 
+def completed(result):
+    """Follow a durable receipt without resubmitting or changing its command identity."""
+    receipt = result["command"] if result.get("status") == "pending" else result
+    if receipt.get("transition_state") != "pending":
+        return receipt
+    command_id = receipt["command_id"]
+    deadline = time.monotonic() + 60
+    while receipt["transition_state"] == "pending":
+        assert time.monotonic() < deadline, receipt
+        time.sleep(0.1)
+        query = urlencode({"coworld_id": coworld.coworld_id, "command_id": command_id})
+        with urlopen("http://127.0.0.1:8650/command?" + query, timeout=30) as response:
+            receipt = json.load(response)
+        assert receipt["command_id"] == command_id, receipt
+    return receipt
+
+
 def status():
     with urlopen("http://127.0.0.1:8650/status", timeout=30) as response:
         return json.load(response)
@@ -48,10 +67,18 @@ with Store.open(ws.store_path, kind="workspace") as store:
     coworld = ws.coworld("transition-proof")
     coworld.ensure_dirs()
     coworlds.register(store, actor, coworld.coworld_id, folder=coworld.folder_name)
-    coworlds.activate(store, actor, coworld.coworld_id)
 
 opened = post(
-    "/session-open", {"op_id": str(uuid4()), "client": {"id": "packaged-proof", "kind": "test"}}
+    "/session-open",
+    {
+        "op_id": str(uuid4()),
+        "client": {"id": "packaged-proof", "kind": "test"},
+        "session_context": {
+            "contract_version": 1,
+            "scope": "coworld",
+            "coworld": coworld.coworld_id,
+        },
+    },
 )
 session_id = opened["session_id"]
 os.environ["IDE_SESSION_ID"] = session_id
@@ -62,7 +89,9 @@ args = {
     "description": "Verify stable tool intent and coordinator application",
     "operation_id": "packaged-proposal",
 }
-first = json.loads(registry.dispatch("task", args, session_id=session_id, task_id=session_id))
+first = completed(
+    json.loads(registry.dispatch("task", args, session_id=session_id, task_id=session_id))
+)
 assert first["ok"] and first["record"]["status"] == "proposed", first
 replay = json.loads(registry.dispatch("task", args, session_id=session_id, task_id=session_id))
 assert replay == first, (first, replay)
@@ -85,9 +114,11 @@ approved = post(
     {
         "actor": str(actor),
         "op": "tasks.approve",
+        "coworld": coworld.coworld_id,
         "args": {"task_id": record["id"], "operation_id": "approve-proof"},
     },
 )
+approved = completed(approved)
 assert approved["record"]["status"] == "unclaimed", approved
 
 # Fixture-backed worker authority: a queued attempt, not an accepted native/model run.
@@ -155,6 +186,7 @@ report_args = {
 reported = json.loads(
     registry.dispatch("task", report_args, session_id=worker_id, task_id=worker_id)
 )
+reported = completed(reported)
 assert reported["ok"] and reported["record"]["waiting_on"]["kind"] == "user", reported
 report_replay = json.loads(
     registry.dispatch("task", report_args, session_id=worker_id, task_id=worker_id)
@@ -200,7 +232,17 @@ with (
 final = status()
 assert final["coordinator_instance"] == owner and final["sleep_started"] is None, final
 with Store.open(coworld.store_path, kind="coworld") as store:
-    assert store.one("SELECT count(*) FROM tasks")[0] == 1
+    fixture_tasks = store.q("SELECT id FROM tasks WHERE title=?", (args["title"],))
+    assert [row["id"] for row in fixture_tasks] == [task_id]
+    background_tasks = store.q(
+        "SELECT type,capability,created_by FROM tasks WHERE id!=?", (task_id,)
+    )
+    assert all(
+        row["type"] == "maintenance"
+        and row["capability"] is not None
+        and row["created_by"] == "harness"
+        for row in background_tasks
+    ), [dict(row) for row in background_tasks]
     commands = store.q("SELECT * FROM transition_commands")
     assert len(commands) == 3 and all(row["completed_at"] for row in commands)
     owners = {row["owner_instance"] for row in commands}
@@ -211,7 +253,8 @@ print(
         {
             "proof": "packaged_transition_commands",
             "commands": len(commands),
-            "tasks": 1,
+            "fixture_tasks": len(fixture_tasks),
+            "background_tasks": len(background_tasks),
             "owner_instances": sorted(owners),
             "replay": "same result",
             "payload_conflict": "refused",

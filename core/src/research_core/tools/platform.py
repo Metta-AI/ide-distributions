@@ -221,7 +221,7 @@ def _policy_file_identities(ctx: ToolContext) -> tuple[Identity, ...]:
 
 
 def results(call: ToolCall, platform: Platform) -> dict:
-    """A Player's standing rows and memberships, per league (the active Coworld's leagues when
+    """A Player's standing rows and memberships, per league (the session Coworld's leagues when
     none is named)."""
     player = _id(call.get("player")) or _this_player(call, platform)
     league_id = _id(call.get("league"))
@@ -403,11 +403,11 @@ def wiki_history(call: ToolCall, platform: Platform) -> dict:
 
 
 def _default_forum_slug(call: ToolCall, platform: Platform) -> str:
-    """The forum of the active Coworld's first league (from its ``forum_markdown_url``)."""
+    """The forum of the session Coworld's first league (from its ``forum_markdown_url``)."""
     for row in _coworld_leagues(call, platform):
         if row.forum_markdown_url:
             return row.forum_markdown_url.rstrip("/").rsplit("/", 1)[-1].removesuffix(".md")
-    raise ToolError("slug is required: no league of the active Coworld names a forum")
+    raise ToolError("slug is required: no league of the session Coworld names a forum")
 
 
 # --- helpers ------------------------------------------------------------------------------
@@ -437,7 +437,7 @@ def _this_player(call: ToolCall, platform: Platform) -> str:
 
 
 def _coworld_leagues(call: ToolCall, platform: Platform) -> list:
-    """The leagues of the active Coworld, or every league when none names it."""
+    """The leagues of the session Coworld, or every league when none names it."""
     rows = _call(call, "GET /v2/leagues", platform.leagues)
     coworld_id = call.ctx.coworld().coworld_id
     mine = [row for row in rows if row.coworld_id == coworld_id]
@@ -581,7 +581,7 @@ SPEC = tool(
             ),
             ActionSpec(
                 "forum_list",
-                "List forum posts (the active Coworld's league forum by default).",
+                "List forum posts (the session Coworld's league forum by default).",
                 {
                     "slug": a.string("The forum slug."),
                     "sort": a.string("Default hot.", enum=["hot", "new"]),

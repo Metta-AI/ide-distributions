@@ -100,9 +100,8 @@ def repair_unopenable(env: Mapping[str, str]) -> list[dict[str, Any]]:
     repaired: list[dict[str, Any]] = []
     wstore = _open_or_rebuild(ws.store_path, "workspace", WORKSPACE_LABEL, repaired)
     try:
-        active = coworlds.active(wstore)
-        if active is not None:
-            coworld = ws.coworld(active["coworld_id"])
+        for registered in coworlds.list(wstore):
+            coworld = ws.coworld(registered["coworld_id"])
             if coworld.store_path.exists():
                 _open_or_rebuild_coworld(wstore, coworld, repaired)
         for entry in repaired:
@@ -275,6 +274,7 @@ def _report_unmarked(
     notices.add(
         ctx.wstore,
         ctx.actor,
+        coworld_id=ctx.coworld.coworld_id if ctx.coworld else None,
         text=(
             f"{len(changes)} write(s) to the {_describe(label)} store were made outside the"
             f" tools (tables: {', '.join(tables)}). Rows written that way skip validation and"

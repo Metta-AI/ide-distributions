@@ -21,6 +21,7 @@ def test_add_records_a_notice_and_an_event(workspace_store, session_actor):
     )
     assert record == {
         "id": "N-1",
+        "coworld_id": None,
         "text": "V-7 was submitted to league_1",
         "refs": ["V-7"],
         "urgency": "low",
@@ -34,7 +35,12 @@ def test_add_records_a_notice_and_an_event(workspace_store, session_actor):
         (
             "notice",
             "N-1",
-            {"text": "V-7 was submitted to league_1", "refs": ["V-7"], "urgency": "low"},
+            {
+                "text": "V-7 was submitted to league_1",
+                "refs": ["V-7"],
+                "urgency": "low",
+                "coworld_id": None,
+            },
         )
     ]
     assert workspace_store.unmarked_changes() == []

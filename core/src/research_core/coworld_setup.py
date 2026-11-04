@@ -1,10 +1,10 @@
 """Coworld switching, source fetch, mixin import and lesson import (design B.11, B.14, D.2, D.4).
 
-``switch`` is what ``workspace.coworld_switch`` and ``research coworld switch`` run: it makes a
-Coworld the active one in the registry, prepares its folder and code repository, fetches its
-source and mixin when it was never set up, emits ``coworld.setup_needed`` for the setup wake,
-and points every profile's skill directories, trusted directory and terminal at the Coworld
-(amendments A4.8, A5.9, A6.3). ``fetch`` clones the release-pinned source once, copies the
+``switch`` sets up the Coworld already bound to the current session. It prepares its folder
+and code repository, fetches its source and mixin, and emits ``coworld.setup_needed``.
+Profile-wide configuration contains only shared skills and a neutral working directory;
+game skills and terminals are scoped by the session. ``fetch`` clones the pinned source and copies
+the
 mixin into ``code/mixin/`` with the Coworld name prefixed to each skill (so a repository's
 ``survey`` never shadows the core ``survey``), installs declared toolchains and imports the
 seed claims and lessons as Claims with ``doc`` evidence (D.4). A mixin that declares another
@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 from urllib.parse import urlsplit
 
 import research_core
-from research_core import environment_guide, gitops, layout, mixin, prepare
+from research_core import gitops, layout, mixin, prepare
 from research_core.locks import file_lock
 from research_core.platform.errors import PlatformError
 from research_core.store import claims, coworlds, events, notices
@@ -64,17 +64,12 @@ def switch(
     source: str | None = None,
     commit: str | None = None,
     pending_request: dict[str, Any] | None = None,
-    drain: Callable[[], Any] | None = None,
 ) -> dict[str, Any]:
-    """Make ``coworld_id`` the active Coworld and start its setup when it needs one.
+    """Set up ``coworld_id`` only when it matches the session's immutable Coworld.
 
-    In order: ``drain()`` when the watcher supplies one (Researcher runs stop and resume after
-    the switch); register and activate the registry row; create the folder and the code
-    repository (``main`` with an empty first commit); when the Coworld was never set up, store
-    ``pending_request``, ``fetch`` the source and mixin and emit ``coworld.setup_needed`` unless
-    one is already waiting for the watcher; apply the profile config; and with ``cites`` (a
-    user's request) add the notice that running work pauses. ``source`` and ``commit`` override
-    the platform manifest (tests, private repositories).
+    Register the Coworld without activating a workspace selection, initialize its repository,
+    fetch missing source and mixin, and emit the setup wake once. Other sessions keep running.
+    ``source`` and ``commit`` override the manifest for local repositories and tests.
     """
     try:
         folder = layout.folder_name_for(coworld_id)
@@ -83,15 +78,14 @@ def switch(
     if pending_request is not None and not isinstance(pending_request, dict):
         raise ToolError("pending_request must be an object such as {text, cites}")
     result: dict[str, Any] = {"coworld_id": coworld_id}
-    if drain is not None:
-        result["drained"] = drain()
 
     wstore, actor = ctx.wstore, ctx.actor
-    previous = coworlds.active(wstore)
+    bound = ctx.coworld()
+    if coworld_id != bound.coworld_id:
+        raise ToolError("a session's Coworld cannot change; open a new session")
     coworlds.register(wstore, actor, coworld_id, folder=folder)
-    row = coworlds.activate(wstore, actor, coworld_id)
+    row = coworlds.read(wstore, coworld_id)
     _forget_coworld_store(ctx)
-    result["switched_from"] = None if previous is None else previous["coworld_id"]
 
     coworld = ctx.workspace.coworld(coworld_id)
     coworld.ensure_dirs()
@@ -102,15 +96,14 @@ def switch(
     if pending_request is not None:
         row = coworlds.set_pending_request(wstore, actor, coworld_id, pending_request)
     result["setup"] = _setup_step(ctx, coworld, row, cites=cites, source=source, commit=commit)
-    result["profile_config"] = apply_profile_config(
-        ctx, coworld, mixin_skills_dir=coworld.mixin / "skills"
-    )
+    result["profile_config"] = apply_profile_config(ctx)
     result["skill_overrides"] = record_skill_overrides(coworld.code)
     if cites:
         notice = notices.add(
             wstore,
             actor,
-            text=f"Switching to {coworld_id}; running work pauses and resumes on switching back.",
+            coworld_id=coworld_id,
+            text=f"Setting up {coworld_id} for this session.",
             refs=[cites],
         )
         result["notice"] = notice["id"]
@@ -166,15 +159,15 @@ def pending_setup_seq(wstore: Store, coworld_id: str) -> int | None:
 
 
 def _forget_coworld_store(ctx: ToolContext) -> None:
-    """The active Coworld changed: drop the context's cached Coworld store (a cached_property)."""
+    """Drop the cached store before setting up this session's Coworld."""
     store = ctx.__dict__.pop("store", None)
     if store is not None:
         store.close()
 
 
 def _coworld_store(ctx: ToolContext, coworld: Coworld) -> Store:
-    active = coworlds.active(ctx.wstore)
-    if active is not None and active["coworld_id"] == coworld.coworld_id:
+    bound = ctx.coworld_or_none()
+    if bound is not None and bound.coworld_id == coworld.coworld_id:
         return ctx.store
     return Store.open(coworld.store_path, kind="coworld")
 
@@ -646,19 +639,12 @@ def _relative(file: Path, root: Path) -> str:
 # --- profile config (A5.9) -------------------------------------------------------------------
 
 
-def apply_profile_config(
-    ctx: ToolContext, coworld: Coworld, *, mixin_skills_dir: Path, run: Runner = subprocess.run
-) -> dict[str, Any]:
-    """Point every profile at the active Coworld: ``skills.external_dirs`` (core common, core
-    role, the mixin's skills), ``skills.trusted_project_dirs`` and ``terminal.cwd`` (the code
-    repository), in this profile and every ``IDE_RESEARCHER_PROFILES`` sibling (A5.9).
+def apply_profile_config(ctx: ToolContext, *, run: Runner = subprocess.run) -> dict[str, Any]:
+    """Keep shared profile configuration neutral; game skills are listed by session.
 
-    Uses ``prepare.HermesCli`` (``hermes config get|set`` with ``HERMES_HOME`` per profile).
-    Without ``HERMES_HOME`` (tests, a bare CLI run) nothing is changed and the note says so.
-    Defers to ``prepare.apply_skill_dirs`` once a later preparation module provides it.
+    Existing game roots are trusted projects. Each task's terminal cwd is bound by the plugin.
     """
     env = ctx.env
-    code_dir = coworld.code
     if not env.get("HERMES_HOME"):
         return {"applied": [], "problems": [], "note": "HERMES_HOME is not set; skipped"}
     hermes = env.get("HERMES_BIN") or shutil.which("hermes")
@@ -666,58 +652,12 @@ def apply_profile_config(
         note = "hermes executable not found (set HERMES_BIN or put hermes on PATH); skipped"
         return {"applied": [], "problems": [], "note": note}
     profile_home = Path(env["HERMES_HOME"])
-    upstream = getattr(prepare, "apply_skill_dirs", None)
-    if upstream is not None:
-        return upstream(
-            profile_home,
-            hermes,
-            mixin_skills_dir=mixin_skills_dir,
-            code_dir=code_dir,
-            env=env,
-            run=run,
-        )
-    core_src = _core_src(env)
-    applied: list[str] = []
-    problems: list[str] = []
-    for profile, role in _profile_targets(profile_home, ctx.role, env):
-        if not profile.is_dir():
-            problems.append(f"profile {profile.name}: no profile home at {profile}")
-            continue
-        cli = prepare.HermesCli(hermes, profile, env, run)
-        desired = {
-            "skills.external_dirs": [
-                *prepare.skill_dirs_for(core_src, role),
-                str(mixin_skills_dir),
-            ],
-            "skills.trusted_project_dirs": [str(code_dir)],
-            "terminal.cwd": str(code_dir),
-        }
-        try:
-            for key, value in desired.items():
-                if cli.config_get(key) != value:
-                    cli.config_set(key, value)
-                    applied.append(f"{profile.name}: set {key}")
-        except prepare.PrepareError as error:
-            problems.append(f"profile {profile.name}: {error}")
-    return {"applied": applied, "problems": problems}
-
-
-def _profile_targets(profile_home: Path, role: str, env) -> list[tuple[Path, str]]:
-    names = [n.strip() for n in (env.get("IDE_RESEARCHER_PROFILES") or "researcher").split(",")]
-    siblings = [profile_home.parent / n for n in names if n]
-    targets = [(profile_home, role)]
-    targets += [(p, "researcher") for p in siblings if p.resolve() != profile_home.resolve()]
-    return targets
-
-
-def _core_src(env) -> Path:
-    checkout = environment_guide.core_checkout(env)
-    if checkout is not None:
-        return checkout / "core" / "src"
-    return Path(research_core.__file__).resolve().parents[1]
-
-
-# --- skill overrides (A7.3) ------------------------------------------------------------------
+    return prepare.apply_skill_dirs(
+        profile_home,
+        hermes,
+        env=env,
+        run=run,
+    )
 
 
 def core_skill_sha(name: str) -> str | None:
@@ -767,15 +707,15 @@ def record_skill_overrides(code: Path) -> list[dict[str, Any]]:
 
 
 def setup_status(ctx: ToolContext) -> dict[str, Any]:
-    """Where the active Coworld's setup stands: the registry row, source and mixin presence,
+    """Where the session's Coworld's setup stands: the registry row, source and mixin presence,
     the declared commands, capability status and the pending request."""
     from research_core.store import capabilities
 
-    row = coworlds.active(ctx.wstore)
+    row = coworlds.read(ctx.wstore, ctx.coworld().coworld_id)
     if row is None:
         return {
             "coworld": None,
-            "note": "no active Coworld; workspace.coworld_switch or research coworld switch",
+            "note": "no session's Coworld; workspace.coworld_switch or research coworld switch",
         }
     coworld = ctx.workspace.coworld(row["coworld_id"])
     return {
