@@ -1,6 +1,7 @@
 """One owner for normal completion, missed facts, continuation and crash handoffs."""
 
 import json
+from types import SimpleNamespace
 
 import pytest
 
@@ -9,7 +10,12 @@ from research_core.coordinator import Coordinator
 from research_core.store import admissions, events, sessions, tasks
 from research_core.store.actors import Actor
 from research_core.watcher import wakes
-from research_core.watcher.hermes_api import RunsUnavailable
+from research_core.watcher.hermes_api import (
+    FakeHermesRuns,
+    HermesRuns,
+    RunsAuthError,
+    RunsUnavailable,
+)
 from tests.watcher._support import (
     HARNESS,
     coordinator,
@@ -428,3 +434,88 @@ def test_open_receipt_is_not_a_completed_execution_attempt(tmp_path):
     coordinator(ctx).advance_attempts(ctx)
     assert sessions.read(ctx.wstore, "new-chat")["ended"] is None
     assert ctx.wstore.one("SELECT advanced_at FROM client_admissions")[0] is None
+
+
+def test_malformed_accepted_start_replays_its_original_identity(tmp_path):
+    class MalformedReply(FakeHermesRuns):
+        start = HermesRuns.start
+        malformed = True
+
+        def _request(self, method, profile, path, *, body, headers):
+            assert (method, path) == ("POST", "/v1/runs")
+            run_id = FakeHermesRuns.start(
+                self,
+                profile=profile,
+                session_id=body["session_id"],
+                text=body["input"],
+                idempotency_key=headers["Idempotency-Key"],
+            )
+            payload = {} if self.malformed else {"run_id": run_id}
+            return SimpleNamespace(status=202, payload=payload)
+
+    ctx = make_ctx(tmp_path)
+    ctx.hermes = MalformedReply()
+    row = assigned(ctx)
+    owner = coordinator(ctx)
+    assert row["status"] == "queued" and row["dispatch_started"] == 1
+    assert row["run_id"] is None
+    for _ in range(3):
+        owner.advance_attempts(ctx)
+        owner.finish_assignments(ctx.wstore)
+        dispatch_inputs(ctx)
+    assert len(ctx.hermes.runs) == 1
+    assert ctx.wstore.one("SELECT count(*) FROM client_admissions")[0] == 1
+    assert ctx.wstore.one("SELECT count(*) FROM task_assignments")[0] == 1
+    assert tasks.read(ctx.store, 1)["held_by"] == row["session_id"]
+    ctx.hermes.malformed = False
+    dispatch_inputs(ctx)
+    recovered = ctx.wstore.one("SELECT * FROM client_admissions WHERE op_id=?", (row["op_id"],))
+    assert recovered["status"] == "running"
+    assert recovered["run_id"] == next(iter(ctx.hermes.runs))
+    assert len(ctx.hermes.runs) == 1
+
+
+def test_definitely_rejected_worker_messages_get_immutable_redelivery(tmp_path):
+    class RejectedSteer(FakeHermesRuns):
+        reject = True
+
+        def steer(self, run_id, text, *, profile):
+            if self.reject:
+                raise RunsAuthError("Credentials rejected", status=403)
+            return super().steer(run_id, text, profile=profile)
+
+    ctx = make_ctx(tmp_path)
+    ctx.hermes = RejectedSteer()
+    initial = assigned(ctx)
+    owner = coordinator(ctx)
+    tasks.message(ctx.store, HARNESS, 1, text="Preserve this message", direction="to_researcher")
+    rejected = []
+    for _ in range(2):
+        for _ in range(3):
+            owner.advance_attempts(ctx)
+            owner.deliver_worker_messages(ctx)
+        dispatch_inputs(ctx)
+        [attempt] = ctx.wstore.q(
+            "SELECT * FROM client_admissions WHERE status='failed' AND advanced_at IS NULL"
+        )
+        assert attempt["dispatch_started"] == 0
+        rejected.append(attempt)
+    ctx.hermes.reject = False
+    for _ in range(3):
+        owner.advance_attempts(ctx)
+        owner.deliver_worker_messages(ctx)
+    dispatch_inputs(ctx)
+    dispatch_inputs(ctx)
+    assert not tasks.pending_messages(ctx.store, 1, "to_researcher")
+    assert len(ctx.hermes.runs) == 1
+    assert len(ctx.hermes.steered[initial["run_id"]]) == 1
+    assert "Preserve this message" in ctx.hermes.steered[initial["run_id"]][0]
+    assert ctx.wstore.one("SELECT count(*) FROM client_admissions")[0] == 4
+    for attempt in rejected:
+        current = ctx.wstore.one(
+            "SELECT * FROM client_admissions WHERE op_id=?", (attempt["op_id"],)
+        )
+        assert current["status"] == "failed"
+        assert current["payload"] == attempt["payload"]
+        assert current["native_key"] == attempt["native_key"]
+        assert current["run_id"] is None

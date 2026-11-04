@@ -266,7 +266,7 @@ def test_start_with_no_run_id_in_the_answer_is_an_error(gateway, client):
     gateway.answer(202, {"status": "started"})
     with pytest.raises(RunsError) as info:
         client.start(profile="researcher", session_id="s", text="t")
-    assert info.value.retryable is False
+    assert info.value.retryable is True
 
 
 def test_unexpected_server_error_is_retryable_runs_error(gateway, client):

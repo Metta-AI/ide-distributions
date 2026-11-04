@@ -294,11 +294,13 @@ class HermesRuns:
         response = self._request("POST", profile, "/v1/runs", body=body, headers=headers)
         run_id = response.payload.get("run_id") if isinstance(response.payload, dict) else None
         if not run_id:
+            # A successful response may follow acceptance. Recover its receipt with the
+            # original durable key rather than authorizing a replacement execution.
             raise RunsError(
                 f"run started but no run_id in the response: {response.payload!r}"[:DETAIL_LIMIT],
                 route=f"POST /p/{profile}/v1/runs",
                 status=response.status,
-                retryable=False,
+                retryable=True,
             )
         return str(run_id)
 

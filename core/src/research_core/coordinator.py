@@ -1038,6 +1038,19 @@ class Coordinator:
             "SELECT * FROM client_admissions WHERE profile=? AND native_key=?",
             (session["profile"], key),
         )
+        # A definite rejection leaves the original delivery immutable. Its replacement
+        # gets a new identity, while accepted or uncertain deliveries retain their reservation.
+        while (
+            previous is not None
+            and previous["status"] in {"failed", "interrupted", "cancelled"}
+            and not previous["dispatch_started"]
+            and not previous["cancel_requested"]
+        ):
+            key = f"redelivery:{previous['op_id']}"
+            previous = ctx.wstore.one(
+                "SELECT * FROM client_admissions WHERE profile=? AND native_key=?",
+                (session["profile"], key),
+            )
         if previous is None:
             admissions.enqueue(
                 ctx.wstore,

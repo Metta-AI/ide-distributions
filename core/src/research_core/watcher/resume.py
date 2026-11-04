@@ -56,7 +56,8 @@ def _pending_message_block(ctx: TickContext, session: dict[str, Any]) -> tuple[s
     reserved = set()
     for row in ctx.wstore.q(
         "SELECT a.delivery_ids FROM client_admissions a JOIN sessions s ON s.id=a.session_id"
-        " WHERE s.coworld_id=? AND s.task_id=? AND a.delivery_ids!='[]'",
+        " WHERE s.coworld_id=? AND s.task_id=? AND a.delivery_ids!='[]'"
+        " AND (a.status IN ('queued','running') OR a.dispatch_started=1)",
         (session["coworld_id"], session["task_id"]),
     ):
         reserved.update(json.loads(row["delivery_ids"]))
