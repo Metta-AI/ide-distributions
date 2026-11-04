@@ -420,7 +420,7 @@ def test_platform_down_puts_the_held_task_on_wait(call, ctx_factory, workspace_e
     assert other["context"]["waiting"] is False
 
 
-@pytest.mark.parametrize("kind", ["transition_pending", "transition_refused", "transition_failed"])
+@pytest.mark.parametrize("kind", ["transition_pending", "transition_refused"])
 def test_platform_failure_does_not_claim_wait_when_command_is_unapplied(
     tmp_path, monkeypatch, kind
 ):
@@ -436,7 +436,13 @@ def test_platform_failure_does_not_claim_wait_when_command_is_unapplied(
         role="researcher", actor=Actor.session(row["session_id"]), workspace=tick.ws, env=tick.env
     )
     ctx.store, ctx.wstore = tick.store, tick.wstore
-    result = {"kind": kind, "command_id": "wait", "ok": False, "error": "Unavailable"}
+    result = {
+        "kind": kind,
+        "command_id": "wait",
+        "ok": False,
+        "error": "Unavailable",
+        "transition_state": kind.removeprefix("transition_"),
+    }
     monkeypatch.setattr(task, "dispatch", lambda call: result)
     error = PlatformError("Platform unavailable", status=503)
     context = wait._wait_on_platform(ctx, "credits", error)

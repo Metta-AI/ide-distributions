@@ -8,9 +8,10 @@ CREATE TABLE transition_commands (
     actor_epoch INTEGER,
     issuer_attempt_id TEXT,
     created_at TEXT NOT NULL,
-    deadline TEXT NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0,
     owner_instance TEXT,
+    last_error TEXT,
+    retry_at TEXT,
     result TEXT,
     completed_at TEXT,
     CHECK((result IS NULL) = (completed_at IS NULL))

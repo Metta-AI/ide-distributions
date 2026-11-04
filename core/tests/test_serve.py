@@ -1221,3 +1221,46 @@ with ownership(ws):
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "dispatcher error propagated; owner released" in result.stdout
+
+
+def test_pending_edit_has_accepted_http_status_and_readable_terminal_receipt(tmp_path, monkeypatch):
+    from research_core import transitions
+
+    ctx = make_ctx(tmp_path)
+    record = tasks.create(ctx.store, HARNESS, type="maintenance", title="Before", description="Fix")
+    server = SeamServer(ws=ctx.workspace, hermes=FakeHermesRuns(), env=dict(ctx.env))
+    apply_commands = server.coordinate_once
+    monkeypatch.setattr(server, "coordinate_once", lambda: None)
+    monkeypatch.setattr(transitions, "REQUEST_WAIT_SECONDS", 0)
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        request = urllib.request.Request(
+            server.url + "/store/apply",
+            method="POST",
+            headers={"Content-Type": "application/json"},
+            data=json.dumps(
+                {
+                    "actor": "user:local",
+                    "op": "tasks.update",
+                    "args": {"task_id": record["id"], "title": "After", "operation_id": "edit"},
+                }
+            ).encode(),
+        )
+        with urllib.request.urlopen(request, timeout=5) as response:
+            assert response.status == 202
+            pending = json.load(response)
+        assert pending["status"] == "pending" and "ok" not in pending and "record" not in pending
+        apply_commands()
+        url = (
+            f"{server.url}/command?coworld_id={COWORLD_ID}"
+            f"&command_id={pending['command']['command_id']}"
+        )
+        with urllib.request.urlopen(url, timeout=5) as response:
+            result = json.load(response)
+        assert result["transition_state"] == "applied" and result["record"]["title"] == "After"
+    finally:
+        server.shutdown()
+        thread.join(5)
+        ctx.store.close()
+        ctx.wstore.close()

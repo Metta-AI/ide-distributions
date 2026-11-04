@@ -103,11 +103,13 @@ def _wait_on_platform(ctx: ToolContext, route: str, error: PlatformError) -> dic
         return {"waiting": False}
     status = error.status if error.status is not None else "unreachable"
     try:
-        from uuid import uuid4
-
         from research_core.tools import task
         from research_core.tools.base import ToolCall
 
+        resolved = ctx.store.one(
+            "SELECT COALESCE(MAX(seq),0) FROM events WHERE kind='task.wait_resolved' AND subject=?",
+            (f"T-{task_id}",),
+        )[0]
         result = task.dispatch(
             ToolCall(
                 spec=task.SPEC,
@@ -119,11 +121,17 @@ def _wait_on_platform(ctx: ToolContext, route: str, error: PlatformError) -> dic
                     "kind": "platform",
                     "detail": f"{route} {status}",
                     "ref": error.request_id,
-                    "operation_id": f"platform:{error.request_id or uuid4()}",
+                    "operation_id": (
+                        f"platform:{error.request_id}"
+                        if error.request_id is not None
+                        else f"platform:{task_id}:{route}:{status}:{resolved}"
+                    ),
                 },
             )
         )
-        if result.get("kind") == "transition_pending" or result.get("ok") is False:
+        from research_core.transitions import CommandReceipt
+
+        if "transition_state" in result and CommandReceipt.parse(result).state != "applied":
             return {"waiting": False, "transition": result}
 
     except (StoreError, ToolError) as problem:

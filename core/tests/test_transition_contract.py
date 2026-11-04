@@ -24,8 +24,8 @@ class Crash(BaseException):
 def command(ctx, command_id="command-1"):
     with ctx.store.tx(Actor.session("planner")) as tx:
         tx.execute(
-            "INSERT INTO transition_commands(id,tool,args,role,actor,created_at,deadline)"
-            " VALUES (?, 'task', ?, 'orchestrator', 'session:planner', ?, '2099-01-01T00:00:00Z')",
+            "INSERT INTO transition_commands(id,tool,args,role,actor,created_at)"
+            " VALUES (?, 'task', ?, 'orchestrator', 'session:planner', ?)",
             (
                 command_id,
                 json.dumps(
@@ -276,8 +276,8 @@ def test_queued_claim_preserves_worker_profile_under_orchestrator_environment(tm
     ctx.env = {"HERMES_PROFILE_NAME": "orchestrator", "IDE_ROLE": "orchestrator"}
     with ctx.store.tx(Actor.session(row["session_id"])) as tx:
         tx.execute(
-            "INSERT INTO transition_commands(id,tool,args,role,actor,created_at,deadline)"
-            " VALUES ('claim','task',?,'researcher',?,?,'2099-01-01T00:00:00Z')",
+            "INSERT INTO transition_commands(id,tool,args,role,actor,created_at)"
+            " VALUES ('claim','task',?,'researcher',?,?)",
             (
                 json.dumps({"action": "claim", "task": "T-1", "operation_id": "claim"}),
                 str(Actor.session(row["session_id"])),
@@ -315,8 +315,8 @@ def test_workspace_effect_survives_lost_cross_store_acknowledgment(tmp_path, mon
         actor, role = Actor.session(row["session_id"]), "researcher"
     with ctx.store.tx(actor) as tx:
         tx.execute(
-            "INSERT INTO transition_commands(id,tool,args,role,actor,created_at,deadline)"
-            " VALUES ('cross-store','task',?,?,?,?,'2099-01-01T00:00:00Z')",
+            "INSERT INTO transition_commands(id,tool,args,role,actor,created_at)"
+            " VALUES ('cross-store','task',?,?,?,?)",
             (json.dumps(args), role, str(actor), tx.at),
         )
     original = db.Tx.__exit__
@@ -340,7 +340,7 @@ def test_workspace_effect_survives_lost_cross_store_acknowledgment(tmp_path, mon
             owner.finish_assignments(ctx.wstore)
         assert not ctx.wstore.q("SELECT * FROM task_assignments")
     with ctx.store.tx(Actor.harness()) as tx:
-        tx.execute("UPDATE transition_commands SET attempts=3,deadline='2000-01-01T00:00:00Z'")
+        tx.execute("UPDATE transition_commands SET attempts=3")
     transitions.apply(ctx, "coordinator:replacement")
     result = transitions.receipt(ctx.store, "cross-store")
     assert result["ok"]
@@ -832,6 +832,9 @@ def test_accepted_worker_report_survives_exit_before_application(tmp_path, monke
     assert command_row["issuer_attempt_id"] == row["op_id"]
     assert command_row["actor_epoch"] == epoch
     ctx.hermes.complete(row["run_id"])
+    ctx.clock.advance(
+        3600
+    )  # Accepted reports survive coordinator downtime before first application.
     owner.reconcile()
     owner.advance_attempts(ctx)
     assert (
@@ -920,3 +923,114 @@ def test_release_retirement_serializes_with_worker_report_acceptance(
     owner.finish_assignments(ctx.wstore)
     assert not ctx.wstore.one("SELECT 1 FROM task_assignments")
     assert tasks.read(ctx.store, 1)["status"] == "unclaimed"
+
+
+def test_expected_command_refusal_rolls_back_and_does_not_block_next_command(tmp_path, monkeypatch):
+    from research_core.tools import task
+
+    ctx = make_ctx(tmp_path)
+    command(ctx, "bad")
+    command(ctx, "good")
+    bad = json.loads(ctx.store.one("SELECT args FROM transition_commands WHERE id='bad'")[0])
+    bad["title"] = "Bad"
+    with ctx.store.tx(Actor.harness()) as tx:
+        tx.execute("UPDATE transition_commands SET args=? WHERE id='bad'", (json.dumps(bad),))
+    execute = task.execute
+
+    def refuse_after_write(call):
+        if call.args["title"] == "Bad":
+            tasks.create(
+                ctx.store, call.ctx.actor, type="maintenance", title="Partial", description="No"
+            )
+            raise ToolError("Expected refusal")
+        return execute(call)
+
+    monkeypatch.setattr(task, "execute", refuse_after_write)
+    transitions.apply(ctx, "coordinator:test")
+    assert (
+        transitions.CommandReceipt.parse(transitions.receipt(ctx.store, "bad")).state == "refused"
+    )
+    assert (
+        transitions.CommandReceipt.parse(transitions.receipt(ctx.store, "good")).state == "applied"
+    )
+    assert [row["title"] for row in ctx.store.q("SELECT title FROM tasks")] == ["Repair"]
+
+
+def test_unexpected_command_failure_propagates_and_retains_durable_retry(tmp_path, monkeypatch):
+    from research_core.tools import task
+
+    ctx = make_ctx(tmp_path)
+    command(ctx)
+
+    def crash(call):
+        raise RuntimeError("Storage boundary failure")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(task, "execute", crash)
+        with pytest.raises(RuntimeError, match="Storage boundary failure"):
+            transitions.apply(ctx, "coordinator:crashed")
+    pending = transitions.receipt(ctx.store, "command-1")
+    assert (
+        pending["transition_state"] == "pending" and "Storage boundary failure" in pending["reason"]
+    )
+    ctx.clock.advance(3600)
+    transitions.apply(ctx, "coordinator:replacement")
+    assert transitions.receipt(ctx.store, "command-1")["transition_state"] == "applied"
+
+
+def test_repeated_capability_failures_coalesce_until_repair(tmp_path, monkeypatch):
+    from research_core.store import capabilities
+
+    ctx = make_ctx(tmp_path)
+    monkeypatch.setattr(transitions, "REQUEST_WAIT_SECONDS", 0)
+    worker = ToolContext(role="researcher", actor=Actor.session("worker"), workspace=ctx.ws, env={})
+    worker.store, worker.wstore = ctx.store, ctx.wstore
+    first = transitions.report_capability(worker, "build", output="First failure", command="build")
+    for i in range(10):
+        repeated = transitions.report_capability(
+            worker, "build", output=f"Retry {i}", command="build"
+        )
+        assert repeated["transition"]["command_id"] == first["transition"]["command_id"]
+    assert ctx.store.one("SELECT count(*) FROM transition_commands")[0] == 1
+    transitions.apply(ctx, "coordinator:test")
+    repair = ctx.store.one("SELECT maintenance_task_id FROM capabilities WHERE name='build'")[0]
+    tasks.abandon(
+        ctx.store,
+        Actor.harness(),
+        repair,
+        failure={"what_failed": "Repair failed", "next_step": "Retry repair"},
+    )
+    retry = transitions.report_capability(worker, "build", output="Still broken", command="build")
+    assert retry["transition"]["command_id"] != first["transition"]["command_id"]
+    transitions.apply(ctx, "coordinator:test")
+    assert ctx.store.one("SELECT count(*) FROM tasks")[0] == 2
+    capabilities.mark(ctx.store, Actor.harness(), "build", status="ok", output="Repaired")
+    second = transitions.report_capability(
+        worker, "build", output="New failure after repair", command="build"
+    )
+    assert second["transition"]["command_id"] != first["transition"]["command_id"]
+    assert ctx.store.one("SELECT count(*) FROM transition_commands")[0] == 3
+
+
+def test_coordinator_faults_never_expire_an_accepted_command(tmp_path, monkeypatch):
+    from research_core.tools import task
+
+    ctx = make_ctx(tmp_path)
+    command(ctx)
+
+    def fail(call):
+        raise RuntimeError("Coordinator fault")
+
+    with monkeypatch.context() as patch:
+        patch.setattr(task, "execute", fail)
+        for _ in range(5):
+            with pytest.raises(RuntimeError, match="Coordinator fault"):
+                transitions.apply(ctx, "coordinator:restarting")
+            assert transitions.receipt(ctx.store, "command-1")["transition_state"] == "pending"
+            ctx.clock.advance(86400)
+    transitions.apply(ctx, "coordinator:healthy")
+    result = transitions.receipt(ctx.store, "command-1")
+    assert result["transition_state"] == "applied"
+    assert ctx.store.one("SELECT count(*) FROM tasks")[0] == 1
+    transitions.apply(ctx, "coordinator:healthy")
+    assert transitions.receipt(ctx.store, "command-1") == result

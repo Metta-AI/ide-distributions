@@ -66,6 +66,10 @@ UNWATCHED_KINDS: frozenset[str] = frozenset(
     {
         "session.dead",
         "task.stuck",
+        "transition.requested",
+        "transition.applied",
+        "transition.refused",
+        "transition.retry_waiting",
         "execution.queued",
         "execution.admitted",
         "task.assigned",

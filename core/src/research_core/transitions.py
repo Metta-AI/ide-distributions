@@ -8,12 +8,12 @@ Stdlib only, because submit runs inside the pinned native interpreter.
 from __future__ import annotations
 
 import json
-import sys
 import threading
 import time
-from dataclasses import replace
+from dataclasses import dataclass, replace
 from datetime import timedelta
-from uuid import NAMESPACE_URL, uuid4, uuid5
+from typing import Literal
+from uuid import NAMESPACE_URL, uuid5
 
 from research_core.store import admissions
 from research_core.store._common import parse_iso
@@ -22,20 +22,107 @@ from research_core.store.db import Store
 from research_core.store.errors import StoreError
 from research_core.tools.base import ToolCall, ToolContext, ToolError, ToolSpec, tool
 
+REQUEST_WAIT_SECONDS = 15
+
+CommandState = Literal["pending", "applied", "refused"]
+
+
+@dataclass(frozen=True)
+class CommandReceipt:
+    state: CommandState
+    payload: dict
+
+    @classmethod
+    def parse(cls, payload: dict) -> CommandReceipt:
+        state = payload["transition_state"]
+        if state not in {"pending", "applied", "refused"}:
+            raise ValueError("unknown command receipt state")
+        return cls(state, payload)
+
+
+@dataclass
+class CommandApplication:
+    """Convert expected domain refusals after rollback into durable terminal results.
+
+    Unexpected exceptions propagate. The inner atomic transaction must exit first.
+    """
+
+    store: Store
+    command_id: str
+
+    def __enter__(self) -> CommandApplication:
+        return self
+
+    def __exit__(self, exc_type, error, tb) -> bool:
+        if isinstance(error, Exception) and not isinstance(error, (ToolError, StoreError)):
+            row = self.store.one(
+                "SELECT attempts FROM transition_commands WHERE id=?", (self.command_id,)
+            )
+            with self.store.tx(Actor.harness()) as tx:
+                retry_at = (
+                    parse_iso(tx.at) + timedelta(seconds=min(60, 2 ** min(row["attempts"], 6)))
+                ).isoformat()
+                detail = f"{type(error).__name__}: {error}"
+                tx.execute(
+                    "UPDATE transition_commands SET last_error=?,retry_at=? WHERE id=?",
+                    (detail, retry_at, self.command_id),
+                )
+                tx.event(
+                    "transition.retry_waiting",
+                    self.command_id,
+                    {"error": detail, "retry_at": retry_at},
+                )
+            return False
+        if not isinstance(error, (ToolError, StoreError)):
+            return False
+        with self.store.tx(Actor.harness()) as tx:
+            tx.execute(
+                "UPDATE transition_commands SET result=?,completed_at=? WHERE id=?",
+                (
+                    json.dumps(
+                        {
+                            "ok": False,
+                            "kind": "transition_refused",
+                            "problems": error.problems,
+                            "error": str(error),
+                        }
+                    ),
+                    tx.at,
+                    self.command_id,
+                ),
+            )
+            tx.event("transition.refused", self.command_id, {"problems": error.problems})
+        return True
+
+
+def command_identity(ctx: ToolContext, tool: str, operation_id: str) -> str:
+    return str(
+        uuid5(
+            NAMESPACE_URL,
+            f"transition:{ctx.coworld().coworld_id}:{ctx.actor}:{tool}:{operation_id}",
+        )
+    )
+
 
 def receipt(store: Store, command_id: str) -> dict:
     row = store.one("SELECT * FROM transition_commands WHERE id=?", (command_id,))
     if row is None:
         raise StoreError(["unknown transition command"])
     if row["result"] is not None:
-        return json.loads(row["result"])
+        result = json.loads(row["result"])
+        state = "applied" if result["ok"] else {"transition_refused": "refused"}[result["kind"]]
+        return {**result, "command_id": command_id, "transition_state": state}
     return {
+        "transition_state": "pending",
         "kind": "transition_pending",
         "command_id": command_id,
         "owner": row["owner_instance"] or "workspace coordinator",
-        "reason": "awaiting coordinator application",
-        "trigger": "coordinator processes this durable command",
-        "deadline": row["deadline"],
+        "reason": row["last_error"] or "awaiting coordinator application",
+        "trigger": "coordinator retries after backoff"
+        if row["retry_at"]
+        else "coordinator processes this durable command",
+        "retry_at": row["retry_at"],
+        "attempts": row["attempts"],
     }
 
 
@@ -44,12 +131,7 @@ def submit(call: ToolCall) -> dict:
 
 
 def request(ctx: ToolContext, tool: str, args: dict, operation_id: str) -> dict:
-    command_id = str(
-        uuid5(
-            NAMESPACE_URL,
-            f"transition:{ctx.coworld().coworld_id}:{ctx.actor}:{tool}:{operation_id}",
-        )
-    )
+    command_id = command_identity(ctx, tool, operation_id)
     payload = json.dumps(args, sort_keys=True)
     # Acceptance and execution retirement share the admission gate. A persisted report
     # retains its acceptance authority if its worker exits before application.
@@ -97,7 +179,7 @@ def request(ctx: ToolContext, tool: str, args: dict, operation_id: str) -> dict:
                 issuer_attempt_id = assignment["current_attempt_id"]
             tx.execute(
                 "INSERT INTO transition_commands(id,tool,args,role,actor,actor_epoch,"
-                "issuer_attempt_id,created_at,deadline) VALUES (?,?,?,?,?,?,?,?,?)",
+                "issuer_attempt_id,created_at) VALUES (?,?,?,?,?,?,?,?)",
                 (
                     command_id,
                     tool,
@@ -107,15 +189,14 @@ def request(ctx: ToolContext, tool: str, args: dict, operation_id: str) -> dict:
                     ctx.actor.epoch,
                     issuer_attempt_id,
                     tx.at,
-                    (parse_iso(tx.at) + timedelta(seconds=120)).isoformat(),
                 ),
             )
             tx.event("transition.requested", command_id, {"tool": tool})
-    deadline = time.monotonic() + 15
+    deadline = time.monotonic() + REQUEST_WAIT_SECONDS
     wait = threading.Event()
     while time.monotonic() < deadline:
         result = receipt(ctx.store, command_id)
-        if "kind" not in result or result["kind"] != "transition_pending":
+        if CommandReceipt.parse(result).state != "pending":
             return result
         wait.wait(0.1)
     return receipt(ctx.store, command_id)
@@ -129,34 +210,14 @@ def apply(ctx, instance_id: str) -> None:
 
     store = ctx.store
     for command in store.q("SELECT * FROM transition_commands WHERE result IS NULL ORDER BY rowid"):
-        committed = ctx.wstore.one(
-            "SELECT 1 FROM transition_effects WHERE command_id=?", (command["id"],)
-        )
-        if committed is None and (
-            command["attempts"] >= 3 or parse_iso(store.now()) >= parse_iso(command["deadline"])
+        if command["retry_at"] is not None and parse_iso(store.now()) < parse_iso(
+            command["retry_at"]
         ):
-            with store.tx(Actor.harness()) as tx:
-                tx.execute(
-                    "UPDATE transition_commands SET result=?,completed_at=? WHERE id=? AND "
-                    "result IS NULL",
-                    (
-                        json.dumps(
-                            {
-                                "ok": False,
-                                "kind": "transition_failed",
-                                "command_id": command["id"],
-                                "error": "Transition application budget exhausted; inspect the "
-                                "coordinator error log",
-                            }
-                        ),
-                        tx.at,
-                        command["id"],
-                    ),
-                )
             continue
         with store.tx(Actor.harness()) as tx:
             tx.execute(
-                "UPDATE transition_commands SET attempts=attempts+1,owner_instance=? WHERE id=?",
+                "UPDATE transition_commands SET attempts=attempts+1,owner_instance=?,"
+                "last_error=NULL,retry_at=NULL WHERE id=?",
                 (instance_id, command["id"]),
             )
         actor = replace(Actor.parse(command["actor"]), epoch=command["actor_epoch"])
@@ -179,7 +240,7 @@ def apply(ctx, instance_id: str) -> None:
         if session is not None:
             tool_ctx.env = {**tool_ctx.env, "HERMES_PROFILE_NAME": session["profile"]}
         args = json.loads(command["args"])
-        try:
+        with CommandApplication(store, command["id"]):
             # Lock order is admission lock, then Coworld writer, everywhere.
             with admissions.dispatch_lock(ctx.wstore), store.atomic(actor) as tx:
                 effect = ctx.wstore.one(
@@ -229,25 +290,6 @@ def apply(ctx, instance_id: str) -> None:
                     (json.dumps(result, default=str), tx.at, command["id"]),
                 )
                 tx.event("transition.applied", command["id"], {"owner": instance_id})
-        finally:
-            error = sys.exception()
-            if isinstance(error, (ToolError, StoreError)):
-                with store.tx(Actor.harness()) as tx:
-                    tx.execute(
-                        "UPDATE transition_commands SET result=?,completed_at=? WHERE id=?",
-                        (
-                            json.dumps(
-                                {
-                                    "ok": False,
-                                    "kind": "transition_refused",
-                                    "problems": error.problems,
-                                    "error": str(error),
-                                }
-                            ),
-                            tx.at,
-                            command["id"],
-                        ),
-                    )
 
 
 def record_effect(tx, env, result: dict) -> None:
@@ -291,9 +333,23 @@ def report_capability(ctx: ToolContext, name: str, **details) -> dict:
         from research_core.store import capabilities
 
         return capabilities.report_failure(ctx.store, ctx.actor, name, **details)
-    result = request(ctx, "capability", {"name": name, **details}, str(uuid4()))
-    if result.get("kind") == "transition_pending":
+    repaired = ctx.store.one(
+        "SELECT COALESCE(MAX(seq),0) FROM events WHERE"
+        " (kind='capability.repaired' AND subject=?) OR"
+        " (kind IN ('task.completed','task.failed','task.abandoned','task.rejected')"
+        " AND subject IN (SELECT 'T-' || id FROM tasks WHERE capability=?))",
+        (name, name),
+    )[0]
+    operation_id = f"failure:{name}:{repaired}"
+    prior = ctx.store.one(
+        "SELECT args FROM transition_commands WHERE id=?",
+        (command_identity(ctx, "capability", operation_id),),
+    )
+    intent = json.loads(prior["args"]) if prior is not None else {"name": name, **details}
+    result = request(ctx, "capability", intent, operation_id)
+    state = CommandReceipt.parse(result).state
+    if state == "pending":
         return {"name": name, "maintenance_task": None, "transition": result}
-    if not result.get("ok", True):
-        raise StoreError(result["problems"] if "problems" in result else [result["error"]])
+    if state == "refused":
+        raise StoreError(result["problems"])
     return result

@@ -351,7 +351,7 @@ class SeamServer:
                 else [
                     dict(row)
                     for row in stores.store().q(
-                        "SELECT id,tool,actor,owner_instance,deadline,attempts"
+                        "SELECT id,tool,actor,owner_instance,attempts"
                         " FROM transition_commands WHERE result IS NULL"
                     )
                 ],
@@ -774,7 +774,26 @@ class SeamServer:
             raise Refused(
                 HTTPStatus.BAD_REQUEST, f"{op} refused", problems=error.problems
             ) from None
+        from research_core.transitions import CommandReceipt
+
+        if isinstance(record, CommandReceipt):
+            return {
+                "status": "pending",
+                "op": op,
+                "store": kind,
+                "coworld_id": stores.coworld_id,
+                "command": record.payload,
+                "seq": seq,
+            }
         return {"ok": True, "op": op, "store": kind, "record": record, "seq": seq}
+
+    def command_status(self, coworld_id: str, command_id: str) -> dict:
+        from research_core.transitions import receipt
+
+        with self.stores() as stores:
+            coworlds.read(stores.wstore, coworld_id)
+            with Store.open(self.ws.coworld(coworld_id).store_path, kind="coworld") as store:
+                return receipt(store, command_id)
 
     def snapshot(self, kind: str) -> dict:
         started = time.monotonic()
@@ -1007,6 +1026,10 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, seam.health())
             elif url.path == "/status":
                 self._json(HTTPStatus.OK, seam.status())
+            elif url.path == "/command":
+                self._json(
+                    HTTPStatus.OK, seam.command_status(query["coworld_id"], query["command_id"])
+                )
             elif url.path == "/snapshot":
                 self._json(HTTPStatus.OK, seam.snapshot(query.get("store", "workspace")))
             elif url.path == "/session-pending":
@@ -1040,7 +1063,13 @@ class _Handler(BaseHTTPRequestHandler):
             handler = routes.get(path)
             if handler is None:
                 raise Refused(HTTPStatus.NOT_FOUND, f"no route POST {path}")
-            self._json(HTTPStatus.OK, handler(self._body()))
+            result = handler(self._body())
+            status = (
+                HTTPStatus.ACCEPTED
+                if path == "/store/apply" and "status" in result and result["status"] == "pending"
+                else HTTPStatus.OK
+            )
+            self._json(status, result)
         except Exception as error:  # noqa: BLE001 - every failure becomes a JSON error
             self._error(error)
 

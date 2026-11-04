@@ -167,6 +167,22 @@ def run_apply(args: argparse.Namespace) -> int:
         return _fail(f"{op} refused", error.problems)
     except Exception as error:  # the bridge reads JSON, never a traceback
         return _fail(f"{op} failed: {type(error).__name__}: {error}")
+    from research_core.transitions import CommandReceipt
+
+    if isinstance(record, CommandReceipt):
+        print(
+            json.dumps(
+                {
+                    "status": "pending",
+                    "op": op,
+                    "store": kind,
+                    "command": record.payload,
+                    "seq": seq,
+                },
+                ensure_ascii=False,
+            )
+        )
+        return 2
     result = {"ok": True, "op": op, "store": kind, "record": record, "seq": seq}
     print(json.dumps(result, ensure_ascii=False))
     return 0
@@ -270,7 +286,7 @@ def _call(
         from uuid import uuid4
 
         from research_core.tools.base import ToolContext
-        from research_core.transitions import request
+        from research_core.transitions import CommandReceipt, request
 
         ctx = ToolContext(
             role="orchestrator",
@@ -282,9 +298,12 @@ def _call(
         args = dict(op_args)
         operation_id = args.pop("operation_id", str(uuid4()))
         result = request(ctx, "store", {"op": op, "args": args}, operation_id)
-        if not result.get("ok", True):
-            raise StoreError(result["problems"] if "problems" in result else [result["error"]])
-        return result["record"] if "record" in result else result
+        receipt = CommandReceipt.parse(result)
+        if receipt.state == "pending":
+            return receipt
+        if receipt.state == "refused":
+            raise StoreError(result["problems"])
+        return result["record"]
     if op == "workspace.coworld_switch":
         return _coworld_switch(actor, op_args)
     if op in ("workspace.pause", "workspace.resume"):
