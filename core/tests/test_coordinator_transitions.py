@@ -410,8 +410,11 @@ def test_drained_worker_continuation_has_one_identity_across_resume_events(tmp_p
     assert ctx.wstore.one("SELECT count(*) FROM client_admissions")[0] == 2
     dispatch_inputs(ctx)
     assert len(ctx.hermes.runs) == 2
-    current = sessions.read(ctx.wstore, row["session_id"])
+    assignment = ctx.wstore.one("SELECT * FROM task_assignments")
+    current = sessions.read(ctx.wstore, assignment["session_id"])
+    assert current["id"] != row["session_id"]
     assert not current["drained"] and current["stopped_by"] is None
+    assert sessions.read(ctx.wstore, row["session_id"])["stopped_by"] == "watcher:drain"
 
 
 def test_open_receipt_is_not_a_completed_execution_attempt(tmp_path):

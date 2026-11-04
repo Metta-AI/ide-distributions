@@ -173,7 +173,7 @@ SETTINGS: dict[str, SettingSpec] = {
             2,
             "workspace",
             "the watcher",
-            "Resumes of a dead run before a fresh Session takes the Task over.",
+            "Failed execution attempts before the Task reaches an explicit failed outcome.",
             minimum=0,
         ),
         _s(

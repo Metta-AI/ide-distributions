@@ -15,6 +15,7 @@ import argparse
 import json
 import os
 from datetime import UTC, datetime
+from pathlib import Path
 
 from research_core import layout
 from research_core.store import admissions, settings
@@ -103,6 +104,12 @@ def run_status(args: argparse.Namespace) -> int:
             "sleep_started": wstore.get_meta("sleep_started"),
             "blocked_executions": admissions.problems(wstore),
             "coordinator_instance": wstore.get_meta("coordinator_instance"),
+            "work": admissions.work_status(
+                wstore,
+                Path(os.environ["IDE_INFERENCE_LEASE_FILE"])
+                if "IDE_INFERENCE_LEASE_FILE" in os.environ
+                else None,
+            ),
             "restart_required": admissions.restart_required(wstore),
             "runtime_recovery_count": int(wstore.get_meta("runtime_recovery_count") or "0"),
         }

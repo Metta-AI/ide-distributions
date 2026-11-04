@@ -454,6 +454,43 @@ def claim_result(
         return _record(store, _row(store, n))
 
 
+def transfer_attempt(
+    store: Store, actor: Actor, task_id: int | str, *, previous: str, successor: str
+) -> dict[str, Any]:
+    """Coordinator-only holder transfer after exact predecessor exclusion; replay is harmless.
+
+    Keep task progress, waits, branch and worktree. Historical holders retain their epoch.
+    """
+    require_problems = []
+    require(require_problems, actor.is_harness, "only the coordinator transfers attempts")
+    if require_problems:
+        raise StoreError(require_problems)
+    n = _task_number(task_id)
+    with store.tx(actor) as tx:
+        row = _row(store, n)
+        if row["held_by"] == successor:
+            return _record(store, row)
+        if row["status"] != "in-progress" or row["held_by"] != previous:
+            raise LeaseError([f"{_t(n)} no longer belongs to predecessor {previous}"])
+        epoch = row["lease_epoch"] + 1
+        tx.execute(
+            "UPDATE tasks SET held_by=?,lease_epoch=?,run_id=NULL,lease_renewed=?,updated=?"
+            " WHERE id=?",
+            (successor, epoch, tx.at, tx.at, n),
+        )
+        tx.execute(
+            "INSERT INTO task_sessions(task_id,session_id,kind,epoch,started) "
+            "VALUES (?,?,'task',?,?)",
+            (n, successor, epoch, tx.at),
+        )
+        tx.event(
+            "task.attempt_transferred",
+            _t(n),
+            {"previous": previous, "successor": successor, "epoch": epoch},
+        )
+        return _record(store, _row(store, n))
+
+
 def renew_lease(store: Store, actor: Actor, task_id: int | str) -> dict[str, Any]:
     """The holder keeps its lease fresh. No event."""
     n = _task_number(task_id)

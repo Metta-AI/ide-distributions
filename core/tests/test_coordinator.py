@@ -279,7 +279,7 @@ def test_recovery_replays_old_message_ids_and_counts_a_running_continuation(tmp_
     resumed = coordinator.continue_session(
         tick, sessions.read(ctx.wstore, row["session_id"]), "new context"
     )
-    assert resumed["delivered"] == "queued"
+    assert resumed["deferred"] and resumed["reason"] == "ownership handoff pending"
     coordinator.start(
         profile=queued["profile"],
         session_id=queued["session_id"],

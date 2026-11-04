@@ -241,7 +241,8 @@ class Coordinator:
                     with admissions.dispatch_lock(store), store.tx(ACTOR) as tx:
                         if accepted:
                             tx.execute(
-                                "UPDATE client_admissions SET run_id=?,status='running'"
+                                "UPDATE client_admissions SET run_id=?,status=CASE WHEN "
+                                "status='queued' THEN 'running' ELSE status END"
                                 " WHERE op_id=?",
                                 (snapshot["run_id"], op_id),
                             )
@@ -276,6 +277,25 @@ class Coordinator:
                         )
                     session = sessions.read(store, session_id)
                     if session["kind"] == "task":
+                        assignment = store.one(
+                            "SELECT * FROM task_assignments WHERE session_id=?", (session_id,)
+                        )
+                        if (
+                            assignment is None
+                            or assignment["current_attempt_id"] != op_id
+                            or assignment["state"] != "held"
+                        ):
+                            with store.tx(ACTOR) as tx:
+                                tx.execute(
+                                    "UPDATE client_admissions SET status='cancelled',"
+                                    "disposition='target ended before delivery' WHERE op_id=?",
+                                    (op_id,),
+                                )
+                            raise RunsError(
+                                "Worker input needs a new execution identity",
+                                code="execution_closed",
+                                retryable=False,
+                            )
                         assignment = store.one(
                             "SELECT * FROM task_assignments WHERE session_id=?", (session_id,)
                         )
@@ -328,33 +348,55 @@ class Coordinator:
                         else:
                             raise RunsBusy("Earlier session input is queued", code="session_busy")
                     reservation = store.one(
-                        "SELECT * FROM task_assignments WHERE op_id=?", (op_id,)
+                        "SELECT * FROM task_assignments WHERE current_attempt_id=?", (op_id,)
                     )
                     if reservation is not None:
                         coworld = self.ws.coworld(reservation["coworld_id"])
                         with Store.open(coworld.store_path, kind="coworld") as task_store:
                             task = tasks.read(task_store, reservation["task_id"])
                             same_holder = task["held_by"] == session_id
-                            if not same_holder and task["updated"] != reservation["task_updated"]:
+                            if (
+                                not same_holder
+                                and not sessions.read(store, session_id)["parent"]
+                                and task["updated"] != reservation["task_updated"]
+                            ):
                                 raise RunsError(
                                     "Assigned task revision changed",
                                     code="assignment_stale",
                                     retryable=False,
                                 )
-                            claim = tasks.claim_result(
-                                task_store,
-                                Actor.session(session_id),
-                                reservation["task_id"],
-                                run_id=None,
-                                worktree=str(coworld.worktree_for_task(reservation["task_id"])),
-                                branch=f"task/{reservation['task_id']}",
-                            )
-                            if isinstance(claim, tasks.ClaimRefused):
-                                raise RunsError(
-                                    "; ".join(claim.problems),
-                                    code="assignment_stale",
-                                    retryable=False,
+                            worker = sessions.read(store, session_id)
+                            if worker["parent"] and not same_holder:
+                                predecessor = store.one(
+                                    "SELECT * FROM client_admissions WHERE successor_id=?", (op_id,)
                                 )
+                                if (
+                                    predecessor is None
+                                    or predecessor["execution_uncertain"]
+                                    or predecessor["status"] in {"queued", "running"}
+                                ):
+                                    raise RunsBusy(
+                                        "Predecessor is not excluded", code="session_unresolved"
+                                    )
+                                tasks.transfer_attempt(
+                                    task_store,
+                                    Actor.harness(),
+                                    reservation["task_id"],
+                                    previous=worker["parent"],
+                                    successor=session_id,
+                                )
+                            else:
+                                claim = tasks.claim_result(
+                                    task_store,
+                                    Actor.session(session_id),
+                                    reservation["task_id"],
+                                    run_id=None,
+                                    worktree=str(coworld.worktree_for_task(reservation["task_id"])),
+                                    branch=f"task/{reservation['task_id']}",
+                                )
+                                if isinstance(claim, tasks.ClaimRefused):
+                                    raise RunsError("; ".join(claim.problems),
+                                                    code="assignment_stale", retryable=False)
                     if not capabilities["supported"] or not capabilities["durable"]:
                         raise RunsError(
                             "Durable native admission unavailable",
@@ -393,7 +435,9 @@ class Coordinator:
                         )
                     row = store.one("SELECT * FROM client_admissions WHERE op_id=?", (op_id,))
                 reason = None
-                if row["auth_scope"] != self.native.auth_scope(profile):
+                if self.runtime_id and row["runtime_id"] and self.runtime_id != row["runtime_id"]:
+                    reason = "Admitted execution belongs to a retired private runtime"
+                elif row["auth_scope"] != self.native.auth_scope(profile):
                     reason = "Native authentication scope changed"
                 elif parse_iso(store.now()) >= parse_iso(row["retry_until"]):
                     reason = "Native replay horizon expired"
@@ -410,15 +454,21 @@ class Coordinator:
                 idempotency_key=idempotency_key,
             )
             with admissions.dispatch_lock(store), store.tx(ACTOR) as tx:
-                recorded = tx.one("SELECT run_id FROM client_admissions WHERE op_id=?", (op_id,))[0]
+                current = tx.one("SELECT * FROM client_admissions WHERE op_id=?", (op_id,))
+                recorded = current["run_id"]
+                if recorded is not None and recorded != run_id:
+                    raise RunsError(
+                        "Conflicting native receipt", code="receipt_conflict", retryable=False
+                    )
                 tx.execute(
-                    "UPDATE client_admissions SET run_id=?,status='running',error=NULL"
-                    " WHERE op_id=?",
-                    (run_id, op_id),
+                    "UPDATE client_admissions SET run_id=?,status=CASE WHEN status='queued'"
+                    " THEN 'running' ELSE status END,owner_instance=? WHERE op_id=?",
+                    (run_id, self.instance_id, op_id),
                 )
-                if recorded is None:
+                if recorded is None and current["status"] in {"queued", "running"}:
                     sessions.set_run_in_transaction(tx, session_id, run_id)
-                tx.event("client.started", op_id, {"run_id": run_id})
+                if recorded is None and current["status"] in {"queued", "running"}:
+                    tx.event("client.started", op_id, {"run_id": run_id})
             return run_id
 
     def close_unreplayable(
@@ -432,6 +482,9 @@ class Coordinator:
         ):
             execution_unknown = False  # the private process namespace was replaced
         with store.tx(ACTOR) as tx:
+            current = tx.one("SELECT status FROM client_admissions WHERE op_id=?", (row["op_id"],))
+            if current["status"] not in {"queued", "running"}:
+                return
             tx.execute(
                 "UPDATE client_admissions SET status='interrupted',resolution_required=0,error=?,"
                 "execution_uncertain=?,runtime_id=COALESCE(runtime_id,?) WHERE op_id=?",
@@ -568,6 +621,12 @@ class Coordinator:
         if session is None:
             return {"skipped": f"no Session row for {session_id}"}
         result: dict[str, Any] = {"task": event.subject, "session": session_id}
+        with ctx.wstore.tx(ctx.actor) as tx:
+            tx.execute(
+                "UPDATE task_assignments SET state='release_requested',"
+                "recovery_deadline=COALESCE(recovery_deadline,?) WHERE session_id=?",
+                ((parse_iso(tx.at) + timedelta(seconds=60)).isoformat(), session_id),
+            )
         if is_live(run_status(ctx, session)):
             sessions.set_stopped_by(ctx.wstore, ctx.actor, session_id, "watcher:abandon")
             try:
@@ -900,6 +959,8 @@ class Coordinator:
 
     def _record_outcome(self, store: Store, row, status: hermes_api.RunStatus) -> None:
         """Caller holds the admission lock; every outcome uses this one transition."""
+        if row["run_id"] is not None and row["run_id"] != status.run_id:
+            raise StoreError(["native outcome belongs to another execution receipt"])
         if row["status"] not in {"queued", "running"}:
             return
         if status.status == "unknown":
@@ -909,8 +970,9 @@ class Coordinator:
             return
         with store.tx(ACTOR) as tx:
             tx.execute(
-                "UPDATE client_admissions SET status=?,error=? WHERE op_id=?",
-                (status.status, status.error, row["op_id"]),
+                "UPDATE client_admissions SET status=?,error=?,run_id=COALESCE(run_id,?)"
+                " WHERE op_id=?",
+                (status.status, status.error, status.run_id, row["op_id"]),
             )
             tx.event("client.finished", row["op_id"], {"status": status.status})
 
@@ -933,6 +995,12 @@ class Coordinator:
             " ('completed','failed','interrupted','cancelled') AND advanced_at IS NULL"
             " AND execution_uncertain=0 ORDER BY rowid"
         ):
+            snapshot = sessions.read(ctx.wstore, row["session_id"])
+            history = (
+                self.native.session_messages(snapshot["id"], profile=snapshot["profile"])
+                if snapshot["kind"] == "task" and row["delivery_mode"] == "start"
+                else []
+            )
             with admissions.dispatch_lock(ctx.wstore):
                 row = ctx.wstore.one(
                     "SELECT * FROM client_admissions WHERE op_id=?", (row["op_id"],)
@@ -944,6 +1012,35 @@ class Coordinator:
                     ctx.coworld is None or session["coworld_id"] != ctx.coworld.coworld_id
                 ):
                     continue
+                if row["disposition"] == "target ended before delivery":
+                    assignment = ctx.wstore.one(
+                        "SELECT * FROM task_assignments WHERE coworld_id=? AND task_id=?",
+                        (session["coworld_id"], session["task_id"]),
+                    )
+                    task = self._task_of(ctx, session)
+                    if assignment is not None and task["status"] == "in-progress":
+                        target = sessions.read(ctx.wstore, assignment["session_id"])
+                        result = self._queue_continuation(
+                            ctx,
+                            target,
+                            json.loads(row["payload"])["input"],
+                            key=f"reroute:{row['op_id']}",
+                            with_pending_messages=False,
+                            delivery_ids=tuple(json.loads(row["delivery_ids"])),
+                        )
+                        if result.get("deferred"):
+                            continue
+                        successor = ctx.wstore.one(
+                            "SELECT op_id FROM client_admissions WHERE profile=? AND native_key=?",
+                            (row["profile"], result["key"]),
+                        )
+                        with ctx.wstore.tx(ctx.actor) as tx:
+                            tx.execute(
+                                "UPDATE client_admissions SET disposition='delivery rerouted',"
+                                "successor_id=?,advanced_at=? WHERE op_id=?",
+                                (successor["op_id"], tx.at, row["op_id"]),
+                            )
+                        continue
                 # A steer is a delivery to an existing attempt, not a new worker attempt.
                 if row["delivery_mode"] == "start":
                     if session["run_id"] == row["run_id"]:
@@ -975,7 +1072,15 @@ class Coordinator:
                                                     counter, str(int(ctx.meta(counter) or 0) + 1)
                                                 )
                                                 ctx.set_meta(marker, "1")
-                    elif session["kind"] == "task" and not session["stopped_by"]:
+                    elif (
+                        session["kind"] == "task"
+                        and not session["stopped_by"]
+                        and ctx.wstore.one(
+                            "SELECT 1 FROM task_assignments WHERE current_attempt_id=?"
+                            " AND state='held'",
+                            (row["op_id"],),
+                        )
+                    ):
                         task = self._task_of(ctx, session)
                         if task is not None and self._recoverable(task, session["id"]):
                             if settings.get(ctx.stores, "paused"):
@@ -987,11 +1092,20 @@ class Coordinator:
                                 session,
                                 row["error"] or row["status"],
                                 predecessor=row,
+                                history=history,
                             )
                 with ctx.wstore.tx(ctx.actor) as tx:
                     tx.execute(
-                        "UPDATE client_admissions SET advanced_at=? WHERE op_id=?",
-                        (tx.at, row["op_id"]),
+                        "UPDATE client_admissions SET advanced_at=?,"
+                        "disposition=COALESCE(disposition,?)"
+                        " WHERE op_id=?",
+                        (
+                            tx.at,
+                            "delivery settled"
+                            if row["delivery_mode"] == "steer"
+                            else "domain outcome recorded",
+                            row["op_id"],
+                        ),
                     )
 
     def continue_session(
@@ -1004,11 +1118,33 @@ class Coordinator:
         attempt_note: str = "",
         with_pending_messages: bool = True,
     ) -> dict[str, Any]:
+        history = []
+        if session["kind"] == "task":
+            current = ctx.wstore.one(
+                "SELECT a.* FROM task_assignments t JOIN client_admissions a"
+                " ON a.op_id=t.current_attempt_id WHERE t.session_id=?",
+                (session["id"],),
+            )
+            if (
+                current is not None
+                and current["run_id"]
+                and current["status"] in {"queued", "running"}
+            ):
+                observed = self.native.status(current["run_id"], profile=session["profile"])
+                self.settle_attempt(ctx.wstore, current["op_id"], observed)
+            current = ctx.wstore.one(
+                "SELECT a.* FROM task_assignments t JOIN client_admissions a"
+                " ON a.op_id=t.current_attempt_id WHERE t.session_id=?",
+                (session["id"],),
+            )
+            if current is not None and current["status"] not in {"queued", "running"}:
+                history = self.native.session_messages(session["id"], profile=session["profile"])
         with admissions.dispatch_lock(ctx.wstore):
             return self._queue_continuation(
                 ctx,
                 session,
                 text,
+                history=history,
                 key=key,
                 attempt_note=attempt_note,
                 with_pending_messages=with_pending_messages,
@@ -1023,6 +1159,8 @@ class Coordinator:
         attempt_note: str = "",
         with_pending_messages: bool = True,
         key: str | None = None,
+        delivery_ids: tuple[int, ...] = (),
+        history: tuple[dict, ...] | list[dict] = (),
     ) -> dict[str, Any]:
         """Persist continuation intent; the one admission dispatcher performs delivery.
 
@@ -1031,7 +1169,7 @@ class Coordinator:
         """
         if settings.get(ctx.stores, "paused"):
             return {"session": session["id"], "deferred": True, "reason": "paused"}
-        message_ids = []
+        message_ids = list(delivery_ids)
         if with_pending_messages:
             block, message_ids = _pending_message_block(ctx, session)
             if block:
@@ -1046,31 +1184,104 @@ class Coordinator:
             "SELECT * FROM client_admissions WHERE profile=? AND native_key=?",
             (session["profile"], key),
         )
-        # A definite rejection leaves the original delivery immutable. Its replacement
-        # gets a new identity, while accepted or uncertain deliveries retain their reservation.
-        while (
-            previous is not None
-            and previous["status"] in {"failed", "interrupted", "cancelled"}
-            and not previous["dispatch_started"]
-            and not previous["cancel_requested"]
+        # Definitively undelivered attempts retain their identity; retries use new keys.
+        while previous is not None and (
+            previous["disposition"] == "target ended before delivery"
+            or (
+                previous["status"] in {"failed", "interrupted", "cancelled"}
+                and not previous["dispatch_started"]
+                and not previous["cancel_requested"]
+            )
         ):
-            key = f"redelivery:{previous['op_id']}"
+            key = (
+                key + ":after-end"
+                if previous["disposition"] == "target ended before delivery"
+                else f"redelivery:{previous['op_id']}"
+            )
             previous = ctx.wstore.one(
                 "SELECT * FROM client_admissions WHERE profile=? AND native_key=?",
                 (session["profile"], key),
             )
-        if previous is None:
-            admissions.enqueue(
-                ctx.wstore,
-                ctx.actor,
+        if previous is not None:
+            return {"session": previous["session_id"], "delivered": "queued", "key": key}
+        predecessor = None
+        assignment = None
+        if session["kind"] == "task":
+            assignment = ctx.wstore.one(
+                "SELECT * FROM task_assignments WHERE coworld_id=? AND task_id=?",
+                (session["coworld_id"], session["task_id"]),
+            )
+            if assignment is None:
+                raise StoreError(["worker continuation has no authoritative assignment"])
+            if assignment["state"] != "held":
+                return {"session": session["id"], "deferred": True, "reason": "release pending"}
+            if assignment["session_id"] != session["id"]:
+                return {
+                    "session": assignment["session_id"],
+                    "deferred": True,
+                    "reason": "ownership handoff pending",
+                }
+            predecessor = ctx.wstore.one(
+                "SELECT * FROM client_admissions WHERE op_id=?", (assignment["current_attempt_id"],)
+            )
+            if predecessor["execution_uncertain"] or predecessor["resolution_required"]:
+                return {
+                    "session": session["id"],
+                    "deferred": True,
+                    "reason": "predecessor execution uncertain",
+                }
+            if predecessor["status"] in {"queued", "running"}:
+                predecessor = None  # A live run receives a steer, retaining its execution identity.
+        target = session["id"]
+        if predecessor is not None:
+            target = "api_" + uuid5(NAMESPACE_URL, f"worker:{session['profile']}:{key}").hex
+            task = tasks.read(ctx.store, session["task_id"])
+            # New execution sessions inherit durable task progress, not mutable runtime identity.
+            text = (
+                "Continue this task from its durable handoff. Inspect the recorded worktree "
+                "and pending work before acting.\n"
+                + json.dumps(task, sort_keys=True)
+                + "\nPrevious execution outcome: "
+                + predecessor["status"]
+                + "\nRecent conversation (last 16 messages, 32000 characters):\n"
+                + json.dumps(history[-16:], sort_keys=True)[-32000:]
+                + "\n\n"
+                + text
+            )
+        with ctx.wstore.tx(ctx.actor) as tx:
+            if predecessor is not None:
+                sessions.register_in_transaction(
+                    tx,
+                    session_id=target,
+                    profile=session["profile"],
+                    kind="task",
+                    coworld_id=session["coworld_id"],
+                    task_id=session["task_id"],
+                    goal_id=session["goal_id"],
+                    parent=session["id"],
+                )
+            successor_id = admissions.enqueue_in_transaction(
+                tx,
                 key=key,
-                session_id=session["id"],
+                session_id=target,
                 profile=session["profile"],
                 text=text,
                 origin="continuation",
                 delivery_ids=tuple(message_ids),
             )
-        return {"session": session["id"], "delivered": "queued", "key": key}
+            if predecessor is not None:
+                tx.execute(
+                    "UPDATE task_assignments SET current_attempt_id=?,session_id=?"
+                    " WHERE op_id=? AND current_attempt_id=?",
+                    (successor_id, target, assignment["op_id"], predecessor["op_id"]),
+                )
+                tx.execute(
+                    "UPDATE client_admissions SET successor_id=?,disposition='successor "
+                    "queued',advanced_at=?"
+                    " WHERE op_id=?",
+                    (successor_id, tx.at, predecessor["op_id"]),
+                )
+        return {"session": target, "delivered": "queued", "key": key}
 
     def retry_worker(
         self,
@@ -1081,6 +1292,7 @@ class Coordinator:
         why: str,
         *,
         predecessor,
+        history: tuple[dict, ...] | list[dict] = (),
     ) -> dict[str, Any]:
         """A terminal attempt stays terminal; its successor has a new immutable identity."""
         key = f"retry:{predecessor['op_id']}"
@@ -1089,9 +1301,16 @@ class Coordinator:
             (key, session["profile"]),
         ):
             return {"session": session["id"], "delivered": "queued", "key": key}
+        with ctx.wstore.tx(ctx.actor) as tx:
+            tx.execute(
+                "UPDATE client_admissions SET failure_counted=1 WHERE op_id=?",
+                (predecessor["op_id"],),
+            )
         count = ctx.wstore.one(
-            "SELECT count(*) FROM client_admissions WHERE session_id=? AND delivery_mode='start'",
-            (session["id"],),
+            "SELECT count(*) FROM client_admissions a JOIN sessions s ON s.id=a.session_id"
+            " WHERE s.coworld_id=? AND s.task_id=? AND a.delivery_mode='start'"
+            " AND a.failure_counted=1",
+            (session["coworld_id"], session["task_id"]),
         )[0]
         max_attempts = int(settings.get(ctx.stores, "recovery.max_attempts"))
         if count < max_attempts:
@@ -1103,6 +1322,7 @@ class Coordinator:
                 attempt_note=f"(Attempt {count + 1} of {max_attempts} for this Session.)",
                 key=key,
                 with_pending_messages=False,
+                history=history,
             )
         failure = {
             "what_failed": f"Worker {task['held_by']} exhausted {max_attempts} attempts: {why}",
@@ -1359,8 +1579,9 @@ class Coordinator:
                 raise StoreError(["only the assigned worker can request release"])
             with ctx.wstore.tx(ctx.actor) as tx:
                 tx.execute(
-                    "UPDATE task_assignments SET state='release_requested' WHERE op_id=?",
-                    (assignment["op_id"],),
+                    "UPDATE task_assignments SET state='release_requested',"
+                    "recovery_deadline=COALESCE(recovery_deadline,?) WHERE op_id=?",
+                    ((parse_iso(tx.at) + timedelta(seconds=60)).isoformat(), assignment["op_id"]),
                 )
                 tx.event(
                     "task.release_requested",
@@ -1370,16 +1591,19 @@ class Coordinator:
         return {
             "kind": "release_pending",
             "record": tasks.read(ctx.store, task_id),
-            "reason": "The coordinator stops the recorded run before releasing task ownership",
+            "reason": "The coordinator stops the run before releasing task ownership",
         }
 
     def finish_assignments(self, store: Store) -> None:
         """Finish release requests and failed legacy reservations without operator intervention."""
         for assignment in store.q(
             "SELECT t.*,a.status,a.error,a.runtime_id,a.op_id AS attempt_id FROM task_assignments t"
-            " JOIN client_admissions a ON a.rowid=(SELECT MAX(rowid) FROM client_admissions"
-            " WHERE session_id=t.session_id)"
-            " WHERE a.execution_uncertain=0 AND (t.state!='held' OR"
+            " JOIN client_admissions a ON a.op_id=t.current_attempt_id"
+            " WHERE NOT EXISTS (SELECT 1 FROM client_admissions obligation"
+            " JOIN sessions s ON s.id=obligation.session_id"
+            " WHERE s.coworld_id=t.coworld_id AND s.task_id=t.task_id"
+            " AND (obligation.execution_uncertain=1 OR obligation.resolution_required=1))"
+            " AND (t.state!='held' OR"
             " (a.status IN ('failed','interrupted','cancelled')"
             " AND a.run_id IS NULL))"
         ):
@@ -1389,7 +1613,19 @@ class Coordinator:
                 and assignment["runtime_id"] is not None
                 and self.runtime_id != assignment["runtime_id"]
             )
-            if session["run_id"] and not excluded:
+            if session["run_id"] and not excluded and assignment["status"] in {"queued", "running"}:
+                if assignment["recovery_deadline"] and parse_iso(store.now()) >= parse_iso(
+                    assignment["recovery_deadline"]
+                ):
+                    self.close_unreplayable(
+                        store,
+                        store.one(
+                            "SELECT * FROM client_admissions WHERE op_id=?",
+                            (assignment["attempt_id"],),
+                        ),
+                        "Native stop deadline expired; private runtime exclusion required",
+                    )
+                    continue
                 status = self.native.status(session["run_id"], profile=assignment["profile"])
                 if status.status == "unknown":
                     self.close_unreplayable(
@@ -1408,9 +1644,8 @@ class Coordinator:
             with Store.open(coworld.store_path, kind="coworld") as task_store:
                 with admissions.dispatch_lock(store):
                     latest = store.one(
-                        "SELECT op_id FROM client_admissions WHERE session_id=?"
-                        " ORDER BY rowid DESC LIMIT 1",
-                        (assignment["session_id"],),
+                        "SELECT current_attempt_id AS op_id FROM task_assignments WHERE op_id=?",
+                        (assignment["op_id"],),
                     )
                     if latest["op_id"] != assignment["attempt_id"]:
                         continue
@@ -1456,7 +1691,8 @@ class Coordinator:
     ) -> None:
         """Migrate existing held workers into the ledger without replaying their old input."""
         for session in store.q(
-            "SELECT s.* FROM sessions s LEFT JOIN task_assignments t ON t.session_id=s.id"
+            "SELECT s.* FROM sessions s LEFT JOIN task_assignments t ON "
+            "t.coworld_id=s.coworld_id AND t.task_id=s.task_id"
             " WHERE s.kind='task' AND t.session_id IS NULL"
         ):
             coworld = ws.coworld(session["coworld_id"])

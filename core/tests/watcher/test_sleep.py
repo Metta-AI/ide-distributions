@@ -172,7 +172,8 @@ def test_wake_clears_sleeps_pause_and_resumes_the_drained_session(tmp_path):
     assert events.unhandled(ctx.wstore, {"workspace.resumed"}) == []
     assert sessions.read(ctx.wstore, researcher["id"])["drained"] is False
     restarted = [kw for name, kw in ctx.hermes.calls if name == "start"][-1]
-    assert restarted["session_id"] == researcher["id"]
+    assert restarted["session_id"] != researcher["id"]
+    assert sessions.read(ctx.wstore, restarted["session_id"])["parent"] == researcher["id"]
 
 
 def test_sleep_and_wake_keep_the_users_own_pause(tmp_path):

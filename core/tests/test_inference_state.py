@@ -250,7 +250,7 @@ def test_wake_defers_without_using_an_attempt_and_starts_after_the_state_clears(
     dispatch_inputs(ctx)
     assert ctx.store.one("SELECT * FROM handled_events WHERE seq=?", (seq,))["attempts"] == 1
     [queued] = ctx.wstore.q("SELECT * FROM client_admissions")
-    assert queued["dispatch_started"] == 0
+    assert queued["dispatch_started"] == 0 and queued["failure_counted"] == 0
 
     inference.lease_installed(lease_file, datetime.now(UTC) + timedelta(days=1), "sk-new")
     dispatch_inputs(ctx)
@@ -284,7 +284,12 @@ def test_researcher_dispatch_defers_without_using_an_attempt_until_the_block_lap
     dispatch_inputs(ctx)
     assert ctx.hermes.runs == {}
     [queued] = ctx.wstore.q("SELECT * FROM client_admissions")
-    assert queued["dispatch_started"] == 0
+    assert queued["dispatch_started"] == 0 and queued["failure_counted"] == 0
+    from research_core.store import admissions
+
+    [visible] = admissions.work_status(ctx.wstore, lease_file)
+    assert visible["state"] == "waiting" and visible["reason"] == "provider_unavailable"
+
     # The outage block is never cleared; it lapses at until.
     inference.update_state(
         lease_file,

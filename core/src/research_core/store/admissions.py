@@ -4,6 +4,7 @@ import fcntl
 import json
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
+from pathlib import Path
 from typing import Literal, get_args
 from uuid import NAMESPACE_URL, uuid5
 
@@ -167,3 +168,62 @@ def restart_required(store: Store) -> bool:
     return (
         store.one("SELECT 1 FROM client_admissions WHERE execution_uncertain=1 LIMIT 1") is not None
     )
+
+
+def work_status(store: Store, lease_file: Path | None = None) -> list[dict]:
+    """Visible execution obligations, including terminal deliveries with uncertain execution."""
+    from research_core import inference
+
+    owner = store.get_meta("coordinator_instance") or "workspace coordinator awaiting startup"
+    paused = store.one("SELECT value FROM settings WHERE key='paused'")
+    paused = paused is not None and json.loads(paused[0])
+    result = []
+    for row in store.q("SELECT * FROM client_admissions WHERE kind='message' ORDER BY rowid"):
+        phase = row["status"]
+        responsible = row["owner_instance"] or owner
+        reason = row["error"]
+        trigger = None
+        if row["execution_uncertain"] or row["resolution_required"]:
+            phase = "waiting"
+            responsible = f"runtime:{row['runtime_id']}"
+            reason = reason or "execution exclusion required"
+            trigger = "private runtime namespace replaced; coordinator reconciles evidence"
+        elif phase == "queued":
+            responsible = owner
+            if paused and not row["dispatch_started"]:
+                phase, reason, trigger = "waiting", "workspace paused", "workspace resume"
+            elif not row["dispatch_started"] and not inference.available(lease_file):
+                blocked = inference.blocking_state(lease_file)
+                phase, responsible = "waiting", f"runtime:{store.get_meta('runtime_id')}"
+                reason = "inference lease unavailable" if blocked is None else blocked.blocked
+                trigger = "new inference lease/key, or provider backoff deadline"
+            else:
+                reason, trigger = "durable admission queued", "coordinator dispatch"
+        elif phase == "running":
+            responsible = f"native:{row['profile']}:{row['run_id']}"
+            reason, trigger = (
+                "execution active",
+                "native outcome; reconciliation recovers missed facts",
+            )
+        elif row["advanced_at"] is None:
+            responsible = owner
+            phase, reason, trigger = (
+                "advancing",
+                "outcome committed",
+                "coordinator applies durable handoff",
+            )
+        result.append(
+            {
+                "attempt_id": row["op_id"],
+                "session_id": row["session_id"],
+                "state": phase,
+                "authority": owner,
+                "owner": responsible,
+                "reason": reason,
+                "trigger": trigger,
+                "outcome": row["status"],
+                "disposition": row["disposition"],
+                "successor_id": row["successor_id"],
+            }
+        )
+    return result

@@ -328,6 +328,7 @@ class SeamServer:
                 "paused_drained": wstore.get_meta(PAUSED_DRAINED_KEY) == "1",
                 "sleep_started": wstore.get_meta("sleep_started"),
                 "blocked_executions": admissions.problems(wstore),
+                "work": admissions.work_status(wstore, self.inference_lease_file),
                 "coordinator_instance": wstore.get_meta("coordinator_instance"),
                 "restart_required": admissions.restart_required(wstore),
                 "runtime_recovery_count": int(wstore.get_meta("runtime_recovery_count") or "0"),
@@ -618,7 +619,9 @@ class SeamServer:
                 if isinstance(run_id, RunsError):
                     with stores.wstore.tx(actor) as tx:
                         tx.execute(
-                            "UPDATE client_admissions SET error=?,status=? WHERE op_id=?",
+                            "UPDATE client_admissions SET error=?,"
+                            "status=CASE WHEN status IN ('queued','running')"
+                            " THEN ? ELSE status END WHERE op_id=?",
                             (
                                 run_id.detail,
                                 "queued" if run_id.retryable else "failed",
