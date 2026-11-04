@@ -1,6 +1,5 @@
 -- One workspace inventory for every native start, including wakes without a Coworld.
 ALTER TABLE client_admissions ADD COLUMN profile TEXT NOT NULL DEFAULT 'orchestrator';
-ALTER TABLE client_admissions ADD COLUMN instructions TEXT;
 ALTER TABLE client_admissions ADD COLUMN delivery_mode TEXT NOT NULL DEFAULT 'start';
 ALTER TABLE client_admissions ADD COLUMN target_run_id TEXT;
 ALTER TABLE client_admissions ADD COLUMN origin TEXT NOT NULL DEFAULT 'client';
@@ -22,7 +21,7 @@ CREATE TABLE task_assignments (
     task_updated TEXT NOT NULL,
     rationale TEXT NOT NULL,
     context TEXT NOT NULL,
-    state TEXT NOT NULL DEFAULT 'held' CHECK(state IN ('held','release_requested','needs_resolution')),
+    state TEXT NOT NULL DEFAULT 'held' CHECK(state IN ('held','release_requested')),
     PRIMARY KEY(coworld_id,task_id)
 );
 CREATE TRIGGER task_assignments_log_insert AFTER INSERT ON task_assignments BEGIN

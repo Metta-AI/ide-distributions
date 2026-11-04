@@ -427,7 +427,7 @@ class SeamServer:
             reserved: set[str] = set()
             for row in stores.wstore.q(
                 "SELECT * FROM client_admissions AS message WHERE kind='message'"
-                " AND origin IN ('client','answer')"
+                " AND origin='client'"
                 " AND status IN ('queued','running')"
                 " AND (message.dispatch_started=1 OR NOT EXISTS("
                 " SELECT 1 FROM client_admissions AS opening"

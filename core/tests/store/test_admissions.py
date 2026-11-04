@@ -1,6 +1,7 @@
 """Durable execution intents before any transport or scheduler can act."""
 
 import json
+import sqlite3
 
 import pytest
 
@@ -60,6 +61,47 @@ def test_changed_origin_cannot_reuse_a_durable_execution_identity(workspace_stor
         )
     [row] = workspace_store.q("SELECT origin FROM client_admissions")
     assert row["origin"] == "assignment"
+
+
+def test_unknown_origin_cannot_leave_a_wedged_intent(workspace_store, harness):
+    with pytest.raises(StoreError, match="origin must be one of"):
+        admissions.enqueue(
+            workspace_store,
+            harness,
+            key="typo",
+            session_id="worker-1",
+            profile="researcher",
+            text="Repair",
+            origin="assigment",
+        )
+    assert workspace_store.one("SELECT count(*) FROM client_admissions")[0] == 0
+    assert workspace_store.last_seq() == 0
+
+
+def test_release_is_not_a_blocked_execution_and_has_no_unowned_resolution_state(
+    workspace_store, harness
+):
+    op_id = enqueue(workspace_store, harness)
+    with workspace_store.tx(harness) as tx:
+        tx.execute(
+            "INSERT INTO task_assignments"
+            " (coworld_id,task_id,op_id,session_id,profile,task_updated,rationale,context,state)"
+            " VALUES ('world',1,?,'worker-1','researcher',?,'Fits','Repair','release_requested')",
+            (op_id, tx.at),
+        )
+    assert admissions.problems(workspace_store) == []
+    with pytest.raises(sqlite3.IntegrityError, match="CHECK constraint failed"):
+        with workspace_store.tx(harness) as tx:
+            tx.execute("UPDATE task_assignments SET state='needs_resolution'")
+    with workspace_store.tx(harness) as tx:
+        tx.execute(
+            "UPDATE client_admissions SET resolution_required=1,error='Legacy receipt unknown'"
+            " WHERE op_id=?",
+            (op_id,),
+        )
+    assert admissions.problems(workspace_store) == [
+        {"op_id": op_id, "profile": "researcher", "reason": "Legacy receipt unknown"}
+    ]
 
 
 def test_uncommitted_intent_and_wakeup_are_rolled_back_together(workspace_store, harness):

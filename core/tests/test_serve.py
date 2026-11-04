@@ -94,7 +94,7 @@ def context_block(seam, run_id) -> dict:
 # --- session-open and message -------------------------------------------------------------
 
 
-@pytest.mark.parametrize("origin", ["assignment", "continuation", "planning", "wake"])
+@pytest.mark.parametrize("origin", ["answer", "assignment", "continuation", "planning", "wake"])
 def test_client_dispatcher_leaves_internal_execution_intents_for_their_owner(tmp_path, origin):
     ctx = make_ctx(tmp_path)
     native = FakeHermesRuns()
@@ -135,6 +135,7 @@ def test_client_dispatcher_leaves_internal_execution_intents_for_their_owner(tmp
             == "running"
         )
         assert [run.input for run in native.runs.values()] == ["Client work"]
+        assert [row["session_id"] for row in admissions.snapshot(ctx.wstore)] == ["chat"]
     finally:
         server._http.server_close()
         ctx.store.close()

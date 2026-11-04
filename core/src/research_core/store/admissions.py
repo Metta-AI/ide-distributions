@@ -4,12 +4,16 @@ import fcntl
 import json
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
-from typing import Literal
+from typing import Literal, get_args
 from uuid import NAMESPACE_URL, uuid5
 
 from research_core.store.actors import Actor
 from research_core.store.db import Store, Tx
 from research_core.store.errors import StoreError
+
+Origin = Literal[
+    "client", "answer", "assignment", "continuation", "planning", "wake", "watcher", "migration"
+]
 
 
 @contextmanager
@@ -49,13 +53,11 @@ def snapshot(store: Store) -> list[dict]:
     return [
         asdict(Admission(**{**dict(row), "input": json.loads(row["input"])}))
         for row in store.q(
-            "SELECT op_id,session_id,message,"
-            " CASE WHEN origin='answer' THEN json_object('role','user','content',message)"
-            " ELSE json_extract(request, '$.message') END AS input,"
+            "SELECT op_id,session_id,message,json_extract(request, '$.message') AS input,"
             " status,run_id,error,created_at,"
             " json_extract(payload, '$.context.client.id') AS client_id"
             " FROM client_admissions WHERE kind = 'message'"
-            " AND origin IN ('client','answer') ORDER BY rowid"
+            " AND origin='client' ORDER BY rowid"
         )
     ]
 
@@ -68,7 +70,7 @@ def enqueue(
     session_id: str,
     profile: str,
     text: str,
-    origin: str,
+    origin: Origin,
     instructions: str | None = None,
     delivery_ids: tuple[int, ...] = (),
 ) -> str:
@@ -93,10 +95,12 @@ def enqueue_in_transaction(
     session_id: str,
     profile: str,
     text: str,
-    origin: str,
+    origin: Origin,
     instructions: str | None = None,
     delivery_ids: tuple[int, ...] = (),
 ) -> str:
+    if origin not in get_args(Origin):
+        raise StoreError([f"origin must be one of {', '.join(get_args(Origin))}"])
     op_id = str(uuid5(NAMESPACE_URL, f"research:{profile}:{key}"))
     request = {
         "key": key,
@@ -115,8 +119,8 @@ def enqueue_in_transaction(
     tx.execute(
         "INSERT INTO client_admissions"
         " (op_id,kind,request,session_id,message,payload,status,created_at,"
-        "profile,instructions,origin,native_key,delivery_ids)"
-        " VALUES (?,'message',?,?,?,?,'queued',?,?,?,?,?,?)",
+        "profile,origin,native_key,delivery_ids)"
+        " VALUES (?,'message',?,?,?,?,'queued',?,?,?,?,?)",
         (
             op_id,
             json.dumps(request, sort_keys=True),
@@ -125,7 +129,6 @@ def enqueue_in_transaction(
             json.dumps({"input": text, "instructions": instructions, "context": None}),
             tx.at,
             profile,
-            instructions,
             origin,
             key,
             json.dumps(list(delivery_ids)),
@@ -149,20 +152,13 @@ def reserved_workers(store: Store, exclude_session: str | None = None) -> int:
 
 
 def problems(store: Store) -> list[dict]:
-    blocked = [
+    return [
         dict(row)
         for row in store.q(
             "SELECT op_id,profile,error AS reason FROM client_admissions"
             " WHERE resolution_required=1"
         )
     ]
-    blocked.extend(
-        dict(row)
-        for row in store.q(
-            "SELECT op_id,profile,state AS reason FROM task_assignments WHERE state!='held'"
-        )
-    )
-    return blocked
 
 
 def restart_required(store: Store) -> bool:
