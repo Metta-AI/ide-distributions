@@ -7,6 +7,7 @@ Hermes calls the hook after it classifies each failed model call, with the class
 is the session id the run started with, so it is what ties an error to a run.
 The hook always records the call as ``last_error``, then:
 
+* a 402 that can still afford output is recorded as ``output_limit`` without closing the gate;
 * on ``billing`` (402 credits, or a 403 "Key limit exceeded") it blocks model work as
   ``budget_exhausted`` for the installed key (the lease file's ``key_id``), showing the next
   refill as ``until``. The block ends when the lease loop installs a different key; nobody
@@ -23,6 +24,7 @@ only, and it never raises.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import replace
 from datetime import UTC, datetime, timedelta
@@ -44,6 +46,10 @@ KEY_CHANGE_GRACE = timedelta(minutes=2)
 def is_billing(reason: str, status_code: int | None, message: str) -> bool:
     """Hermes's ``billing`` class, or OpenRouter's 403 "Key limit exceeded" in case Hermes's
     classifier ever words it differently."""
+    # An affordability reservation failure can leave credit for a smaller response.
+    affordable = re.search(r"can only afford ([\d,]+)", message, re.IGNORECASE)
+    if status_code == 402 and affordable is not None and int(affordable[1].replace(",", "")) > 0:
+        return False
     return reason == "billing" or (status_code == 403 and "key limit exceeded" in message.lower())
 
 
@@ -68,7 +74,7 @@ def record_api_error(
             state,
             last_error=inference.ApiError(
                 session_id=session_id,
-                reason="billing" if billing else reason,
+                reason="billing" if billing else "output_limit" if reason == "billing" else reason,
                 status_code=status_code,
                 at=now,
                 task_id=task_id,
@@ -125,3 +131,27 @@ def make_api_request_error() -> Callable[..., None]:
             log.debug("inference-state hook failed: %s", failure)
 
     return api_request_error
+
+
+# OpenRouter reserves the requested maximum before generation. A model's catalog maximum
+# can exceed a daily key's remaining allowance even when an ordinary reply is affordable.
+MAX_RESPONSE_TOKENS = 16384
+
+
+def bound_output_request(
+    *, request: dict[str, Any], provider: str, **_: Any
+) -> dict[str, Any] | None:
+    """Bound OpenRouter replies through Hermes's supported request middleware."""
+    if provider != "openrouter":
+        return None
+    bounded = dict(request)
+    fields = [
+        key
+        for key in ("max_tokens", "max_completion_tokens", "max_output_tokens")
+        if key in bounded
+    ]
+    if not fields:
+        fields = ["max_output_tokens" if "input" in bounded else "max_tokens"]
+    for key in fields:
+        bounded[key] = min(bounded[key] or MAX_RESPONSE_TOKENS, MAX_RESPONSE_TOKENS)
+    return {"request": bounded, "reason": "Bound workspace output credit reservations"}

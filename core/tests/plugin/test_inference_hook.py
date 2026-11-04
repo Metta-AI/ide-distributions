@@ -146,6 +146,9 @@ class HookContext:
     def __init__(self):
         self.hooks = []
 
+    def register_middleware(self, name, callback):
+        self.hooks.append(name)
+
     def register_tool(self, **kwargs):
         pass
 
@@ -161,3 +164,36 @@ def test_both_profiles_register_the_hook():
         ctx = HookContext()
         register.make_register(role)(ctx)
         assert "api_request_error" in ctx.hooks
+
+
+@pytest.mark.parametrize("affordable", ["105913", "97,700", "1"])
+def test_affordable_smaller_reply_does_not_block_workspace(lease_file, affordable):
+    state = record(
+        lease_file,
+        "billing",
+        status_code=402,
+        message=f"You requested up to 131072 tokens, but can only afford {affordable}.",
+    )
+    assert state.blocked is None
+    assert state.last_error.reason == "output_limit"
+
+
+def test_no_affordable_output_still_blocks(lease_file):
+    state = record(
+        lease_file,
+        "billing",
+        status_code=402,
+        message="You requested up to 16384 tokens, but can only afford 0.",
+    )
+    assert state.blocked == "budget_exhausted"
+
+
+@pytest.mark.parametrize("key", ["max_tokens", "max_completion_tokens", "max_output_tokens"])
+def test_output_middleware_caps_reservations_and_preserves_smaller_requests(key):
+    from research_core.plugin.inference_hook import bound_output_request
+
+    for requested, expected in [(131072, 16384), (1024, 1024)]:
+        request = {key: requested, "model": "moonshotai/kimi-k3.1-pro"}
+        result = bound_output_request(request=request, provider="openrouter")
+        assert result["request"][key] == expected
+        assert request[key] == requested

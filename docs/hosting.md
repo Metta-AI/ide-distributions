@@ -208,3 +208,12 @@ daily lock refresh keeps `coworld` and `softmax-cli` current.
 - S3: the bridge reads a store with WAL under gVisor.
 - S4: whether the profile venv is writable (not needed any more: the workspace environment is
   the one `prepare.py` manages).
+
+## Output reservations
+
+Both research profiles use Hermes's `llm_request` middleware to cap OpenRouter output at
+16,384 tokens, preserving smaller explicit caps. This limits the up-front credit reservation
+without changing the context window. A 402 reporting a positive affordable output count does
+not prove exhausted credit: it records `output_limit` and fails that run without locking other
+model work or scheduling budget-refill continuations. A zero affordable count and other billing
+failures retain the budget gate. The platform owns daily allowance and owner team membership.
