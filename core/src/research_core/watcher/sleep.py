@@ -82,7 +82,8 @@ def go_to_sleep(
             f"admission:{row['op_id']}:reconciling"
             for row in ctx.wstore.q(
                 "SELECT op_id FROM client_admissions"
-                " WHERE dispatch_started=1 AND run_id IS NULL AND status='queued'"
+                " WHERE execution_uncertain=1 OR"
+                " (dispatch_started=1 AND run_id IS NULL AND status='queued')"
             )
         )
     started = now_iso()

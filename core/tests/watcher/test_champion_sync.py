@@ -12,8 +12,8 @@ from research_core.platform.fake import (
 )
 from research_core.store import champion
 from research_core.store.db import Store
-from research_core.watcher import champion_sync, wakes
-from tests.watcher._support import advance, events_of, make_ctx
+from research_core.watcher import champion_sync
+from tests.watcher._support import advance, coordinator, events_of, make_ctx
 from tests.watcher._support_w3 import platform_with_faults
 
 
@@ -132,7 +132,7 @@ def test_a_coworld_no_league_runs_starts_no_wake_and_says_so_once(tmp_path):
     for _ in range(3):
         advance(ctx, 600)
         reports.append(champion_sync.run(ctx))
-    wake_report = wakes.run(ctx)
+    wake_report = coordinator(ctx).advance_events(ctx)
 
     assert (
         reports
@@ -165,7 +165,7 @@ def test_champions_in_other_coworlds_leagues_start_no_wake(tmp_path):
     _activate(ctx, LEAGUELESS_COWORLD_ID)  # another Coworld: fakegame's league is not its own
 
     champion_sync.run(ctx)
-    wakes.run(ctx)
+    coordinator(ctx).advance_events(ctx)
 
     assert ctx.store.get_meta("champion_synced_at") is not None
     assert champion.read(ctx.store, LEAGUE_ID) is None

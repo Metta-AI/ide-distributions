@@ -1,5 +1,10 @@
 # Running the research profiles end to end on a Mac
 
+> Admission ownership changed: `research serve` now owns watcher ticks and native starts.
+> Cron appends observation requests only. The in-process real-gateway harness uses that same service path;
+> its five-second polling loop observes progress. Historical timing and cron-output examples below are not current acceptance evidence.
+
+
 How to run the rebuilt `orchestrator` and `researcher` profiles on your own machine in a setup
 that is as close to Softmax hosting as a laptop gets: a real Hermes gateway multiplexing both
 profiles with one API key, one shared `IDE_WORKSPACE`, a per-profile `.env`, the seam the
@@ -72,7 +77,7 @@ The harness builds, in a fresh temporary directory, what hosting builds in a san
 | `prepare.py --source <checkout>/<role> --hermes $HERMES_BIN` for each role, which records the core path, creates the stores, applies the protected config keys, installs the watcher job paused and builds the workspace environment (`uv sync`) under `workspace/tools/venv` | The same script, run after every install and update; the environment is prebuilt at image build |
 | `hermes gateway run` with `GATEWAY_MULTIPLEX_PROFILES=true`, ready when `GET /v1/capabilities` answers 200; its output in `gateway.log` | The multiplexing gateway |
 | `SeamServer` (`research serve`'s class) in the pytest process, bound to a free loopback port | Metta's bridge |
-| Watcher ticks run in process: every 5 seconds during the scenario, every 60 seconds in an interactive session; the Hermes cron job stays paused | The `watcher` cron job every minute inside Hermes |
+| `research serve` owns watcher ticks every 60 seconds; the scenario only polls for completion | The same coordinator, with cron recording observations only |
 
 The gateway enables its API server from the host home's `.env`, not from the process
 environment, and under multiplexing each profile's `.env` reaches the plugin through Hermes's

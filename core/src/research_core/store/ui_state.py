@@ -22,7 +22,7 @@ from typing import Any
 
 from research_core.store._common import json_field, parse_json, require
 from research_core.store.actors import Actor
-from research_core.store.db import Store
+from research_core.store.db import Store, Tx
 from research_core.store.errors import StoreError
 
 OPS = ("add", "replace", "remove", "test")
@@ -40,30 +40,34 @@ def patch(
     store: Store, actor: Actor, conversation: str, ops: list[dict[str, Any]]
 ) -> dict[str, Any]:
     """Apply a JSON Patch to the conversation's document; emits ``ui.patch`` with the ops."""
+    with store.tx(actor) as tx:
+        return patch_in_transaction(tx, conversation, ops)
+
+
+def patch_in_transaction(tx: Tx, conversation: str, ops: list[dict[str, Any]]) -> dict[str, Any]:
     problems: list[str] = []
     require(problems, isinstance(conversation, str) and conversation, "conversation is required")
     problems.extend(_validate_ops(ops))
     if problems:
         raise StoreError(problems)
-    with store.tx(actor) as tx:
-        row = tx.one("SELECT * FROM ui_state WHERE conversation = ?", (conversation,))
-        doc = {} if row is None else parse_json(row["doc"], default={})
-        version = (0 if row is None else row["version"]) + 1
-        doc = apply_patch(doc, ops)
-        if row is None:
-            tx.execute(
-                "INSERT INTO ui_state(conversation, doc, version, updated) VALUES (?, ?, ?, ?)",
-                (conversation, json_field(doc), version, tx.at),
-            )
-        else:
-            tx.execute(
-                "UPDATE ui_state SET doc = ?, version = ?, updated = ? WHERE conversation = ?",
-                (json_field(doc), version, tx.at, conversation),
-            )
-        tx.event(
-            "ui.patch", conversation, {"conversation": conversation, "version": version, "ops": ops}
+    row = tx.one("SELECT * FROM ui_state WHERE conversation = ?", (conversation,))
+    doc = {} if row is None else parse_json(row["doc"], default={})
+    version = (0 if row is None else row["version"]) + 1
+    doc = apply_patch(doc, ops)
+    if row is None:
+        tx.execute(
+            "INSERT INTO ui_state(conversation, doc, version, updated) VALUES (?, ?, ?, ?)",
+            (conversation, json_field(doc), version, tx.at),
         )
-        return _record(tx.one("SELECT * FROM ui_state WHERE conversation = ?", (conversation,)))
+    else:
+        tx.execute(
+            "UPDATE ui_state SET doc = ?, version = ?, updated = ? WHERE conversation = ?",
+            (json_field(doc), version, tx.at, conversation),
+        )
+    tx.event(
+        "ui.patch", conversation, {"conversation": conversation, "version": version, "ops": ops}
+    )
+    return _record(tx.one("SELECT * FROM ui_state WHERE conversation = ?", (conversation,)))
 
 
 def apply_patch(doc: dict[str, Any], ops: list[dict[str, Any]]) -> dict[str, Any]:

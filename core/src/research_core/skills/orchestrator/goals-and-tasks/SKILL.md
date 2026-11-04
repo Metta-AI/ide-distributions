@@ -36,6 +36,10 @@ with claim and Experiment ids; `for_human` is one plain sentence clients show. O
 `depends_on` or `task.link`. A Task can be edited only before it is claimed, and an edit clears
 its approval.
 
+Inspect profiles with `task.workers`. Assign with `task.assign`: Task revision, profile,
+stable ID, context, rationale. Retry unchanged after uncertainty. Release stops the worker
+before rescheduling. Review failed recovery before reopening.
+
 ## Proposals
 
 Researchers propose with `task.propose`; a management wake brings each one to you. `task.read`

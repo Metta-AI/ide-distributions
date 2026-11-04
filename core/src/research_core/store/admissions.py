@@ -53,11 +53,13 @@ def snapshot(store: Store) -> list[dict]:
     return [
         asdict(Admission(**{**dict(row), "input": json.loads(row["input"])}))
         for row in store.q(
-            "SELECT op_id,session_id,message,json_extract(request, '$.message') AS input,"
+            "SELECT op_id,session_id,message,"
+            " CASE WHEN origin='answer' THEN json_object('role','user','content',message)"
+            " ELSE json_extract(request, '$.message') END AS input,"
             " status,run_id,error,created_at,"
             " json_extract(payload, '$.context.client.id') AS client_id"
             " FROM client_admissions WHERE kind = 'message'"
-            " AND origin='client' ORDER BY rowid"
+            " AND origin IN ('client','answer') ORDER BY rowid"
         )
     ]
 

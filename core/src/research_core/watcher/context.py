@@ -8,6 +8,7 @@ starts wake Sessions for the events a model must judge.
 
 from __future__ import annotations
 
+import json
 import os
 from collections.abc import Mapping
 from dataclasses import dataclass, field
@@ -30,6 +31,14 @@ def researcher_profiles(env: Mapping[str, str]) -> tuple[str, ...]:
     raw = env.get("IDE_RESEARCHER_PROFILES", "")
     names = tuple(part.strip() for part in raw.split(",") if part.strip())
     return names or DEFAULT_RESEARCHER_PROFILES
+
+
+def workers(env) -> list[dict]:
+    capabilities = json.loads(env.get("IDE_RESEARCHER_CAPABILITIES", "{}"))
+    return [
+        {"profile": profile, "capabilities": capabilities.get(profile, "General research worker")}
+        for profile in researcher_profiles(env)
+    ]
 
 
 @dataclass

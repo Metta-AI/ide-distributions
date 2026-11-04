@@ -2,8 +2,9 @@
 
 Starts ``research serve``'s :class:`SeamServer` in a temporary workspace against the fake
 platform and a :class:`FakeHermesRuns` whose runs are played by :class:`ScriptedAgent`
-(``research_core.scripted_agent``), and ticks the watcher every few seconds on a thread, as the
-cron job would. Nothing calls a model and nothing touches the network, so the page at the
+(``research_core.scripted_agent``), and advances the coordinator every few seconds on a thread.
+Nothing calls a model and
+nothing touches the network, so the page at the
 printed URL can be opened, poked and screenshotted at will. Ctrl-C stops everything; the
 temporary workspace is removed on exit.
 
@@ -31,7 +32,6 @@ from research_core import layout  # noqa: E402 - after the sys.path change
 from research_core.scripted_agent import REQUEST, TRIGGERS, ScriptedAgent  # noqa: E402
 from research_core.serve import DEFAULT_PORT, SeamServer  # noqa: E402
 from research_core.watcher import context as watcher_context  # noqa: E402
-from research_core.watcher import tick as watcher_tick  # noqa: E402
 from research_core.watcher.hermes_api import FakeHermesRuns  # noqa: E402
 
 DEFAULT_TICK_S = 5.0
@@ -63,7 +63,7 @@ def main(argv: list[str] | None = None) -> int:
         threading.Thread(target=server.serve_forever, daemon=True, name="seam").start()
         stop = threading.Event()
         ticker = threading.Thread(
-            target=tick_forever, args=(env, hermes, args.tick_seconds, stop), daemon=True
+            target=tick_forever, args=(env, server, args.tick_seconds, stop), daemon=True
         )
         ticker.start()
 
@@ -86,14 +86,15 @@ def main(argv: list[str] | None = None) -> int:
     return 0
 
 
-def tick_forever(env: dict[str, str], hermes: FakeHermesRuns, every_s: float, stop) -> None:
+def tick_forever(env: dict[str, str], server: SeamServer, every_s: float, stop) -> None:
     """One watcher tick every ``every_s`` seconds until ``stop`` is set; one line per tick."""
     number = 0
     while not stop.is_set():
         number += 1
-        ctx = watcher_context.build(env, hermes=hermes)
+        ctx = watcher_context.build(env, hermes=server.coordinator)
         try:
-            report = watcher_tick.tick(ctx).to_dict()
+            server.coordinator.reconcile()
+            report = server.coordinator.advance(ctx)
         except Exception as error:  # a dev tool keeps ticking and shows the failure
             report = {
                 "has_work": None,
@@ -107,8 +108,8 @@ def tick_forever(env: dict[str, str], hermes: FakeHermesRuns, every_s: float, st
         stamp = datetime.now().astimezone().strftime("%H:%M:%S %Z")
         errors = report.get("errors") or []
         print(
-            f"[{stamp}] tick {number}: has_work={report.get('has_work')}"
-            f" paused={report.get('paused')} errors={errors if errors else 'none'}",
+            f"[{stamp}] workflow {number}: operations={','.join(report)}"
+            f" errors={errors if errors else 'none'}",
             flush=True,
         )
         stop.wait(every_s)

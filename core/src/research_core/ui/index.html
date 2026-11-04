@@ -590,26 +590,28 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
     setText("composer-status", "Sending…");
     try {
       const context = buildContext();
-      const reply = await api("POST", "/message", {session_id: state.session, message: text, actor: ACTOR, context});
+      const reply = await api("POST", "/message", {session_id: state.session, message: {role: "user", content: text}, actor: ACTOR, context});
       input.value = "";
       addMessage({role: "user", text, run_id: reply.run_id, delivered: reply.delivered, context});
       const problems = (reply.problems || []).length ? ` Problems: ${reply.problems.join("; ")}.` : "";
       setText("composer-status", `Delivered as <strong>${esc(reply.delivered)}</strong> to <span class="mono">${esc(reply.run_id)}</span> (workspace seq ${esc(reply.seq)}).${esc(problems)}`);
-      for (;;) {
-        const snapshot = await api("GET", "/snapshot?store=workspace");
-        const admission = snapshot.records.admissions.find(item => item.op_id === reply.op_id);
-        if (admission.run_id) { trackRun(admission.run_id); break; }
-        if (TERMINAL.has(admission.status)) {
-          setText("composer-status", esc(admission.error || admission.status));
-          break;
-        }
-        await sleep(RUN_POLL_MS);
-      }
+      const admission = await awaitAdmission(reply.op_id);
+      trackRun(admission.run_id);
     } catch (error) {
       setText("composer-status", `<span class="err-text">Not sent: ${esc(error.message)}</span>`);
     } finally {
       button.disabled = false;
       input.focus();
+    }
+  }
+
+  async function awaitAdmission(opId) {
+    for (;;) {
+      const snapshot = await api("GET", "/snapshot?store=workspace");
+      const admission = snapshot.records.admissions.find(item => item.op_id === opId);
+      if (admission.run_id) return admission;
+      if (TERMINAL.has(admission.status)) throw new Error(admission.error || admission.status);
+      await sleep(RUN_POLL_MS);
     }
   }
 
@@ -803,7 +805,8 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
     try {
       const reply = await api("POST", "/ui-action", {session_id: state.session, action: "answer", payload: {ask_id: askId, value}, actor: ACTOR});
       addMessage({role: "user", text: `Answer to ${askId}: ${value}`, run_id: reply.run_id, delivered: reply.delivered, context: {}});
-      trackRun(reply.run_id);
+      const admission = await awaitAdmission(reply.op_id);
+      trackRun(admission.run_id);
     } catch (error) {
       if (status) { status.textContent = `Not accepted: ${error.message}`; status.classList.add("err-text"); }
     }

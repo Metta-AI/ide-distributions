@@ -9,12 +9,12 @@ from pathlib import Path
 
 import pytest
 
+from research_core.coordinator import Coordinator
 from research_core.store import notices, settings
 from research_core.store.db import Store
 from research_core.store.errors import SchemaMismatch, SchemaNewer
 from research_core.watcher import store_checks
 from research_core.watcher import tick as tick_module
-from research_core.watcher.tick import PAUSED_STEPS, STEP_ORDER
 from tests.watcher._support import USER, events_of, make_ctx, set_setting
 
 
@@ -199,18 +199,16 @@ def test_the_tick_keeps_running_its_paused_steps_without_the_newer_store(tmp_pat
     make_newer(store_path)
     env = tick_env(ctx, tmp_path)
 
-    assert tick_module.main([], env=env) == 0
-    first = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert first["steps"]["store_checks"] == {"workspace": {}, "cow_fake": {"schema_newer": 99}}
-    assert tick_module.main([], env=env) == 0
-    second = json.loads(capsys.readouterr().out.strip().splitlines()[-1])
-    assert second["paused"] is True and second["errors"] == []
-    for name in STEP_ORDER:
-        if name in PAUSED_STEPS:
-            assert second["steps"][name].get("skipped") != "paused", name
-        else:
-            assert second["steps"][name] == {"skipped": "paused"}, name
-    assert second["steps"]["store_checks"] == {"workspace": {}, "cow_fake": {"schema_newer": 99}}
+    from research_core.watcher import context
+
+    store_checks.repair_unopenable(env)
+    observed = context.build(env)
+    first = Coordinator(observed.ws, observed.hermes).advance(observed)
+    second = Coordinator(observed.ws, observed.hermes).advance(observed)
+    assert settings.get(observed.wstore, "paused") is True
+    assert first["store_checks"] == {"workspace": {}, "cow_fake": {"schema_newer": 99}}
+    assert set(second) == {"store_checks", "heartbeat", "context_panel"}
+    observed.wstore.close()
     assert_newer_store_untouched(store_path)
     with Store.open(wstore_path, kind="workspace") as wstore:
         assert len(events_of(wstore, "store.schema_newer")) == 1
@@ -243,9 +241,10 @@ def test_a_newer_workspace_store_stops_the_tick_with_the_reason(tmp_path, capsys
     raw.commit()
     raw.close()
     env = tick_env(ctx, tmp_path)
-    assert tick_module.main([], env=env) == 1
-    payload = json.loads(capsys.readouterr().out.strip())
-    assert "newer release" in payload["error"] and "schema version is 99" in payload["error"]
+    from research_core.store.errors import SchemaNewer
+
+    with pytest.raises(SchemaNewer, match="newer release"):
+        tick_module.main([], env=env)
     raw = sqlite3.connect(f"file:{wstore_path}?mode=ro", uri=True)
     try:
         assert raw.execute("PRAGMA user_version").fetchone()[0] == 99

@@ -85,64 +85,44 @@ minutes and should happen at image build (then set `IDE_WORKSPACE_ENV`).
 - Container health stays as it is: the watcher reports through its heartbeat and
   `workspace.doctor`, never through container liveness, so a broken tool cannot crash-loop.
 
-### The sleep cycle
+### Coordinator and pause
 
-Every stop of a running container (automatic sleep, a planned pause, an image update, a move to
-another node) goes through these steps. Run both commands from the workspace environment with
-the Orchestrator profile's environment (`HERMES_HOME` set; the same way the cron job runs the
-watcher), while the gateway is still up.
+`research serve` is the sole native admission owner. Its periodic loop runs watcher observations;
+the cron command only persists observation requests. `task.workers` and `task.assign` let the
+Orchestrator choose a worker and commit context, rationale, and task revision before execution.
+The workspace admission ledger records every chat, worker, continuation, and event-wake start.
+UI answers and their delivery inputs commit together; retrying the same answer returns its receipt.
 
-1. **`research workspace sleep [--wait 120]`**, and wait for it to exit. It pauses the workspace
-   (no tick starts new work), stops the Researcher runs and marks their Sessions to resume,
-   sends SIGTERM to background processes Tasks wait on and waits for them to exit, gives the
-   Orchestrator's chat and wake runs `--wait` seconds to finish and then stops them, and then
-   flushes: every database (the workspace store, every Coworld store, the Hermes `state.db` of
-   the Orchestrator and of each Researcher profile) is checkpointed into its main file and
-   fsynced, and `sync` flushes every other file on the volume (documents, git objects, logs).
-   It prints one JSON line (`paused`, `drained`, `orchestrator_runs`, `flushed`, `volatile`).
-   - **Exit 0** guarantees that nothing runs and that every record and every file the profiles
-     wrote is on disk; nothing is held in memory. The host may now stop the container or
-     snapshot the volume without `research store quiesce`.
-   - **Exit 1** lists in `volatile` what is still running or not flushed (a run the gateway
-     refused to stop, a process that ignored SIGTERM, a database a reader kept busy). Run the
-     command again, or stop anyway: the work listed is recovered after the wake as after a crash.
-2. Stop the container or snapshot the volume.
-3. **After the container is back** and the gateway is up, run **`research workspace wake`**. It
-   clears the pause that `sleep` set (a pause the user set stays), and the next tick resumes the
-   drained Researcher Sessions with their own session ids before starting new work; it starts
-   no run itself. Hermes's cron catch-up fires that tick at once.
+`research workspace sleep` preserves lifecycle v1: pause admission, drain recorded workers and
+tracked processes, settle chat/wake runs, then checkpoint and flush the retained volume.
+Exit 0 authorizes the host to stop compute. Explicit Stop and fifteen-minute automatic sleep
+remain enabled. Wake clears a sleep-owned pause and the coordinator resumes drained work.
 
-A wake run stopped by `sleep` is retried after the wake and does not count as a failed attempt.
-Hermes cannot list runs, so `sleep` stops only the runs the stores know: Researcher and wake
-runs, and chat runs started through the seam (`research serve` records them). A bridge that
-starts chat runs itself must finish or stop them before calling `sleep`. While paused the
-watcher still ticks (store checks, heartbeat, panel); each of its writes is committed with
-`synchronous=FULL`, so it never leaves anything volatile. `research workspace drain` is the
-raw drain step on its own and is no longer part of the cycle.
+Steering records its target run before transport. Explicit rejection can retry safely; an ambiguous
+reply closes delivery without replay while that known run remains tracked. It does not recycle
+the workspace. Unknown native run status or an expired/scope-invalid start receipt ends delivery as interrupted
+without blind replay. Its execution obligation continues to block sleep. The image supervisor
+then exits and the normal container restart policy replaces that runtime; a fresh boot ID
+clears the obligation before HTTP admission opens. Later chat inputs can then proceed. Release requests stop the recorded worker, then clear ownership and reservation;
+exhausted worker recovery records a failed Task for normal Orchestrator review.
+The stronger lifecycle v2 and descendant/delivery guarantees remain a separate future design.
+Merging changes here triggers `.github/workflows/release-hermes.yml` and the hosted image release.
 
-### Background activity and autosleep
+Recovery frequency is available as `runtime_recovery_count` in `/status` and `research watcher status`.
+The image emits a typed `workspace_runtime_recovery` event before recycling, with workspace and boot IDs.
+The packaged fault test records recovery elapsed seconds, container restart count, and validates the event.
 
-The host may run `scripts/activity.py` in the installed Orchestrator profile with the
-profile's environment and Hermes's Python. It prints one JSON line, `{"waiting_on": [reason,
-...]}`, from the watcher's last tick without polling the platform or writing a record. Only
-work that is running or ready to run keeps the workspace awake: a live Researcher run
-(`session:<id>:running`), a background process a Task waits on (`task:T-n:waiting:process`;
-it runs on this machine, so sleep would kill it), an autonomous-submission candidate
-(`submission:candidate`) or a queued wake (`wake:queued`). A Task waiting on the platform (XP,
-credits, a submission) does not: the platform works on while the workspace sleeps, and the
-first tick after the next wake reads the result. A non-empty list prevents automatic sleep; an
-empty list permits it, and so does an explicitly paused workspace. When the probe permits sleep,
-the host still starts it with `research workspace sleep`. A workspace that
-was never prepared or has no store yet is empty. A non-zero exit or unreadable output must
-prevent automatic sleep. The same list is `waiting_on` in `research watcher status`.
+Standalone local `research serve` does not own the gateway's lifecycle. After stopping that gateway
+and its workers, use `research workspace recover --runtime-stopped` to acknowledge interruption.
+This preserves the store and never replays uncertain input. It refuses managed-runtime obligations;
+hosted workspaces continue to recover automatically through their supervisor.
 
 ## The bridge (the seam)
 
 The bridge does transport only. For each user message it POSTs `{"input": <message + "\n\nContext
 v1:\n" + json>, "session_id"}` to the Orchestrator's runs route, where the JSON block is the
 client's typed context validated against `research context-schema` and stamped with the client's
-identity, the active Coworld and `contract_version: 1`. If the Session has a live run, it steers
-instead of starting. It streams each store's `events` table to clients as Server-Sent Events
+identity, the active Coworld and `contract_version: 1`. If the Session has a live run, new inputs wait in the durable inbox. It streams each store's `events` table to clients as Server-Sent Events
 (`research store events --after <seq>` and `--follow` show the rows; one cursor per store), and
 applies user edits through `research store apply --actor user:<id> <op> <json>`. Notices
 (`events` rows of kind `notice`) must reach every client. `research serve` is the reference

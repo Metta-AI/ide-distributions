@@ -385,9 +385,11 @@ def claim(
         if same_holder:
             pass
         elif row["status"] == "in-progress":
-            if _lease_fresh(store, row):
-                problems.append(f"{_t(n)} is held by session:{row['held_by']} with a fresh lease")
-                lease_problem = True
+            problems.append(
+                f"{_t(n)} is held by session:{row['held_by']}; "
+                "lease age cannot release execution ownership"
+            )
+            lease_problem = True
         else:
             require(
                 problems, row["status"] == "unclaimed", f"{_t(n)} is {row['status']}, not unclaimed"

@@ -23,7 +23,7 @@ import pytest
 from research_core import intake
 from research_core.client import ScriptedClient, SeamError
 from research_core.serve import SeamServer
-from research_core.store import admissions, coworlds, goals, notices, tasks, ui_state
+from research_core.store import admissions, coworlds, goals, notices, sessions, tasks, ui_state
 from research_core.store.actors import Actor
 from research_core.store.db import Store, Tx
 from research_core.tools.base import ToolContext
@@ -74,7 +74,7 @@ def make_ctx(tmp_path, coworld: bool = True) -> ToolContext:
 def start_seam(tmp_path, *, coworld: bool = True) -> Seam:
     ctx = make_ctx(tmp_path, coworld=coworld)
     hermes = FakeHermesRuns()
-    server = SeamServer(ws=ctx.workspace, hermes=hermes)
+    server = SeamServer(ws=ctx.workspace, hermes=hermes, env=dict(ctx.env))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     return Seam(server, hermes, ctx, ScriptedClient(server.url))
 
@@ -94,19 +94,21 @@ def context_block(seam, run_id) -> dict:
 # --- session-open and message -------------------------------------------------------------
 
 
-@pytest.mark.parametrize("origin", ["answer", "assignment", "continuation", "planning", "wake"])
-def test_client_dispatcher_leaves_internal_execution_intents_for_their_owner(tmp_path, origin):
+@pytest.mark.parametrize("origin", ["answer", "continuation", "planning", "wake"])
+def test_coordinator_dispatches_internal_intents_alongside_client_inputs(tmp_path, origin):
     ctx = make_ctx(tmp_path)
     native = FakeHermesRuns()
     server = SeamServer(ws=ctx.workspace, hermes=native)
     try:
-        # No session exists yet: the client dispatcher must not consume this native intent.
+        sessions.register(
+            ctx.wstore, HARNESS, session_id="worker", profile="orchestrator", kind="chat"
+        )
         op_id = admissions.enqueue(
             ctx.wstore,
             HARNESS,
             key="internal",
             session_id="worker",
-            profile="researcher",
+            profile="orchestrator",
             text="Internal work",
             origin=origin,
         )
@@ -126,16 +128,18 @@ def test_client_dispatcher_leaves_internal_execution_intents_for_their_owner(tmp
         )
         asyncio.run(server.dispatch_messages())
         row = ctx.wstore.one("SELECT * FROM client_admissions WHERE op_id=?", (op_id,))
-        assert row["status"] == "queued" and not row["dispatch_started"]
-        assert row["run_id"] is None
+        assert row["status"] == "running" and row["dispatch_started"]
+        assert row["run_id"] is not None
         assert (
             ctx.wstore.one(
                 "SELECT status FROM client_admissions WHERE op_id=?", (receipt["op_id"],)
             )[0]
             == "running"
         )
-        assert [run.input for run in native.runs.values()] == ["Client work"]
-        assert [row["session_id"] for row in admissions.snapshot(ctx.wstore)] == ["chat"]
+        assert sorted(run.input for run in native.runs.values()) == ["Client work", "Internal work"]
+        assert {row["session_id"] for row in admissions.snapshot(ctx.wstore)} == (
+            {"chat", "worker"} if origin == "answer" else {"chat"}
+        )
     finally:
         server._http.server_close()
         ctx.store.close()
@@ -516,26 +520,30 @@ def open_ask(seam, conversation: str, ask_id: str = "ask_1") -> None:
     )
 
 
-def test_ui_action_answer_patches_the_ask_and_steers_the_live_run(seam):
+def test_ui_action_answer_is_durable_and_waits_for_the_live_run(seam):
     session_id = seam.client.open()
     run = seam.say("propose a submission")
     open_ask(seam, session_id)
     result = seam.client.answer("ask_1", "yes")
-    assert result["accepted"] is True and result["delivered"] == "steer"
+    assert result["accepted"] is True and result["delivered"] == "queued"
     assert result["conversation"] == session_id
     ask = ui_state.get(seam.wstore, session_id)["doc"]["asks"]["ask_1"]
     assert ask["status"] == "answered" and ask["answer"] == "yes"
     assert ask["answered_by"] == "user:local"
-    assert seam.hermes.steered[run["run_id"]] == ["[UI action] answer to ask_1: yes"]
-    assert seam.starts() == 1
+    assert seam.hermes.steered == {} and seam.starts() == 1
+    assert seam.client.answer("ask_1", "yes")["op_id"] == result["op_id"]
+    seam.hermes.complete(run["run_id"])
+    delivered = seam.client.wait_admission(result["op_id"])
+    assert seam.run_input(delivered["run_id"]) == "[UI action] answer to ask_1: yes"
 
 
 def test_ui_action_answer_starts_a_run_when_none_is_live_and_finds_workspace_asks(seam):
     seam.client.open()
     open_ask(seam, "workspace", "ask_w")
     result = seam.client.answer("ask_w", {"choice": "no"})
-    assert result["delivered"] == "start" and result["conversation"] == "workspace"
-    assert seam.run_input(result["run_id"]) == '[UI action] answer to ask_w: {"choice": "no"}'
+    assert result["delivered"] == "queued" and result["conversation"] == "workspace"
+    delivered = seam.client.wait_admission(result["op_id"])
+    assert seam.run_input(delivered["run_id"]) == '[UI action] answer to ask_w: {"choice": "no"}'
     assert ui_state.get(seam.wstore, "workspace")["doc"]["asks"]["ask_w"]["answer"] == {
         "choice": "no"
     }
@@ -672,6 +680,9 @@ def test_status_reports_the_watcher_fields_from_the_workspace_store(seam, monkey
         "paused": False,
         "paused_drained": False,
         "sleep_started": None,
+        "blocked_executions": [],
+        "restart_required": False,
+        "runtime_recovery_count": 0,
     }
     seam.wstore.set_meta("heartbeat", now_iso())
     seam.wstore.set_meta("has_work", "1")
@@ -702,7 +713,7 @@ def test_unknown_get_paths_still_404_beside_the_page(seam):
 def test_fresh_workspace_storage_is_ready_before_concurrent_workers_start(tmp_path):
     ctx = make_ctx(tmp_path, coworld=False)
     assert not ctx.workspace.store_path.exists()
-    server = SeamServer(ws=ctx.workspace, hermes=FakeHermesRuns())
+    server = SeamServer(ws=ctx.workspace, hermes=FakeHermesRuns(), env=dict(ctx.env))
     # Existing fixtures register a Coworld first, hiding first-open SQLite journal/schema races.
     assert ctx.workspace.store_path.exists()
     with server.stores() as stores:
@@ -806,6 +817,34 @@ def test_metadata_uses_native_identity_for_identical_messages(seam, monkeypatch)
     ]
 
 
+def test_ui_answer_and_delivery_obligation_roll_back_together(seam, monkeypatch):
+    from research_core.store import admissions
+    from research_core.store.errors import StoreError
+
+    session_id = seam.client.open()
+    open_ask(seam, session_id)
+
+    def unavailable(*args, **kwargs):
+        raise StoreError(["simulated admission write failure"])
+
+    monkeypatch.setattr(admissions, "enqueue_in_transaction", unavailable)
+    with pytest.raises(SeamError):
+        seam.client.answer("ask_1", "yes")
+    assert ui_state.get(seam.wstore, session_id)["doc"]["asks"]["ask_1"]["status"] == "open"
+    assert seam.starts() == 0
+
+
+def test_live_chat_followup_steers_the_original_run(seam):
+    seam.client.open()
+    first = seam.say("Start working")
+    followup = seam.say("Change direction")
+    assert followup["run_id"] == first["run_id"]
+    assert seam.hermes.steered[first["run_id"]] == ["Change direction"]
+    from research_core.store import sessions
+
+    assert sessions.read(seam.wstore, first["session_id"])["attempts"] == 1
+
+
 def test_failed_attachment_retains_original_input_and_does_not_block_chat(seam):
     from uuid import uuid4
 
@@ -832,13 +871,58 @@ def test_failed_attachment_retains_original_input_and_does_not_block_chat(seam):
     assert seam.starts() == 1
 
 
+def test_multimodal_followup_waits_for_typed_start_instead_of_text_only_steer(seam):
+    from uuid import uuid4
+
+    seam.client.open()
+    first = seam.say("Start working")
+    parts = [
+        {"type": "text", "text": "Inspect this image next"},
+        {"type": "image_url", "image_url": {"url": "https://example.invalid/image.png"}},
+    ]
+    receipt = seam.client._post(
+        "/message",
+        {
+            "op_id": str(uuid4()),
+            "session_id": seam.client.session_id,
+            "message": {"role": "user", "content": parts},
+        },
+    )
+    # Deterministically run dispatch while the original native run remains active.
+    import asyncio
+
+    asyncio.run(seam.server.dispatch_messages())
+    assert seam.hermes.steered.get(first["run_id"], []) == []
+    assert (
+        seam.wstore.one("SELECT status FROM client_admissions WHERE op_id=?", (receipt["op_id"],))[
+            0
+        ]
+        == "queued"
+    )
+    seam.hermes.complete(first["run_id"])
+    following = seam.client.wait_admission(receipt["op_id"])
+    assert following["run_id"] != first["run_id"]
+    assert seam.hermes.runs[following["run_id"]].input == parts
+
+
+def test_ui_answer_native_history_keeps_its_native_content(seam):
+    session_id = seam.client.open()
+    open_ask(seam, session_id)
+    seam.client.answer("ask_1", "yes")
+    with seam.wstore.tx(HARNESS) as tx:
+        tx.execute("UPDATE client_admissions SET native_message_id=42 WHERE origin='answer'")
+    native = {"id": 42, "role": "user", "content": "[UI action] answer to ask_1: yes"}
+    response = seam.client._post("/messages/context", {"session_id": session_id, "data": [native]})
+    assert response["data"] == [{**native, "client_context": None}]
+
+
 @pytest.mark.parametrize("retryable", [False, True])
 def test_failed_native_open_does_not_block_other_sessions(tmp_path, monkeypatch, retryable):
     from research_core.watcher.hermes_api import RunsError
 
     ctx = make_ctx(tmp_path)
     native = FakeHermesRuns()
-    server = SeamServer(ws=ctx.workspace, hermes=native)
+    server = SeamServer(ws=ctx.workspace, hermes=native, env=dict(ctx.env))
     original = native.create_session
     failing = True
 
@@ -967,7 +1051,7 @@ def test_reopening_preserves_existing_execution_and_history(
 
     ctx = make_ctx(tmp_path)
     native = FakeHermesRuns()
-    server = SeamServer(ws=ctx.workspace, hermes=native)
+    server = SeamServer(ws=ctx.workspace, hermes=native, env=dict(ctx.env))
     start = native.start
     lose_reply = lost_reply
 

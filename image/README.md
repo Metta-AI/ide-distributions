@@ -1,5 +1,13 @@
 # Self-contained workspace image
 
+The workspace coordinator owns native admission and periodic watcher execution. The full plan is
+[workspace orchestration](../docs/specs/workspace-orchestration.md).
+The existing lifecycle v1 sleep/wake behavior remains enabled. Explicit Stop and idle sleep
+use pause, drain, settle, and flush; lifecycle v2 is a separate future change.
+Lost native receipts remain execution obligations until the supervisor recycles the container.
+The next boot closes those obligations without replaying their inputs. This is automatic recovery,
+not a forced platform hold or an operator command.
+
 This image builds on distribution PR #116's `research workspace sleep` and
 `research workspace wake`. It includes PR #117's source-acquisition and routed-profile fixes.
 The image owns profile installation, dependency resolution, internal paths, gateway setup,
@@ -107,7 +115,7 @@ chat remains a target-environment acceptance check with an authorized inference 
 
 Run `bash image/system_tests/start-stop.sh ide-distribution:local` after building. The smoke
 uses a fresh volume, then restarts with the same volume under the hosting filesystem
-restrictions. It checks adapter operations, sleep, retained sessions and transport failures.
+restrictions. It checks adapter operations, explicit clean-sleep refusal, retained sessions and transport failures.
 It also validates all sixteen startup timing events on each boot: profile install/update,
 preparation, gateway readiness, application wake/readiness and total startup. Missing phases,
 reused boot IDs, malformed events and extra telemetry fields fail the check.

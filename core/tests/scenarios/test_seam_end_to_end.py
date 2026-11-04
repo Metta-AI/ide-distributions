@@ -11,8 +11,10 @@ The seam server is ``research serve`` on a thread; the client is the :class:`Scr
 
 from __future__ import annotations
 
+import asyncio
 import json
 import threading
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -25,7 +27,6 @@ from research_core.serve import SeamServer
 from research_core.store import coworlds, notices
 from research_core.tools.base import ToolContext, run_tool
 from research_core.watcher import context as watcher_context
-from research_core.watcher import tick as watcher_tick
 from research_core.watcher.hermes_api import FakeHermesRuns
 from tests.fixtures.fakegame_repo import COWORLD_ID, make_fakegame_repo
 
@@ -38,6 +39,7 @@ class Scenario:
             "IDE_RESEARCHER_PROFILES": "researcher",
             "SOFTMAX_PLAYER_ID": "ply_test",
         }
+        self.observed_at = datetime.now(UTC)
         self.ws = layout.from_env(self.env)
         self.ws.ensure_dirs()
         source, commit = make_fakegame_repo(tmp_path / "upstream")
@@ -50,9 +52,12 @@ class Scenario:
         self.session_id = self.client.open("scripted", "web-ide")
 
     def tick(self) -> dict:
-        ctx = watcher_context.build(self.env, hermes=self.hermes)
+        self.observed_at += timedelta(seconds=60)
+        ctx = watcher_context.build(self.env, hermes=self.hermes, now=self.observed_at)
         try:
-            report = watcher_tick.tick(ctx)
+            self.server.coordinator.reconcile()
+            report = self.server.coordinator.advance(ctx)
+            asyncio.run(self.server.dispatch_messages())
         finally:
             ctx.wstore.close()
             if ctx.store is not None:

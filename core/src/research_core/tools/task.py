@@ -13,10 +13,12 @@ steers or resumes the holder's run with them (entry 5).
 from __future__ import annotations
 
 from research_core import gitops, task_types
-from research_core.store import sessions, tasks
+from research_core.coordinator import Coordinator
+from research_core.store import admissions, sessions, tasks
 from research_core.store.registry import TASK_STATUSES, TASK_TYPES, WAIT_KINDS
 from research_core.tools import _args as a
 from research_core.tools.base import ActionSpec, ToolCall, ToolError, ToolSpec, tool
+from research_core.watcher.context import workers
 
 ORCHESTRATOR = frozenset({"orchestrator"})
 RESEARCHER = frozenset({"researcher"})
@@ -135,33 +137,43 @@ def handle_claim(call: ToolCall) -> dict:
             "the Coworld's code repository is not set up (code/ is not a git repository);"
             " the setup wake creates it, so ask the Orchestrator to run the Coworld setup"
         )
-    branch = f"task/{n}"
-    try:
-        worktree = gitops.worktree_add(
-            coworld.code, coworld.worktree_for_task(n), branch=branch, base="main"
+    with admissions.dispatch_lock(ctx.wstore):
+        assignment = ctx.wstore.one(
+            "SELECT session_id FROM task_assignments WHERE coworld_id=? AND task_id=?",
+            (coworld.coworld_id, n),
         )
-    except gitops.GitError as error:
-        raise ToolError(
-            f"could not create the worktree for {branch}: {error}",
-            command=error.command,
-            exit_code=error.exit_code,
-            stderr_tail=error.stderr[-2000:],
-        ) from None
-    session = sessions.read(ctx.wstore, session_id)
-    run_id = (session or {}).get("run_id") or ""
-    record = tasks.claim(
-        ctx.store, ctx.actor, n, run_id=run_id, worktree=str(worktree), branch=branch
-    )
-    sessions.register(
-        ctx.wstore,
-        ctx.actor,
-        session_id=session_id,
-        profile=ctx.env.get("HERMES_PROFILE_NAME") or ctx.env.get("IDE_ROLE") or ctx.role,
-        kind="task",
-        coworld_id=coworld.coworld_id,
-        task_id=n,
-        goal_id=record["goal_id"],
-    )
+        if assignment is None or assignment["session_id"] != session_id:
+            raise ToolError(
+                "task.claim requires this session's recorded assignment; "
+                "ask the Orchestrator to use task.assign"
+            )
+        branch = f"task/{n}"
+        try:
+            worktree = gitops.worktree_add(
+                coworld.code, coworld.worktree_for_task(n), branch=branch, base="main"
+            )
+        except gitops.GitError as error:
+            raise ToolError(
+                f"could not create the worktree for {branch}: {error}",
+                command=error.command,
+                exit_code=error.exit_code,
+                stderr_tail=error.stderr[-2000:],
+            ) from None
+        session = sessions.read(ctx.wstore, session_id)
+        run_id = (session or {}).get("run_id") or ""
+        record = tasks.claim(
+            ctx.store, ctx.actor, n, run_id=run_id, worktree=str(worktree), branch=branch
+        )
+        sessions.register(
+            ctx.wstore,
+            ctx.actor,
+            session_id=session_id,
+            profile=ctx.env.get("HERMES_PROFILE_NAME") or ctx.env.get("IDE_ROLE") or ctx.role,
+            kind="task",
+            coworld_id=coworld.coworld_id,
+            task_id=n,
+            goal_id=record["goal_id"],
+        )
     return {
         "record": record,
         "worktree": str(worktree),
@@ -254,7 +266,7 @@ def handle(call: ToolCall) -> dict:
     if call.action == "ask":
         return {"record": tasks.ask(store, actor, n, question=call.get("question"))}
     if call.action == "release":
-        return {"record": tasks.release(store, actor, n, reason=call.get("reason"))}
+        return Coordinator.request_release(ctx, n, call.get("reason"))
     if call.action == "propose_submission":
         version = a.record_number(call.get("version"), "version", "version")
         record = tasks.propose_submission(
@@ -265,6 +277,18 @@ def handle(call: ToolCall) -> dict:
 
 
 def dispatch(call: ToolCall) -> dict:
+    if call.action == "workers":
+        return {"kind": "available_workers", "workers": workers(call.ctx.env)}
+    if call.action == "assign":
+        return Coordinator.reserve(
+            call.ctx,
+            task_id=a.record_number(call.get("task"), "task", "task"),
+            task_updated=call.get("task_updated"),
+            profile=call.get("profile"),
+            assignment_id=call.get("assignment_id"),
+            context=call.get("context"),
+            rationale=call.get("rationale"),
+        )
     if call.action in ("create", "propose"):
         return handle_create(call)
     if call.action == "list":
@@ -289,6 +313,31 @@ SPEC = tool(
         roles=BOTH,
         executor="inproc",
         actions=(
+            ActionSpec(
+                "workers",
+                "Inspect available research workers before choosing an assignment.",
+                {},
+                (),
+                ORCHESTRATOR,
+            ),
+            ActionSpec(
+                "assign",
+                "Reserve an approved dependency-ready Task for the chosen worker once.",
+                {
+                    "task": TASK,
+                    "task_updated": a.string("The exact updated field from task.read/list."),
+                    "profile": a.string(
+                        "A profile returned by task.workers; choose by capabilities."
+                    ),
+                    "assignment_id": a.string(
+                        "Stable identifier for this assignment; reuse it on retries."
+                    ),
+                    "context": a.string("The context and instructions this worker needs."),
+                    "rationale": a.string("Why this worker fits the task and dependencies."),
+                },
+                ("task", "task_updated", "profile", "assignment_id", "context", "rationale"),
+                ORCHESTRATOR,
+            ),
             ActionSpec(
                 "create",
                 "Create an accepted Task (stored as proposed when its type needs the user's "
@@ -426,7 +475,7 @@ SPEC = tool(
             ),
             ActionSpec(
                 "release",
-                "Give the Task back unfinished.",
+                "Request release; ownership stays reserved until execution is proven stopped.",
                 {"task": TASK, "reason": a.string("Why it is given back.")},
                 ("task", "reason"),
                 RESEARCHER,

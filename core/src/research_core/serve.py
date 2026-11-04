@@ -49,7 +49,13 @@ from typing import Any
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
-from research_core import contract, inference, intake, layout, profile_models
+from httpx import HTTPError
+
+from research_core import attachments, contract, inference, intake, layout, profile_models
+from research_core.attachments import AttachmentError
+from research_core.coordinator import Coordinator, ownership
+from research_core.messages import UserMessage
+from research_core.platform.errors import PlatformError
 from research_core.prepare import Runner
 from research_core.profile_models import Catalog, ModelError, Profile
 from research_core.store import admissions, coworlds, sessions, settings, ui_state
@@ -59,7 +65,7 @@ from research_core.store.actors import Actor
 from research_core.store.db import Store
 from research_core.store.errors import StoreError
 from research_core.tools.ui import WORKSPACE_CONVERSATION, pointer_token
-from research_core.watcher import hermes_api
+from research_core.watcher import context, hermes_api
 from research_core.watcher.heartbeat import HAS_WORK_KEY, HAS_WORK_REASONS_KEY, HEARTBEAT_KEY
 from research_core.watcher.hermes_api import HermesRuns, RunsBusy, RunsError
 from research_core.watcher.tick import PAUSED_DRAINED_KEY
@@ -71,6 +77,7 @@ TAIL_INTERVAL_S = 0.5  # how often the stream looks for new events rows (A.11)
 KEEPALIVE_S = 10.0  # an SSE comment keeps an idle connection open through proxies
 STREAM_BATCH = 500
 DEFAULT_PORT = 8650
+WATCHER_INTERVAL_S = 60.0
 DEFAULT_ACTOR = "user:local"
 RETRY_AFTER_S = 1
 UI_ACTIONS = ("answer", "reaction")
@@ -159,17 +166,17 @@ class SeamServer:
         config_runner: Runner = subprocess.run,
         catalog: Catalog | None = None,
     ) -> None:
-        from research_core.messages import UserMessage
-
-        self._message_type = UserMessage
         self.ws = ws
         self.hermes = hermes
         self.profile = profile
-        self.inference_lease_file = inference_lease_file
+        self.inference_lease_file = (
+            hermes.inference_lease_file if inference_lease_file is None else inference_lease_file
+        )
         # The profiles whose model the bridge shows and changes, and how it changes them.
         self.profiles = profiles or []
         self.hermes_bin = hermes_bin
-        self.env = dict(os.environ if env is None else env)
+        self.env = {**dict(os.environ if env is None else env), "IDE_WORKSPACE": str(ws.root)}
+        self.coordinator = Coordinator(ws, hermes, self.env.get("IDE_RUNTIME_ID"))
         self.config_runner = config_runner
         self.catalog = catalog or Catalog()
         self._model_lock = threading.Lock()
@@ -179,7 +186,9 @@ class SeamServer:
         self._deliver_lock = threading.Lock()
         self.stopping = threading.Event()
         # Initialize the schema before the dispatcher and HTTP handlers can open it concurrently.
-        Store.open(self.ws.store_path, kind="workspace").close()
+        with Store.open(self.ws.store_path, kind="workspace") as store:
+            self.coordinator.reconcile_inputs(store)
+            self.coordinator.adopt_existing_workers(self.ws, store, self.coordinator.runtime_id)
         self._http = _HttpServer((host, port), self)
 
     @property
@@ -198,13 +207,56 @@ class SeamServer:
             dispatch.result()
 
     async def dispatch_forever(self) -> None:
+        with ownership(self.ws):
+            observer = asyncio.create_task(self.observe_forever())
+            workflow = asyncio.create_task(self.coordinate_forever())
+            try:
+                while not self.stopping.is_set():
+                    (result,) = await asyncio.gather(
+                        self.dispatch_messages(), return_exceptions=True
+                    )
+                    if isinstance(result, RunsError):
+                        log.warning("Admission unavailable: %s", result)
+                    elif isinstance(result, BaseException):
+                        raise result
+                    await asyncio.sleep(0.5)
+            finally:
+                self.stopping.set()
+                await asyncio.gather(observer, workflow)
+
+    async def observe_forever(self) -> None:
+        if not self.env.get("HERMES_HOME"):
+            return
         while not self.stopping.is_set():
-            (result,) = await asyncio.gather(self.dispatch_messages(), return_exceptions=True)
-            if isinstance(result, RunsError):
-                log.warning("Chat dispatch unavailable: %s", result)
-            elif isinstance(result, BaseException):
-                raise result
-            await asyncio.sleep(0.5)
+            (result,) = await asyncio.gather(
+                asyncio.to_thread(self.observe_once), return_exceptions=True
+            )
+            if isinstance(result, BaseException):
+                log.error("Watcher observation failed", exc_info=result)
+            await asyncio.to_thread(self.stopping.wait, WATCHER_INTERVAL_S)
+
+    def observe_once(self) -> None:
+        self.coordinator.reconcile()
+
+    async def coordinate_forever(self) -> None:
+        if not self.env.get("HERMES_HOME"):
+            return
+        while not self.stopping.is_set():
+            (result,) = await asyncio.gather(
+                asyncio.to_thread(self.coordinate_once), return_exceptions=True
+            )
+            if isinstance(result, BaseException):
+                log.error("Coordinator workflow failed", exc_info=result)
+            await asyncio.to_thread(self.stopping.wait, 0.5)
+
+    def coordinate_once(self) -> None:
+        ctx = context.build(self.env, hermes=self.coordinator)
+        try:
+            self.coordinator.advance(ctx)
+        finally:
+            ctx.wstore.close()
+            if ctx.store is not None:
+                ctx.store.close()
 
     def shutdown(self) -> None:
         """Stop accepting requests and end every open stream; safe to call more than once."""
@@ -262,13 +314,16 @@ class SeamServer:
                 or bool(
                     wstore.one(
                         "SELECT 1 FROM client_admissions"
-                        " WHERE status IN ('queued','running') LIMIT 1"
+                        " WHERE status IN ('queued','running') OR resolution_required=1 LIMIT 1"
                     )
                 ),
                 "waiting_on": json.loads(wstore.get_meta(HAS_WORK_REASONS_KEY) or "[]"),
                 "paused": bool(settings.get(wstore, "paused")),
                 "paused_drained": wstore.get_meta(PAUSED_DRAINED_KEY) == "1",
                 "sleep_started": wstore.get_meta("sleep_started"),
+                "blocked_executions": admissions.problems(wstore),
+                "restart_required": admissions.restart_required(wstore),
+                "runtime_recovery_count": int(wstore.get_meta("runtime_recovery_count") or "0"),
             }
 
     @staticmethod
@@ -338,7 +393,7 @@ class SeamServer:
         """Confirm a durable input once; dispatch serially with Hermes's durable run key."""
         started = time.monotonic()
         session_id = _text(body, "session_id")
-        message = self._message_type.model_validate(body["message"])
+        message = UserMessage.model_validate(body["message"])
         content = message.root["content"]
         text = (
             content
@@ -393,6 +448,7 @@ class SeamServer:
     async def dispatch_messages(self) -> None:
         with self._deliver_lock, self.stores() as stores:
             actor = Actor.user("client-dispatch")
+            self.coordinator.reconcile_inputs(stores.wstore)
             for opening in stores.wstore.q(
                 "SELECT op_id,session_id FROM client_admissions"
                 " WHERE kind='open' AND status='queued' ORDER BY rowid"
@@ -427,8 +483,7 @@ class SeamServer:
             reserved: set[str] = set()
             for row in stores.wstore.q(
                 "SELECT * FROM client_admissions AS message WHERE kind='message'"
-                " AND origin='client'"
-                " AND status IN ('queued','running')"
+                " AND (status IN ('queued','running') OR resolution_required=1)"
                 " AND (message.dispatch_started=1 OR NOT EXISTS("
                 " SELECT 1 FROM client_admissions AS opening"
                 " WHERE opening.kind='open' AND opening.status='queued'"
@@ -436,7 +491,13 @@ class SeamServer:
             ):
                 if row["session_id"] in reserved:
                     continue
-                reserved.add(row["session_id"])
+                if row["run_id"]:
+                    self.coordinator.acknowledge_inputs(stores.wstore, row)
+                    if row["cancel_requested"]:
+                        self.hermes.stop(row["run_id"], profile=row["profile"])
+                    status = self.hermes.status(row["run_id"], profile=row["profile"])
+                    self.coordinator.settle_attempt(stores.wstore, row["op_id"], status)
+                    continue
                 opening = stores.wstore.one(
                     "SELECT status,error FROM client_admissions WHERE kind='open'"
                     " AND session_id=? ORDER BY rowid DESC LIMIT 1",
@@ -454,148 +515,98 @@ class SeamServer:
                         )
                         tx.event("client.finished", row["op_id"], {"status": "failed"})
                     continue
-                with admissions.dispatch_lock(stores.wstore):
-                    if row["run_id"]:
-                        session = self._require_session(stores, row["session_id"])
-                        if session["run_id"] != row["run_id"]:
-                            sessions.set_run(stores.wstore, actor, row["session_id"], row["run_id"])
-                        if row["cancel_requested"]:
-                            self.hermes.stop(row["run_id"], profile=self.profile)
-                        status = self.hermes.status(row["run_id"], profile=self.profile)
-                        if status.terminal:
-                            terminal = (
-                                status.status if status.status != "unknown" else "interrupted"
-                            )
-                            with stores.wstore.tx(actor) as tx:
-                                tx.execute(
-                                    "UPDATE client_admissions SET status=?,error=? WHERE op_id=?",
-                                    (terminal, status.error, row["op_id"]),
-                                )
-                                tx.event("client.finished", row["op_id"], {"status": terminal})
-                        continue
-                    if row["cancel_requested"] and not row["dispatch_started"]:
-                        with stores.wstore.tx(actor) as tx:
-                            tx.execute(
-                                "UPDATE client_admissions SET status='cancelled' WHERE op_id=?",
-                                (row["op_id"],),
-                            )
-                            tx.event("client.cancelled", row["op_id"], {})
-                        continue
-                    if settings.get(stores.wstore, "paused") and not row["dispatch_started"]:
-                        continue
-                    if not inference.available(self.inference_lease_file):
-                        continue
-                    session = self._require_session(stores, row["session_id"])
-                    if (
-                        not row["dispatch_started"]
-                        and session["run_id"]
-                        and not self.hermes.status(session["run_id"], profile=self.profile).terminal
-                    ):
-                        continue
-                    payload = json.loads(row["payload"])
-                    if not row["dispatch_started"]:
-                        from httpx import HTTPError
-
-                        from research_core.attachments import AttachmentError, prepare
-                        from research_core.platform.errors import PlatformError
-
-                        preparing = time.monotonic()
-                        (prepared,) = await asyncio.gather(
-                            asyncio.to_thread(
-                                prepare,
-                                self._message_type.model_validate(payload["input"][0]),
-                                ws=self.ws,
-                                env=self.env,
-                                hermes_bin=self.hermes_bin,
-                            ),
-                            return_exceptions=True,
-                        )
-                        log.info(
-                            "Message input prepared: op_id=%s seconds=%.3f result=%s",
-                            row["op_id"],
-                            time.monotonic() - preparing,
-                            type(prepared).__name__,
-                        )
-                        if isinstance(
-                            prepared,
-                            (AttachmentError, PlatformError, HTTPError, subprocess.TimeoutExpired),
-                        ):
-                            detail = (
-                                str(prepared)
-                                if isinstance(prepared, AttachmentError)
-                                else type(prepared).__name__
-                            )
-                            with stores.wstore.tx(actor) as tx:
-                                tx.execute(
-                                    "UPDATE client_admissions SET status='failed',error=?"
-                                    " WHERE op_id=?",
-                                    (detail, row["op_id"]),
-                                )
-                                tx.event("client.delivery_failed", row["op_id"], {"error": detail})
-                            continue
-                        if isinstance(prepared, BaseException):
-                            raise prepared
-                        payload["input"] = [prepared.model_dump(mode="json")]
+                if row["cancel_requested"] and not row["dispatch_started"]:
                     with stores.wstore.tx(actor) as tx:
                         tx.execute(
-                            "UPDATE client_admissions SET dispatch_started=1,payload=?"
-                            " WHERE op_id=?",
-                            (json.dumps(payload), row["op_id"]),
+                            "UPDATE client_admissions SET status='cancelled' WHERE op_id=?",
+                            (row["op_id"],),
                         )
-                    starting = time.monotonic()
-                    (run_id,) = await asyncio.gather(
+                        tx.event("client.cancelled", row["op_id"], {})
+                    continue
+                if settings.get(stores.wstore, "paused") and not row["dispatch_started"]:
+                    continue
+                if not inference.available(self.inference_lease_file):
+                    continue
+                session = self._require_session(stores, row["session_id"])
+                if (
+                    row["origin"] not in {"client", "answer", "continuation"}
+                    and not row["dispatch_started"]
+                    and session["run_id"]
+                    and not self.hermes.status(session["run_id"], profile=row["profile"]).terminal
+                ):
+                    continue
+                reserved.add(row["session_id"])
+                payload = json.loads(row["payload"])
+                if not row["dispatch_started"] and isinstance(payload["input"], list):
+                    (prepared,) = await asyncio.gather(
                         asyncio.to_thread(
-                            self.hermes.start,
-                            profile=self.profile,
-                            session_id=row["session_id"],
-                            text=payload["input"],
-                            instructions=payload["instructions"],
-                            idempotency_key=row["op_id"],
+                            attachments.prepare,
+                            UserMessage.model_validate(payload["input"][0]),
+                            ws=self.ws,
+                            env=self.env,
+                            hermes_bin=self.hermes_bin,
                         ),
                         return_exceptions=True,
                     )
-                    log.info(
-                        "Message native start returned: op_id=%s seconds=%.3f result=%s",
-                        row["op_id"],
-                        time.monotonic() - starting,
-                        type(run_id).__name__,
-                    )
-                    if isinstance(run_id, RunsError):
+                    if isinstance(
+                        prepared,
+                        (AttachmentError, PlatformError, HTTPError, subprocess.TimeoutExpired),
+                    ):
+                        detail = (
+                            str(prepared)
+                            if isinstance(prepared, AttachmentError)
+                            else type(prepared).__name__
+                        )
                         with stores.wstore.tx(actor) as tx:
-                            if run_id.status == 429 or run_id.code in {
-                                "gateway_draining",
-                                "inference_unavailable",
-                            }:
-                                tx.execute(
-                                    "UPDATE client_admissions SET dispatch_started=0 WHERE op_id=?",
-                                    (row["op_id"],),
-                                )
                             tx.execute(
-                                "UPDATE client_admissions SET error=?,status=? WHERE op_id=?",
-                                (
-                                    run_id.detail,
-                                    "queued" if run_id.retryable else "failed",
-                                    row["op_id"],
-                                ),
+                                "UPDATE client_admissions SET status='failed',error=?"
+                                " WHERE op_id=?",
+                                (detail, row["op_id"]),
                             )
-                            tx.event(
-                                "client.delivery_failed",
-                                row["op_id"],
-                                {"retryable": run_id.retryable},
-                            )
+                            tx.event("client.delivery_failed", row["op_id"], {"error": detail})
                         continue
-                    if isinstance(run_id, BaseException):
-                        raise run_id
+                    if isinstance(prepared, BaseException):
+                        raise prepared
+                    payload["input"] = [prepared.model_dump(mode="json")]
+                    # Freeze the prepared body before native admission, retaining the user's
+                    # original message in request for the application contract and history.
+                    with admissions.dispatch_lock(stores.wstore), stores.wstore.tx(actor) as tx:
+                        tx.execute(
+                            "UPDATE client_admissions SET payload=? WHERE op_id=?"
+                            " AND dispatch_started=0",
+                            (json.dumps(payload), row["op_id"]),
+                        )
+                (run_id,) = await asyncio.gather(
+                    asyncio.to_thread(
+                        self.coordinator.start,
+                        profile=row["profile"],
+                        session_id=row["session_id"],
+                        text=payload["input"],
+                        instructions=payload["instructions"],
+                        idempotency_key=row["native_key"] or row["op_id"],
+                    ),
+                    return_exceptions=True,
+                )
+                if isinstance(run_id, RunsError):
                     with stores.wstore.tx(actor) as tx:
                         tx.execute(
-                            "UPDATE client_admissions SET run_id=?,status='running',error=NULL"
-                            " WHERE op_id=?",
-                            (run_id, row["op_id"]),
+                            "UPDATE client_admissions SET error=?,status=? WHERE op_id=?",
+                            (
+                                run_id.detail,
+                                "queued" if run_id.retryable else "failed",
+                                row["op_id"],
+                            ),
                         )
-                        sessions.set_run_in_transaction(tx, row["session_id"], run_id)
-                        tx.event("client.started", row["op_id"], {"run_id": run_id})
-                    if row["cancel_requested"]:
-                        self.hermes.stop(run_id, profile=self.profile)
+                        tx.event(
+                            "client.delivery_failed",
+                            row["op_id"],
+                            {"retryable": run_id.retryable},
+                        )
+                    continue
+                if isinstance(run_id, BaseException):
+                    raise run_id
+                if row["cancel_requested"]:
+                    self.hermes.stop(run_id, profile=row["profile"])
 
     def session_pending(self, session_id: str) -> dict:
         """A locally accepted chat is empty until its serial native opening completes."""
@@ -623,7 +634,7 @@ class SeamServer:
                 )
                 for row in stores.wstore.q(
                     "SELECT native_message_id,payload,request FROM client_admissions"
-                    " WHERE session_id=? AND native_message_id IS NOT NULL",
+                    " WHERE session_id=? AND native_message_id IS NOT NULL AND origin='client'",
                     (session_id,),
                 )
             }
@@ -824,31 +835,6 @@ class SeamServer:
             block["coworld"] = stores.coworld_id
         return block, problems
 
-    def _deliver(self, stores: store_cli.Stores, actor: Actor, session_id: str, text: str) -> dict:
-        """A6.1: steer the Session's live run, else start one with the same session id."""
-        with self._deliver_lock:
-            run_id = self._require_session(stores, session_id).get("run_id")
-            try:
-                if run_id and self._is_live(run_id):
-                    if self.hermes.steer(run_id, text, profile=self.profile):
-                        return {"session_id": session_id, "run_id": run_id, "delivered": "steer"}
-                    if self._is_live(run_id):  # queued: not steerable yet, and a second run
-                        raise Refused(  # would race it, so the client retries shortly
-                            HTTPStatus.SERVICE_UNAVAILABLE,
-                            f"run {run_id} is queued and cannot take input yet; retry",
-                            headers={"Retry-After": str(RETRY_AFTER_S)},
-                            retry_after=RETRY_AFTER_S,
-                            retryable=True,
-                        )
-                run_id = self.hermes.start(profile=self.profile, session_id=session_id, text=text)
-            except RunsError as error:
-                raise _gateway_error(error) from None
-            sessions.set_run(stores.wstore, actor, session_id, run_id)
-            return {"session_id": session_id, "run_id": run_id, "delivered": "start"}
-
-    def _is_live(self, run_id: str) -> bool:
-        return self.hermes.status(run_id, profile=self.profile).status in LIVE_STATUSES
-
     def _answer(
         self, stores: store_cli.Stores, actor: Actor, session_id: str, payload: dict
     ) -> dict:
@@ -857,30 +843,38 @@ class SeamServer:
             raise Refused(HTTPStatus.BAD_REQUEST, "value is required: the user's answer")
         value = payload["value"]
         conversation = self._ask_conversation(stores.wstore, session_id, ask_id)
-        ask = ui_state.get(stores.wstore, conversation)["doc"]["asks"][ask_id]
-        if ask.get("status") != "open":
-            raise Refused(
-                HTTPStatus.CONFLICT,
-                f"{ask_id} was already answered; the first answer wins",
-                answer=ask.get("answer"),
-                answered_by=ask.get("answered_by"),
+        shown = value if isinstance(value, str) else json.dumps(value, sort_keys=True)
+        text = f"[UI action] answer to {ask_id}: {shown}"
+        key = f"ui-answer:{session_id}:{ask_id}"
+        with stores.wstore.tx(actor) as tx:
+            current = ui_state.get(stores.wstore, conversation)["doc"]["asks"][ask_id]
+            if current["status"] != "open" and current["answer"] != value:
+                raise Refused(
+                    HTTPStatus.CONFLICT, f"{ask_id} was already answered", answer=current["answer"]
+                )
+            if current["status"] == "open":
+                path = f"/asks/{pointer_token(ask_id)}"
+                record = ui_state.patch_in_transaction(
+                    tx,
+                    conversation,
+                    [
+                        {"op": "test", "path": f"{path}/status", "value": "open"},
+                        {"op": "replace", "path": f"{path}/status", "value": "answered"},
+                        {"op": "add", "path": f"{path}/answer", "value": value},
+                        {"op": "add", "path": f"{path}/answered_by", "value": str(actor)},
+                    ],
+                )
+            else:
+                record = ui_state.get(stores.wstore, conversation)
+            op_id = admissions.enqueue_in_transaction(
+                tx,
+                key=key,
+                session_id=session_id,
+                profile=self._require_session(stores, session_id)["profile"],
+                text=text,
+                origin="answer",
             )
-        path = f"/asks/{pointer_token(ask_id)}"
-        record = ui_state.patch(
-            stores.wstore,
-            actor,
-            conversation,
-            [
-                {"op": "test", "path": f"{path}/status", "value": "open"},
-                {"op": "replace", "path": f"{path}/status", "value": "answered"},
-                {"op": "add", "path": f"{path}/answer", "value": value},
-                {"op": "add", "path": f"{path}/answered_by", "value": str(actor)},
-            ],
-        )
-        shown = value if isinstance(value, str) else json.dumps(value)
-        result = self._deliver(
-            stores, actor, session_id, f"[UI action] answer to {ask_id}: {shown}"
-        )
+        result = {"op_id": op_id, "session_id": session_id, "run_id": None, "delivered": "queued"}
         return {
             "accepted": True,
             "conversation": conversation,

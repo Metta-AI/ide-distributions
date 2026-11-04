@@ -10,11 +10,11 @@ Task. The whole loop fits on this page.
 
 ## 1. Claim
 
-The watcher's prompt names the Task and your first call: `task.claim {task: T-n}`. It takes the
-lease, creates `worktrees/task-<n>/` on branch `task/<n>` from `main`, and returns the Task, its
-Goal, the type's instructions and the Orchestrator's messages. A claim refused because another
-Session holds the Task, or because your epoch is stale, means a replacement took it: end your
-run without writing anything.
+The assignment prompt names the Task and your first call: `task.claim {task: T-n}`. The
+workspace reserved ownership before starting you. This call renews that lease, creates
+`worktrees/task-<n>/` on branch `task/<n>` from `main`, and returns the Task, its Goal, the type's
+instructions and the Orchestrator's messages. A refused claim means you lack valid ownership:
+end your run without writing anything.
 
 ## 2. Read before working
 
@@ -70,8 +70,8 @@ undefined symbol X"`, `next_step: "pin nim 2.0 in MIXIN.md toolchains or patch t
 line 12"`. Bad: `what_failed: "it broke"`, `next_step: "try again"`. Fill `tried` so nobody
 repeats it.
 
-`task.release {task, reason}` gives the Task back unfinished when you must not continue (a
-directive forbids the only path).
+`task.release {task, reason}` requests release when you must not continue (a directive forbids
+the only path). End your run afterward. The workspace stops your recorded run, then returns the Task to scheduling.
 
 ## 7. What happens next
 

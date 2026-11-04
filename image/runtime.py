@@ -22,6 +22,15 @@ from pydantic import BaseModel, ConfigDict, SecretStr
 from timing import StartupTiming
 
 
+class RuntimeRecovery(BaseModel):
+    event: Literal["workspace_runtime_recovery"] = "workspace_runtime_recovery"
+    workspace_id: str
+    boot_id: str
+    reason: Literal["execution_uncertain"] = "execution_uncertain"
+    completed_recoveries: int
+    timestamp: datetime
+
+
 class Bootstrap(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -89,6 +98,7 @@ async def run(stack: AsyncExitStack) -> None:
     key = key_file.read_text()
     common = {
         **os.environ,
+        "IDE_RUNTIME_ID": boot_id,
         "API_SERVER_ENABLED": "true",
         "API_SERVER_HOST": "127.0.0.1",
         "API_SERVER_PORT": "8642",
@@ -235,6 +245,29 @@ async def run(stack: AsyncExitStack) -> None:
                             break
                         await asyncio.sleep(1)
             report("application_ready", phase_started)
+
+            async def reconcile_uncertain_execution() -> None:
+                async with httpx.AsyncClient(base_url="http://127.0.0.1:8650") as observer:
+                    while True:
+                        response = await observer.get("/status")
+                        response.raise_for_status()
+                        activity = response.json()
+                        if activity["restart_required"]:
+                            print(
+                                RuntimeRecovery(
+                                    workspace_id=bootstrap.workspace_id,
+                                    boot_id=boot_id,
+                                    completed_recoveries=activity["runtime_recovery_count"],
+                                    timestamp=datetime.now(UTC),
+                                ).model_dump_json(),
+                                flush=True,
+                            )
+                            raise RuntimeError(
+                                "Recycling runtime to settle an uncertain native execution"
+                            )
+                        await asyncio.sleep(1)
+
+            recovery = group.create_task(reconcile_uncertain_execution())
             report("startup_total", started)
 
             group.create_task(observe_ready("relay_connected", relay_connected))
@@ -249,7 +282,12 @@ async def run(stack: AsyncExitStack) -> None:
                 )
             )
             await asyncio.wait(
-                [group.create_task(gateway.wait()), group.create_task(seam.wait()), control],
+                [
+                    group.create_task(gateway.wait()),
+                    group.create_task(seam.wait()),
+                    control,
+                    recovery,
+                ],
                 return_when=asyncio.FIRST_COMPLETED,
             )
             raise RuntimeError("A distribution service exited")
