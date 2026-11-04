@@ -13,6 +13,14 @@ note, so the server never duplicates them. ``ThreadingHTTPServer`` gives
 each request its own thread, and each request opens its own store connections (SQLite
 connections are per thread). A background dispatcher reconciles each persisted input using
 Hermes's durable idempotency key. Its filesystem lock also fences the separate sleep command.
+A chat run that fails is classified (``run_failures.py``, in the Coordinator's outcome
+transition): a budget, rate-limit or provider failure holds the message, which the snapshot
+reports as ``waiting``, and the dispatcher resumes it with a continuation prompt in the same
+Session once its hold has passed and the inference gate is open; other failures end ``failed``
+with an ``error_class`` beside Hermes's error (``contract/CONTRACT.md``, "Message admissions").
+Each resume holds longer than the last. ``GET /status``'s ``has_work`` counts neither a held
+message nor the messages queued behind it, on purpose: a budget wait lasts until the daily
+refill and must not keep the workspace awake; the message resumes once the workspace is awake.
 
 The model routes (``GET /models``, ``GET /models/catalog``, ``POST /models``) show each
 profile's model and change it on the user's request (``profile_models.py``); a change is a
@@ -37,7 +45,7 @@ import subprocess
 import threading
 import time
 import traceback
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime
@@ -166,8 +174,10 @@ class SeamServer:
         env: dict[str, str] | None = None,
         config_runner: Runner = subprocess.run,
         catalog: Catalog | None = None,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
         self.ws = ws
+        self.clock = clock
         self.hermes = hermes
         self.profile = profile
         self.inference_lease_file = (
@@ -177,7 +187,13 @@ class SeamServer:
         self.profiles = profiles or []
         self.hermes_bin = hermes_bin
         self.env = {**dict(os.environ if env is None else env), "IDE_WORKSPACE": str(ws.root)}
-        self.coordinator = Coordinator(ws, hermes, self.env.get("IDE_RUNTIME_ID"))
+        self.coordinator = Coordinator(
+            ws,
+            hermes,
+            self.env.get("IDE_RUNTIME_ID"),
+            inference_lease_file=self.inference_lease_file,
+            clock=clock,
+        )
         self.config_runner = config_runner
         self.catalog = catalog or Catalog()
         self._model_lock = threading.Lock()
@@ -335,8 +351,12 @@ class SeamServer:
                 "has_work": wstore.get_meta(HAS_WORK_KEY) == "1"
                 or bool(
                     wstore.one(
-                        "SELECT 1 FROM client_admissions"
-                        " WHERE status IN ('queued','running') OR resolution_required=1 LIMIT 1"
+                        "SELECT 1 FROM client_admissions a WHERE a.status='running'"
+                        " OR a.resolution_required=1"
+                        " OR (a.status='queued' AND a.resume_after IS NULL AND NOT EXISTS"
+                        " (SELECT 1 FROM client_admissions held WHERE held.session_id=a.session_id"
+                        " AND held.status='queued' AND held.resume_after IS NOT NULL"
+                        " AND held.rowid<a.rowid)) LIMIT 1"
                     )
                 ),
                 "waiting_on": json.loads(wstore.get_meta(HAS_WORK_REASONS_KEY) or "[]"),
@@ -535,6 +555,14 @@ class SeamServer:
             for row in pending:
                 if row["session_id"] in reserved:
                     continue
+                if row["resume_after"] is not None:
+                    # A held (``waiting``) message keeps its Session's place until it resumes.
+                    reserved.add(row["session_id"])
+                    with admissions.dispatch_lock(stores.wstore):
+                        resumed = self.coordinator.resume_if_due(stores.wstore, row)
+                    if resumed is None:
+                        continue
+                    row = resumed
                 if row["run_id"]:
                     if self._acknowledged_receipts.get(row["op_id"]) != row["run_id"]:
                         self.coordinator.acknowledge_inputs(stores.wstore, row)
@@ -579,7 +607,7 @@ class SeamServer:
                     continue
                 if settings.get(stores.wstore, "paused") and not row["dispatch_started"]:
                     continue
-                if not inference.available(self.inference_lease_file):
+                if not inference.available(self.inference_lease_file, self.clock()):
                     continue
                 session = self._require_session(stores, row["session_id"])
                 if (
@@ -591,7 +619,13 @@ class SeamServer:
                     continue
                 reserved.add(row["session_id"])
                 payload = json.loads(row["payload"])
-                if not row["dispatch_started"] and isinstance(payload["input"], list):
+                # Attachments are prepared once, at the first start. A resume sends the
+                # continuation prompt, not the admitted input, so it prepares nothing.
+                if (
+                    not row["dispatch_started"]
+                    and not row["resumes"]
+                    and isinstance(payload["input"], list)
+                ):
                     (prepared,) = await asyncio.gather(
                         asyncio.to_thread(
                             attachments.prepare,
@@ -653,6 +687,12 @@ class SeamServer:
                                 row["op_id"],
                             ),
                         )
+                        if not run_id.retryable:
+                            # A resume's class described the earlier run, not this refusal.
+                            tx.execute(
+                                "UPDATE client_admissions SET error_class=NULL WHERE op_id=?",
+                                (row["op_id"],),
+                            )
                         tx.event(
                             "client.delivery_failed",
                             row["op_id"],

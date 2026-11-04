@@ -127,6 +127,8 @@ def test_hook_reads_the_lease_path_from_the_environment(lease_file, monkeypatch)
     )
     state = inference.read_state(lease_file)
     assert state.blocked == "budget_exhausted" and state.last_error.session_id == "api_9"
+    # task_id (the run's own session id) survives a round trip; compression rotates session_id.
+    assert state.last_error.task_id == "t"
 
 
 def test_hook_does_nothing_without_a_lease_file_and_never_raises(tmp_path, monkeypatch):

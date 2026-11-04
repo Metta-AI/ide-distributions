@@ -22,7 +22,7 @@ Two files sit side by side in the folder of ``IDE_INFERENCE_LEASE_FILE``:
       {"blocked": "budget_exhausted" | "provider_unavailable" | null,
        "until": "<ISO time>" | null,
        "since": "<ISO time>",
-       "last_error": {"session_id", "reason", "status_code", "at"} | null,
+       "last_error": {"session_id", "task_id", "reason", "status_code", "at"} | null,
        "next_refill_at": "<ISO time>" | null,
        "outages": ["<ISO time>", ...],
        "blocked_key_id": "<sha256 prefix of the spent key>" | null}
@@ -77,12 +77,19 @@ Blocked = Literal["budget_exhausted", "provider_unavailable"]
 
 @dataclass(frozen=True)
 class ApiError:
-    """The last failed model call Hermes reported through ``api_request_error``."""
+    """The last failed model call Hermes reported through ``api_request_error``.
+
+    ``session_id`` is the agent's live session id, which Hermes rotates when it compresses the
+    conversation; ``task_id`` is the session id the run was started with, fixed for the whole
+    run (Hermes's ``effective_task_id``, the run status's ``session_id``). Match a run on
+    ``task_id``; it is ``None`` in states written before it was recorded.
+    """
 
     session_id: str
     reason: str
     status_code: int | None
     at: datetime
+    task_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -309,6 +316,7 @@ def _decode(raw: dict[str, Any]) -> InferenceState:
             reason=str(error["reason"]),
             status_code=error.get("status_code"),
             at=_time(error["at"]),
+            task_id=None if error.get("task_id") is None else str(error["task_id"]),
         ),
         next_refill_at=_time(raw.get("next_refill_at")),
         outages=tuple(_time(at) for at in raw.get("outages") or ()),

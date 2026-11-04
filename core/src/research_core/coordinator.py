@@ -9,15 +9,18 @@ from __future__ import annotations
 import fcntl
 import hashlib
 import json
+import logging
 import sys
+from collections.abc import Callable
 from contextlib import contextmanager
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
-from research_core import layout, transitions
+from research_core import inference, layout, run_failures, transitions
 from research_core.store import admissions, events, notices, sessions, settings, tasks
-from research_core.store._common import parse_iso
+from research_core.store._common import now_iso, parse_iso
 from research_core.store.actors import Actor
 from research_core.store.db import Store
 from research_core.store.errors import StoreError
@@ -61,6 +64,8 @@ from research_core.watcher.wakes import (
     render_wake,
 )
 
+log = logging.getLogger(__name__)
+
 DEAD_TEXT = "Your previous run ended unexpectedly; continue from your last commit."
 HEADER = "The Orchestrator sent you a message; read it below and act on it."
 REPEAT_WINDOW = timedelta(hours=6)
@@ -91,11 +96,22 @@ def ownership(ws: layout.Workspace):
 
 
 class Coordinator:
-    def __init__(self, ws: layout.Workspace, native: HermesRuns, runtime_id: str | None = None):
+    def __init__(
+        self,
+        ws: layout.Workspace,
+        native: HermesRuns,
+        runtime_id: str | None = None,
+        *,
+        inference_lease_file: Path | None = None,
+        clock: Callable[[], datetime] = lambda: datetime.now(UTC),
+    ):
         self.ws = ws
         self.native = native
         self.runtime_id = runtime_id
         self.instance_id = f"coordinator:{uuid4()}"
+        # The inference state beside this file classifies a failed chat run (``run_failures``).
+        self.inference_lease_file = inference_lease_file
+        self.clock = clock
 
     def status(self, run_id: str, *, profile: str):
         return self.native.status(run_id, profile=profile)
@@ -366,6 +382,14 @@ class Coordinator:
                                     "Session execution has not settled", code="session_busy"
                                 )
                             self._record_outcome(store, previous, status)
+                            held = store.one(
+                                "SELECT resume_after FROM client_admissions WHERE op_id=?",
+                                (previous["op_id"],),
+                            )
+                            if held["resume_after"] is not None:
+                                raise RunsBusy(
+                                    "Earlier session input is waiting", code="session_busy"
+                                )
                         elif previous["dispatch_started"]:
                             raise RunsBusy(
                                 "Session has an uncertain start", code="session_unresolved"
@@ -512,6 +536,13 @@ class Coordinator:
                     " THEN 'running' ELSE status END,owner_instance=? WHERE op_id=?",
                     (run_id, self.instance_id, op_id),
                 )
+                if current["status"] == "queued":
+                    # The run that failed is over. A late receipt on a finished admission keeps
+                    # that admission's own error.
+                    tx.execute(
+                        "UPDATE client_admissions SET error=NULL,error_class=NULL WHERE op_id=?",
+                        (op_id,),
+                    )
                 if recorded is None and current["status"] in {"queued", "running"}:
                     sessions.set_run_in_transaction(tx, session_id, run_id)
                 if recorded is None and current["status"] in {"queued", "running"}:
@@ -1020,18 +1051,120 @@ class Coordinator:
             raise StoreError(["native outcome belongs to another execution receipt"])
         if row["status"] not in {"queued", "running"}:
             return
+        if row["run_id"] is None and (row["resume_after"] or row["resumes"]):
+            return  # A held or resuming admission already settled its run; this report is late.
         if status.status == "unknown":
             self.close_unreplayable(store, row, "Native outcome is unknown")
             return
         if not status.terminal:
             return
+        error_class = None
+        if status.status == "failed" and row["origin"] == "client":
+            error_class = self._classify(row, status)
+            if (
+                error_class in run_failures.WAITING_CLASSES
+                and not row["cancel_requested"]
+                and row["delivery_mode"] == "start"
+            ):
+                self._hold(store, row, status, error_class)
+                return
         with store.tx(ACTOR) as tx:
             tx.execute(
-                "UPDATE client_admissions SET status=?,error=?,run_id=COALESCE(run_id,?)"
-                " WHERE op_id=?",
-                (status.status, status.error, status.run_id, row["op_id"]),
+                "UPDATE client_admissions SET status=?,error=?,error_class=?,"
+                "run_id=COALESCE(run_id,?) WHERE op_id=?",
+                (status.status, status.error, error_class, status.run_id, row["op_id"]),
             )
-            tx.event("client.finished", row["op_id"], {"status": status.status})
+            tx.event(
+                "client.finished",
+                row["op_id"],
+                {"status": status.status, "error_class": error_class},
+            )
+
+    def _installed_key_id(self) -> str | None:
+        lease = inference.read_lease(self.inference_lease_file)
+        return lease.key_id if lease else None
+
+    def _classify(self, row, status: hermes_api.RunStatus) -> run_failures.ErrorClass | None:
+        """The class of a chat message's failed run (``run_failures``); ``None`` if unknown."""
+        error_class = run_failures.classify(
+            session_id=row["session_id"],
+            raw=status.raw,
+            error=status.error,
+            state=inference.read_state(self.inference_lease_file),
+            installed_key_id=self._installed_key_id(),
+            now=self.clock(),
+        )
+        if error_class == "misconfigured":
+            log.error(
+                "Chat run %s failed: the workspace is misconfigured (%s)",
+                status.run_id,
+                status.error,
+            )
+        return error_class
+
+    def _hold(self, store: Store, row, status: hermes_api.RunStatus, error_class: str) -> None:
+        """Hold a chat message whose run failed on budget, rate limit or provider outage.
+
+        The admission goes back to ``queued`` with ``resume_after`` set, which the snapshot
+        reports as ``waiting``: its run is over, no new one has started, and it keeps its
+        Session's place, so later messages queue behind it. :meth:`resume_if_due` restarts it.
+        The steered inputs that rode the same run end ``failed`` with the class: the resume
+        continues the whole conversation, theirs included.
+        """
+        now = self.clock()
+        state = inference.read_state(self.inference_lease_file)
+        installed_key_id = self._installed_key_id()
+        resume_after = now_iso(
+            lambda: run_failures.resume_after(
+                error_class, state, now, row["resumes"], installed_key_id=installed_key_id
+            )
+        )
+        with store.tx(ACTOR) as tx:
+            tx.execute(
+                "UPDATE client_admissions SET status='queued',run_id=NULL,dispatch_started=0,"
+                "error=?,error_class=?,resume_after=? WHERE op_id=?",
+                (status.error, error_class, resume_after, row["op_id"]),
+            )
+            tx.event(
+                "client.waiting",
+                row["op_id"],
+                {"error_class": error_class, "resume_after": resume_after},
+            )
+
+    def resume_if_due(self, store: Store, row) -> Any | None:
+        """Release a held message whose hold is over, or return ``None`` while it must wait.
+
+        It may resume once ``resume_after`` has passed, the workspace is not paused and the
+        inference gate is open (a budget block holds until a new key). Resume ``n`` sends the
+        continuation prompt for its class as a user message under the native key
+        ``<op id>:resume:<n>``, so a start retried after a crash replays the same run and each
+        resume is a new one. The admitted input stays in ``request``; attachments are never
+        prepared again. Caller holds the admission lock.
+        """
+        now = self.clock()
+        if (
+            parse_iso(row["resume_after"]) > now
+            or settings.get(store, "paused")
+            or not inference.available(self.inference_lease_file, now)
+        ):
+            return None
+        payload = json.loads(row["payload"])
+        payload["input"] = [
+            {"role": "user", "content": run_failures.continuation(row["error_class"])}
+        ]
+        resume = row["resumes"] + 1
+        with store.tx(ACTOR) as tx:
+            tx.execute(
+                "UPDATE client_admissions SET payload=?,native_key=?,resumes=?,resume_after=NULL"
+                " WHERE op_id=?",
+                (json.dumps(payload), f"{row['op_id']}:resume:{resume}", resume, row["op_id"]),
+            )
+            tx.event(
+                "client.resumed",
+                row["op_id"],
+                {"error_class": row["error_class"], "resume": resume},
+            )
+        return store.one("SELECT * FROM client_admissions WHERE op_id=?", (row["op_id"],))
 
     def reconcile(self) -> None:
         """Recover missed native outcomes. This pass never schedules or retries work."""
