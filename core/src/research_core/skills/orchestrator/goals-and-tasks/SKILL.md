@@ -62,7 +62,8 @@ not activity.
 A standing instruction or preference ("never touch the opening book", "keep replies short") is a
 directive: `directive.add {text, scope, source}` word for word, `scope` the workspace or a Goal
 id, `source` the message. The briefing shows every active directive, so a summary cannot lose
-it. `directive.retire` when the user withdraws it.
+it. `directive.update` when the user changes it, `directive.retire` when they withdraw it, and
+`claim.retire` any older `preference` claim that contradicts.
 
 When a setting covers it, use the setting instead: `settings.update {key, value, cites}`, and
 `cites` is the user's message, always. `settings.read` lists the keys with their scopes:

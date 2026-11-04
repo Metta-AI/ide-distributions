@@ -132,7 +132,7 @@ def test_existing_preference_claims_still_show_and_yield_to_directives(tmp_path)
     make_claim(ctx.store, 1, ["preference"])
     text = briefing.render(ctx, "chat1", role="orchestrator", now=NOW)
     assert "C-1: Finding 1" in text
-    assert "directives override" in text
+    assert "directives and settings override" in text
 
 
 def test_overflow_cuts_the_lowest_priority_list_first_and_keeps_the_budget(tmp_path):

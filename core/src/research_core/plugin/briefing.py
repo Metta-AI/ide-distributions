@@ -455,7 +455,7 @@ def _preference_claims(inputs: Inputs) -> Section:
         return Section()
     entries = [f"{c['id']}: {_clip(c['summary'], SUMMARY_CHARS)}" for c in found]
     return Section(
-        lines=["Earlier user preferences (older claims; directives override them):"],
+        lines=["Earlier user preferences (older claims; directives and settings override them):"],
         entries=entries,
         more="search with claim.search",
         total=_count_tagged(inputs.store, ["preference"]),

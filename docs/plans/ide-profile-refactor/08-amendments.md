@@ -121,7 +121,7 @@ and task it changes. Implementers read this file with their entry.
   concerns one Goal, or a setting when a setting key covers it. Claims live in one Coworld's
   store and need evidence, so a preference claim did not follow the user between Coworlds.
   `settings.update` no longer suggests writing a preference claim. The briefing still lists
-  claims tagged `preference` that already exist, below Goals, saying directives override them,
+  claims tagged `preference` that already exist, below Goals, saying directives and settings override them,
   and omits the item when there are none; it can be removed once no workspace has any. Directives rank above Goals in the briefing,
   so many long preferences would push Goal information out.
 
