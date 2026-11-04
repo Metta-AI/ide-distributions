@@ -42,7 +42,7 @@ decisions is `docs/plans/ide-profile-refactor/`.
 | `prompts/` | The SOUL parts per role, `vocabulary.md` (from metta) and `build.py`; `tools/build_prompts.py` renders `orchestrator/SOUL.md` and `researcher/SOUL.md` and syncs the plugin manifests. |
 | `skills/` | The shipped skills: `common/<category>/<skill>/`, `orchestrator/<skill>/`, `researcher/<skill>/`; `prepare.py` points `skills.external_dirs` at them. |
 | `task_types/` | The four Task types with their completion checklists and Researcher instructions. |
-| `prepare.py` | Profile preparation after install or update: core path marker, protected and retired config keys, the active Coworld's skill directories for every profile, shipped values over earlier defaults (never the model settings), stores, the watcher job, the workspace environment, the default Coworld. |
+| `prepare.py` | Profile preparation after install or update: core path marker, protected and retired config keys, the active Coworld's skill directories for every profile, shipped values over earlier defaults (not the model settings, but for one Orchestrator migration off `kimi-k3`), stores, the watcher job, the workspace environment, the default Coworld. |
 | `cli.py` | The `research` command; each subcommand module registers itself. |
 
 ## Run the tests

@@ -4,9 +4,10 @@
 The model is the profile's own Hermes setting: ``model.default`` and ``model.provider``, with
 ``fallback_providers`` tried in order when the primary fails, all in the profile's
 ``config.yaml``. A new install starts with what the profile's shipped ``config.yaml`` names;
-``prepare.py`` never changes it, and the host neither sets nor reads it. The bridge reads the
-file directly (fast enough for every page load) and writes through ``hermes config set`` (Hermes
-validates the value and keeps the file's comments; about 1.5 seconds per key). The gateway
+``prepare.py`` leaves it alone (but for ``migrate_orchestrator_model``), and the host neither
+sets nor reads it. The bridge reads the file directly (fast enough for every page load) and
+writes through ``hermes config set`` (Hermes validates the value and keeps the file's comments;
+about 1.5 seconds per key). The gateway
 reads the file at the start of every run, so a change applies to the next run of every
 conversation of that profile; a run already going finishes on the model it started with.
 
