@@ -209,7 +209,17 @@ with (
 final = status()
 assert final["coordinator_instance"] == owner and final["sleep_started"] is None, final
 with Store.open(coworld.store_path, kind="coworld") as store:
-    assert store.one("SELECT count(*) FROM tasks")[0] == 1
+    fixture_tasks = store.q("SELECT id FROM tasks WHERE title=?", (args["title"],))
+    assert [row["id"] for row in fixture_tasks] == [task_id]
+    background_tasks = store.q(
+        "SELECT type,capability,created_by FROM tasks WHERE id!=?", (task_id,)
+    )
+    assert all(
+        row["type"] == "maintenance"
+        and row["capability"] is not None
+        and row["created_by"] == "harness"
+        for row in background_tasks
+    ), [dict(row) for row in background_tasks]
     commands = store.q("SELECT * FROM transition_commands")
     assert len(commands) == 3 and all(row["completed_at"] for row in commands)
     owners = {row["owner_instance"] for row in commands}
@@ -220,7 +230,8 @@ print(
         {
             "proof": "packaged_transition_commands",
             "commands": len(commands),
-            "tasks": 1,
+            "fixture_tasks": len(fixture_tasks),
+            "background_tasks": len(background_tasks),
             "owner_instances": sorted(owners),
             "replay": "same result",
             "payload_conflict": "refused",
