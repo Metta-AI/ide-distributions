@@ -1,8 +1,17 @@
 -- Assignment identity survives retries; execution identity does not.
 ALTER TABLE task_assignments ADD COLUMN current_attempt_id TEXT REFERENCES client_admissions(op_id);
+-- Retain live or uncertain execution; after settlement, preserve queued dispatch order.
 UPDATE task_assignments SET current_attempt_id=COALESCE(
     (SELECT a.op_id FROM client_admissions a WHERE a.session_id=task_assignments.session_id
-     AND a.delivery_mode='start' ORDER BY a.dispatch_started DESC,a.rowid DESC LIMIT 1), op_id
+     AND a.kind='message' AND a.delivery_mode='start'
+     ORDER BY CASE
+       WHEN a.dispatch_started=1 AND (a.status IN ('queued','running')
+         OR a.execution_uncertain=1 OR a.resolution_required=1) THEN 0
+       WHEN a.dispatch_started=0 AND a.status='queued' AND a.cancel_requested=0 THEN 1
+       ELSE 2 END,
+       CASE WHEN a.dispatch_started=0 AND a.status='queued' AND a.cancel_requested=0
+         THEN a.rowid END ASC,
+       a.dispatch_started DESC,a.rowid DESC LIMIT 1), op_id
 );
 CREATE TRIGGER task_assignment_initial_attempt AFTER INSERT ON task_assignments
 WHEN NEW.current_attempt_id IS NULL BEGIN

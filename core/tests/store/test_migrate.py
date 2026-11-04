@@ -369,7 +369,10 @@ def test_admission_schema_does_not_activate_legacy_quarantine_before_its_owner_e
 
 
 @pytest.mark.parametrize("lost_receipt", [False, True])
-def test_attempt_pointer_migration_uses_latest_execution_not_first_attempt_or_steer(lost_receipt):
+@pytest.mark.parametrize("state", ["running", "failed", "interrupted"])
+def test_attempt_pointer_migration_preserves_live_authority_or_first_queued_successor(
+    lost_receipt, state
+):
     conn = sqlite3.connect(":memory:", isolation_level=None)
     conn.row_factory = sqlite3.Row
     for version, path in migrate.migration_files("workspace"):
@@ -381,8 +384,9 @@ def test_attempt_pointer_migration_uses_latest_execution_not_first_attempt_or_st
     )
     for op_id, status, mode, run_id in (
         ("first", "failed", "start", "first-run"),
-        ("second", "running", "start", "second-run"),
+        ("second", state, "start", "second-run"),
         ("guidance", "running", "steer", "second-run"),
+        ("queued-retry", "queued", "start", None),
         ("queued-guidance", "queued", "start", None),
     ):
         conn.execute(
@@ -392,6 +396,8 @@ def test_attempt_pointer_migration_uses_latest_execution_not_first_attempt_or_st
             "'2026-11-01T00:00:00Z',?,?,?)",
             (op_id, status, mode, run_id, int(status != "queued")),
         )
+    if state == "interrupted":
+        conn.execute("UPDATE client_admissions SET execution_uncertain=1 WHERE op_id='second'")
     if lost_receipt:
         conn.execute(
             "INSERT INTO client_admissions(op_id,kind,request,session_id,message,payload,status,"
@@ -405,5 +411,5 @@ def test_attempt_pointer_migration_uses_latest_execution_not_first_attempt_or_st
     )
     conn.execute("PRAGMA user_version=6")
     migrate.apply_migrations(conn, "workspace")
-    expected = "lost-receipt" if lost_receipt else "second"
+    expected = "lost-receipt" if lost_receipt else "queued-retry" if state == "failed" else "second"
     assert conn.execute("SELECT current_attempt_id FROM task_assignments").fetchone()[0] == expected
