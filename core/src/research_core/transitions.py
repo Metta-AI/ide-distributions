@@ -83,12 +83,16 @@ def request(ctx: ToolContext, tool: str, args: dict, operation_id: str) -> dict:
                 task_id = arguments.record_number(args["task"], "task", "task")
                 tasks.require_holder(ctx.store, task_id, ctx.actor)
                 assignment = ctx.wstore.one(
-                    "SELECT a.current_attempt_id,execution.status FROM task_assignments a"
+                    "SELECT a.current_attempt_id,a.state,execution.status FROM task_assignments a"
                     " JOIN client_admissions execution ON execution.op_id=a.current_attempt_id"
                     " WHERE a.session_id=? AND a.task_id=?",
                     (ctx.actor.id, task_id),
                 )
-                if assignment is None or assignment["status"] not in {"queued", "running"}:
+                if (
+                    assignment is None
+                    or assignment["state"] != "held"
+                    or assignment["status"] not in {"queued", "running"}
+                ):
                     raise ToolError("This worker execution no longer has task transition authority")
                 issuer_attempt_id = assignment["current_attempt_id"]
             tx.execute(

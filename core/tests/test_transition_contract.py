@@ -492,6 +492,7 @@ def test_release_before_start_receipt_retains_execution_authority(tmp_path, lost
                 store=store,
                 wstore=wstore,
                 actor=Actor.session(row["session_id"]),
+                env=ctx.env,
                 coworld=lambda: ctx.coworld,
                 hermes_session_id=lambda: row["session_id"],
             )
@@ -794,7 +795,8 @@ def test_work_status_omits_acknowledged_history(tmp_path):
     owner.advance_attempts(ctx)
     assert admissions.work_status(ctx.wstore) == []
 
-@pytest.mark.parametrize("action", ["wait", "ask", "release"])
+
+@pytest.mark.parametrize("action", ["wait", "ask", "release", "complete"])
 def test_accepted_worker_report_survives_exit_before_application(tmp_path, monkeypatch, action):
     ctx = make_ctx(tmp_path)
     row = assigned(ctx)
@@ -813,6 +815,12 @@ def test_accepted_worker_report_survives_exit_before_application(tmp_path, monke
             "wait": {"kind": "platform", "detail": "Platform unavailable"},
             "ask": {"question": "Which approach?"},
             "release": {"reason": "Cannot proceed"},
+            "complete": {
+                "checklist": {"summary": "Fixed", "commit": "a" * 40},
+                "merge": "no",
+                "merge_reason": "No code",
+                "result": "Fixed",
+            },
         }[action]
     )
     with monkeypatch.context() as patch:
@@ -875,3 +883,41 @@ def test_durable_command_preserves_explicit_stale_epoch(tmp_path):
     with pytest.raises(LeaseError, match="lease epoch"):
         transitions.request(tool_ctx, "task", {"action": "release", "task": "T-1"}, "stale")
     assert not ctx.store.q("SELECT * FROM transition_commands")
+
+
+@pytest.mark.parametrize("accepted_first", [False, True])
+def test_release_retirement_serializes_with_worker_report_acceptance(
+    tmp_path, monkeypatch, accepted_first
+):
+    ctx = make_ctx(tmp_path)
+    row = assigned(ctx)
+    owner = coordinator(ctx)
+    worker = ToolContext(
+        role="researcher",
+        actor=Actor.session(row["session_id"]),
+        workspace=ctx.ws,
+        env={**ctx.env, "IDE_SESSION_ID": row["session_id"]},
+    )
+    worker.store, worker.wstore = ctx.store, ctx.wstore
+    args = {"action": "wait", "task": "T-1", "kind": "platform", "detail": "Unavailable"}
+    if accepted_first:
+        with monkeypatch.context() as patch:
+            ticks = iter([0, 16])
+            patch.setattr(transitions.time, "monotonic", lambda: next(ticks))
+            pending = transitions.request(worker, "task", args, "report")
+    Coordinator.request_release(worker, 1, "Done")
+    if not accepted_first:
+        with pytest.raises(ToolError, match="no longer has task transition authority"):
+            transitions.request(worker, "task", args, "late")
+        assert not ctx.store.q("SELECT * FROM transition_commands")
+        return
+    ctx.hermes.complete(row["run_id"])
+    owner.reconcile()
+    owner.finish_assignments(ctx.wstore)
+    assert ctx.wstore.one("SELECT 1 FROM task_assignments")
+    assert tasks.read(ctx.store, 1)["held_by"] == row["session_id"]
+    transitions.apply(ctx, "replacement-coordinator")
+    assert transitions.receipt(ctx.store, pending["command_id"])["ok"]
+    owner.finish_assignments(ctx.wstore)
+    assert not ctx.wstore.one("SELECT 1 FROM task_assignments")
+    assert tasks.read(ctx.store, 1)["status"] == "unclaimed"

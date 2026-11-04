@@ -1863,6 +1863,12 @@ class Coordinator:
                         )
                     ):
                         continue
+                    if task_store.one(
+                        "SELECT 1 FROM transition_commands WHERE issuer_attempt_id=?"
+                        " AND result IS NULL",
+                        (latest["current_attempt_id"],),
+                    ):
+                        continue
                     assignment = dict(assignment) | dict(latest)
                     task = tasks.read(task_store, assignment["task_id"])
                     if (
