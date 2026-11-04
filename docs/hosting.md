@@ -26,7 +26,7 @@ metta changes); the build decisions are in `docs/plans/ide-profile-refactor/00-o
 ```
 hermes profile install <checkout>/orchestrator --name orchestrator --yes
 hermes profile install <checkout>/researcher --name researcher --yes     # one or several
-<hermes python> <profile>/scripts/prepare.py --source <checkout>/<folder> --hermes <hermes> [--activate-supervisor] [--check]
+<hermes python> <profile>/scripts/prepare.py --source <checkout>/<folder> --hermes <hermes> [--check]
 ```
 
 Run `prepare.py` after every install and every `hermes profile update`, with
@@ -45,8 +45,7 @@ when you call the script). With `IDE_WORKSPACE` unset the workspace defaults to
    Moonshot only) unless the owner set routing for that model or for every model
    (Hermes applies a per-model entry over the rules for every model, so route a Kimi model
    differently with an entry under `provider_routing.models`);
-4. reconciles the Orchestrator's `watcher` cron job (kept paused until `--activate-supervisor`
-   on the first preparation);
+4. retires the Orchestrator's obsolete `watcher` cron job; `research serve` owns scheduling;
 5. builds the workspace environment with `uv sync --frozen --no-dev --project <checkout>` into
    `$IDE_WORKSPACE/tools/venv`, or verifies a prebuilt one named by `IDE_WORKSPACE_ENV` against
    the lock's sha256;

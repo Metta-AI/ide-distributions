@@ -78,6 +78,7 @@ KEEPALIVE_S = 10.0  # an SSE comment keeps an idle connection open through proxi
 STREAM_BATCH = 500
 DEFAULT_PORT = 8650
 WATCHER_INTERVAL_S = 60.0
+RUN_POLL_INTERVAL_S = 1.0
 DEFAULT_ACTOR = "user:local"
 RETRY_AFTER_S = 1
 UI_ACTIONS = ("answer", "reaction")
@@ -184,6 +185,8 @@ class SeamServer:
         # did not open is stamped with the client the context block names, if any.
         self._clients: dict[str, dict[str, Any]] = {}
         self._deliver_lock = threading.Lock()
+        self._acknowledged_receipts: dict[str, str] = {}
+        self._last_native_poll: dict[tuple[str, str], float] = {}
         self.stopping = threading.Event()
         # Initialize the schema before the dispatcher and HTTP handlers can open it concurrently.
         with Store.open(self.ws.store_path, kind="workspace") as store:
@@ -485,21 +488,42 @@ class SeamServer:
                         (opening["op_id"],),
                     )
             reserved: set[str] = set()
-            for row in stores.wstore.q(
+            pending = stores.wstore.q(
                 "SELECT * FROM client_admissions AS message WHERE kind='message'"
                 " AND (status IN ('queued','running') OR resolution_required=1)"
                 " AND (message.dispatch_started=1 OR NOT EXISTS("
                 " SELECT 1 FROM client_admissions AS opening"
                 " WHERE opening.kind='open' AND opening.status='queued'"
                 " AND opening.session_id=message.session_id)) ORDER BY rowid"
-            ):
+            )
+            active = {row["op_id"] for row in pending}
+            self._acknowledged_receipts = {
+                op_id: run_id
+                for op_id, run_id in self._acknowledged_receipts.items()
+                if op_id in active
+            }
+            active_runs = {(row["profile"], row["run_id"]) for row in pending if row["run_id"]}
+            self._last_native_poll = {
+                key: at for key, at in self._last_native_poll.items() if key in active_runs
+            }
+            for row in pending:
                 if row["session_id"] in reserved:
                     continue
                 if row["run_id"]:
-                    self.coordinator.acknowledge_inputs(stores.wstore, row)
+                    if self._acknowledged_receipts.get(row["op_id"]) != row["run_id"]:
+                        self.coordinator.acknowledge_inputs(stores.wstore, row)
+                        self._acknowledged_receipts[row["op_id"]] = row["run_id"]
+                    key = (row["profile"], row["run_id"])
+                    now = time.monotonic()
                     if row["cancel_requested"]:
-                        self.hermes.stop(row["run_id"], profile=row["profile"])
-                    status = self.hermes.status(row["run_id"], profile=row["profile"])
+                        status = self.hermes.stop(row["run_id"], profile=row["profile"])
+                    elif (
+                        now - self._last_native_poll.get(key, float("-inf")) >= RUN_POLL_INTERVAL_S
+                    ):
+                        status = self.hermes.status(row["run_id"], profile=row["profile"])
+                    else:
+                        continue
+                    self._last_native_poll[key] = now
                     self.coordinator.settle_attempt(stores.wstore, row["op_id"], status)
                     continue
                 opening = stores.wstore.one(

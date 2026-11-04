@@ -17,8 +17,7 @@ In order, ``prepare``:
    shipped ``config.yaml`` and the bridge's ``/models`` route changes them. It adds the
    shipped OpenRouter host pins (``PROVIDER_ROUTING_MODELS``) the owner's routing does not
    already decide, so the two shipped Kimi models go only to Moonshot's own endpoint;
-4. (Orchestrator) reconciles the watcher cron job with the shipped definition and, on the first
-   preparation with ``activate_watcher``, resumes it;
+4. (Orchestrator) removes the retired observation cron; research serve owns scheduling;
 5. builds or checks the workspace environment under a file lock;
 6. (Orchestrator, fresh workspace, ``IDE_DEFAULT_COWORLD`` set) registers and activates the
    default Coworld through the workspace environment;
@@ -34,7 +33,6 @@ Config comes before the (slow, network-bound) environment build so that a failed
 
 from __future__ import annotations
 
-import copy
 import hashlib
 import json
 import os
@@ -142,19 +140,6 @@ ENV_PASSTHROUGH: dict[str, list[str]] = {
     "orchestrator": ["IDE_RESEARCHER_PROFILES"],
     "researcher": [],
 }
-
-# The authored fields of the watcher job that the shipped definition owns. Everything else in
-# the live record (pause state, run history, next_run_at, ...) belongs to the store and is kept.
-WATCHER_JOB_FIELDS: tuple[str, ...] = (
-    "name",
-    "prompt",
-    "script",
-    "no_agent",
-    "schedule",
-    "schedule_display",
-    "enabled_toolsets",
-    "deliver",
-)
 
 Runner = Callable[..., subprocess.CompletedProcess]
 
@@ -273,13 +258,6 @@ class HermesCli:
             return False
         raise _failed(result)
 
-    def cron_resume(self, job_id: str) -> None:
-        if self.dry_run:
-            self.planned.append(f"cron: resume {job_id}")
-            return
-        result = self._call("cron", "resume", job_id)
-        if result.returncode != 0:
-            raise _failed(result)
 
 
 class HermesConfig(HermesCli):
@@ -512,38 +490,17 @@ def _write_json_atomic(path: Path, payload: Any) -> None:
     os.replace(pending, path)
 
 
-def reconcile_watcher_job(profile: Path, source: Path) -> str:
-    """Make the live watcher job match the shipped authored fields; add it paused if missing.
-
-    The live store's other jobs, the watcher's pause state and its run history are kept. The
-    store is rewritten atomically (``jobs.json.pending`` then ``os.replace``).
-    """
-    shipped_job = _find_job(_job_list(_load_json(source / "cron" / "jobs.json")), WATCHER_JOB_ID)
-    if shipped_job is None:
-        raise PrepareError(f"{source} ships no '{WATCHER_JOB_ID}' cron job")
+def retire_watcher_job(profile: Path) -> str:
+    """Remove the retired observation cron while preserving unrelated scheduled work."""
     jobs_path = profile / "cron" / "jobs.json"
     payload = _load_json(jobs_path) if jobs_path.exists() else {"jobs": []}
     if isinstance(payload, list):
         payload = {"jobs": payload}
     if not isinstance(payload, dict):
         raise PrepareError(f"{jobs_path} is not a cron store")
-    jobs = _job_list(payload)
-    live = _find_job(jobs, WATCHER_JOB_ID)
-    if live is None:
-        jobs.append(copy.deepcopy(shipped_job))
-        action = "cron: added the watcher job (paused)"
-    else:
-        changed = sorted(f for f in WATCHER_JOB_FIELDS if live.get(f) != shipped_job.get(f))
-        for field in changed:
-            live[field] = copy.deepcopy(shipped_job[field])
-        action = (
-            f"cron: watcher job updated ({', '.join(changed)})"
-            if changed
-            else "cron: watcher job unchanged"
-        )
-    payload["jobs"] = jobs
+    payload["jobs"] = [job for job in _job_list(payload) if job["id"] != WATCHER_JOB_ID]
     _write_json_atomic(jobs_path, payload)
-    return action
+    return "cron: retired the watcher job; research serve owns observation"
 
 
 # --- the workspace environment ----------------------------------------------------------------
@@ -609,7 +566,6 @@ def ensure_workspace_env(
 def prepare(
     source: Path,
     cli: HermesCli,
-    activate_watcher: bool,
     env: Mapping[str, str] = os.environ,
     run: Runner = subprocess.run,
     *,
@@ -618,8 +574,8 @@ def prepare(
     """Prepare the profile at ``$HERMES_HOME`` from the distribution folder ``source``.
 
     ``source`` is ``<checkout>/orchestrator`` or ``<checkout>/researcher``; its name is the
-    role. ``cli`` configures the selected Hermes profile. ``activate_watcher`` resumes the watcher
-    job on the first preparation only (the ``.softmax-prepared`` marker records that one happened).
+    role. ``cli`` configures the selected Hermes profile. The lifetime research serve
+    service owns observation and scheduling; preparation retires its former cron job.
     """
     source = Path(source)
     role = source.name
@@ -665,10 +621,7 @@ def prepare(
     marker = profile / PREPARED_MARKER
     if role == "orchestrator":
         if not check:
-            actions.append(reconcile_watcher_job(profile, source))
-        if activate_watcher and not marker.exists():
-            cli.cron_resume(WATCHER_JOB_ID)
-            actions.append("cron: resumed the watcher job")
+            actions.append(retire_watcher_job(profile))
 
     if check:
         actions.extend(cli.planned)

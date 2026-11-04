@@ -601,3 +601,47 @@ def test_failed_reopening_does_not_discard_existing_execution(tmp_path, lost_sta
         )
     finally:
         server._http.server_close()
+
+
+def test_unsent_steer_retries_after_connection_recovers_without_uncertainty(tmp_path):
+    from research_core.watcher.hermes_api import RunsNotSent
+
+    class RefusedConnection(FakeHermesRuns):
+        refuse = True
+
+        def steer(self, run_id, text, *, profile):
+            if self.refuse:
+                raise RunsNotSent("Connection refused before send")
+            return super().steer(run_id, text, profile=profile)
+
+    ctx = make_ctx(tmp_path)
+    native = RefusedConnection()
+    owner = Coordinator(ctx.workspace, native, "same-runtime")
+    sessions.register(ctx.wstore, HARNESS, session_id="chat", profile="orchestrator", kind="chat")
+    first = owner.start(
+        profile="orchestrator", session_id="chat", text="original", idempotency_key="one"
+    )
+    admissions.enqueue(
+        ctx.wstore,
+        HARNESS,
+        key="two",
+        session_id="chat",
+        profile="orchestrator",
+        text="followup",
+        origin="client",
+    )
+    with pytest.raises(RunsNotSent):
+        owner.start(
+            profile="orchestrator", session_id="chat", text="followup", idempotency_key="two"
+        )
+    [pending] = ctx.wstore.q("SELECT * FROM client_admissions WHERE native_key='two'")
+    assert not pending["dispatch_started"] and not pending["execution_uncertain"]
+    native.refuse = False
+    assert (
+        owner.start(
+            profile="orchestrator", session_id="chat", text="followup", idempotency_key="two"
+        )
+        == first
+    )
+    assert native.steered[first] == ["followup"]
+    assert not admissions.restart_required(ctx.wstore)

@@ -176,7 +176,6 @@ async def run(stack: AsyncExitStack) -> None:
             str(SOURCE / role),
             "--hermes",
             HERMES,
-            "--activate-supervisor",
             env=profile_env,
         )
         report("profile_prepare", phase_started, role=role)

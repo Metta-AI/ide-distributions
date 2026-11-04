@@ -28,12 +28,8 @@ KINDS: frozenset[str] = frozenset(
     {
         "execution.queued",
         "execution.admitted",
-        "execution.start_failed",
-        "execution.needs_resolution",
         "task.assigned",
         "task.release_requested",
-        "coordinator.observation_requested",
-        "coordinator.pause_requested",
         "goal.created",
         "goal.updated",
         "goal.status",

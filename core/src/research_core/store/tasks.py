@@ -31,6 +31,7 @@ from __future__ import annotations
 import builtins
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from research_core import task_types
@@ -351,6 +352,12 @@ def link(
 # --- leases ---------------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class ClaimRefused:
+    problems: tuple[str, ...]
+    lease: bool = False
+
+
 def claim(
     store: Store,
     actor: Actor,
@@ -361,6 +368,25 @@ def claim(
     branch: str,
     kind: str = "task",
 ) -> dict[str, Any]:
+    """Claim the task, raising the existing typed store refusal for tool callers."""
+    result = claim_result(
+        store, actor, task_id, run_id=run_id, worktree=worktree, branch=branch, kind=kind
+    )
+    if isinstance(result, ClaimRefused):
+        raise (LeaseError if result.lease else StoreError)(builtins.list(result.problems))
+    return result
+
+
+def claim_result(
+    store: Store,
+    actor: Actor,
+    task_id: int | str,
+    *,
+    run_id: str | None,
+    worktree: str,
+    branch: str,
+    kind: str = "task",
+) -> dict[str, Any] | ClaimRefused:
     """Take the Task's lease: status ``in-progress``, ``held_by`` the session, epoch raised.
 
     Refused when the Task is not unclaimed, not approved, waits for a dependency, or is held
@@ -375,7 +401,7 @@ def claim(
     require(problems, _text(branch), "branch is required")
     require(problems, kind in SESSION_KINDS, f"kind must be task or change, not {kind!r}")
     if problems:
-        raise StoreError(problems)
+        return ClaimRefused(tuple(problems))
     # BEGIN IMMEDIATE holds the write lock from here: the status check below is serialised
     # with every other claim, so of two concurrent claims one sees the other's result.
     with store.tx(actor) as tx:
@@ -399,7 +425,7 @@ def claim(
         if blocking:
             problems.append(f"{_t(n)} waits for {', '.join(blocking)} to complete")
         if problems:
-            raise (LeaseError if lease_problem else StoreError)(problems)
+            return ClaimRefused(tuple(problems), lease=lease_problem)
         epoch = row["lease_epoch"] if same_holder else row["lease_epoch"] + 1
         tx.execute(
             "UPDATE tasks SET status = 'in-progress', held_by = ?, lease_epoch = ?,"

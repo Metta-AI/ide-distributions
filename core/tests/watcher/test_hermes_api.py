@@ -541,3 +541,26 @@ def test_fake_create_session_then_messages():
         ("session_messages", {"session_id": "api_1_new", "profile": "orchestrator"}),
         ("session_messages", {"session_id": "api_1_none", "profile": "orchestrator"}),
     ]
+
+
+@pytest.mark.parametrize(
+    "cause,unsent",
+    [
+        (ConnectionRefusedError(), True),
+        (socket.gaierror(), True),
+        (TimeoutError(), False),
+        (ConnectionResetError(), False),
+    ],
+)
+def test_transport_distinguishes_unsent_connection_setup_from_ambiguous_delivery(cause, unsent):
+    from urllib.error import URLError
+
+    from research_core.watcher.hermes_api import RunsNotSent
+
+    def failed(request, *, timeout):
+        raise URLError(cause)
+
+    native = HermesRuns(base_url="http://fixture", keys=KEYS, opener=failed)
+    with pytest.raises(RunsUnavailable) as error:
+        native.steer("run", "input", profile="researcher")
+    assert isinstance(error.value, RunsNotSent) == unsent

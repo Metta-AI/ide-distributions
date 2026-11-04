@@ -76,7 +76,7 @@ def test_plugin_shim_is_stdlib_only(role):
 @pytest.mark.parametrize("role", sorted(PROFILES))
 def test_prepare_script_is_stdlib_only_and_takes_the_hosting_flags(role):
     text = (PROFILES[role] / "scripts" / "prepare.py").read_text()
-    for flag in ("--source", "--hermes", "--activate-supervisor"):
+    for flag in ("--source", "--hermes"):
         assert flag in text
     tree = ast.parse(text)
     for node in ast.walk(tree):
@@ -84,14 +84,10 @@ def test_prepare_script_is_stdlib_only_and_takes_the_hosting_flags(role):
             assert (node.module or "").split(".")[0] in STDLIB
 
 
-def test_watcher_cron_job_shape():
+def test_profiles_ship_no_observation_cron():
     jobs = json.loads((PROFILES["orchestrator"] / "cron" / "jobs.json").read_text())["jobs"]
-    (job,) = jobs
-    assert job["id"] == "watcher" and job["no_agent"] is True and job["script"] == "watcher.py"
-    assert job["schedule"] == {"kind": "interval", "minutes": 1, "display": "every 1m"}
-    assert job["enabled"] is False and job["state"] == "paused"
-    assert job["enabled_toolsets"] == []
-    assert (PROFILES["orchestrator"] / "scripts" / "watcher.py").is_file()
+    assert jobs == []
+    assert not (PROFILES["orchestrator"] / "scripts" / "watcher.py").exists()
     assert not (PROFILES["researcher"] / "cron").exists()
 
 

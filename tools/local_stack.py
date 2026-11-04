@@ -931,7 +931,7 @@ up() {{
     install_profile orchestrator
     install_profile researcher
     write_env_files
-    prepare_profile orchestrator --activate-supervisor
+    prepare_profile orchestrator
     prepare_profile researcher
     configure_fake_platform
     start_gateway

@@ -42,6 +42,7 @@ from research_core.watcher.hermes_api import (
     RunsAuthError,
     RunsBusy,
     RunsError,
+    RunsNotSent,
     mint_session_id,
 )
 from research_core.watcher.resume import (
@@ -224,7 +225,7 @@ class Coordinator:
                     finally:
                         error = sys.exception()
                         rejected = isinstance(error, RunsError) and (
-                            isinstance(error, RunsAuthError)
+                            isinstance(error, (RunsAuthError, RunsNotSent))
                             or error.status in {400, 401, 403, 404, 409, 422, 429}
                             or (
                                 error.status == 503
@@ -287,7 +288,7 @@ class Coordinator:
                         if assignment["state"] != "held":
                             raise RunsError(
                                 "Worker ownership requires resolution",
-                                code="needs_resolution",
+                                code="assignment_not_held",
                                 retryable=False,
                             )
                         if admissions.reserved_workers(store, session_id) >= int(
@@ -340,7 +341,7 @@ class Coordinator:
                                     code="assignment_stale",
                                     retryable=False,
                                 )
-                            tasks.claim(
+                            claim = tasks.claim_result(
                                 task_store,
                                 Actor.session(session_id),
                                 reservation["task_id"],
@@ -348,6 +349,12 @@ class Coordinator:
                                 worktree=str(coworld.worktree_for_task(reservation["task_id"])),
                                 branch=f"task/{reservation['task_id']}",
                             )
+                            if isinstance(claim, tasks.ClaimRefused):
+                                raise RunsError(
+                                    "; ".join(claim.problems),
+                                    code="assignment_stale",
+                                    retryable=False,
+                                )
                     if not capabilities["supported"] or not capabilities["durable"]:
                         raise RunsError(
                             "Durable native admission unavailable",

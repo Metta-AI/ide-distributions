@@ -13,8 +13,7 @@ from research_core.coordinator import Coordinator
 from research_core.store import notices, settings
 from research_core.store.db import Store
 from research_core.store.errors import SchemaMismatch, SchemaNewer
-from research_core.watcher import store_checks
-from research_core.watcher import tick as tick_module
+from research_core.watcher import context, store_checks
 from tests.watcher._support import USER, events_of, make_ctx, set_setting
 
 
@@ -230,7 +229,7 @@ def test_a_store_turning_newer_while_open_is_set_aside_in_the_tick(tmp_path):
     assert_newer_store_untouched(store_path)
 
 
-def test_a_newer_workspace_store_stops_the_tick_with_the_reason(tmp_path, capsys):
+def test_a_newer_workspace_store_stops_coordinator_context_with_the_reason(tmp_path, capsys):
     ctx = make_ctx(tmp_path)
     set_setting(ctx, "paused", False)
     wstore_path = ctx.wstore.path
@@ -244,7 +243,7 @@ def test_a_newer_workspace_store_stops_the_tick_with_the_reason(tmp_path, capsys
     from research_core.store.errors import SchemaNewer
 
     with pytest.raises(SchemaNewer, match="newer release"):
-        tick_module.main([], env=env)
+        context.build(env)
     raw = sqlite3.connect(f"file:{wstore_path}?mode=ro", uri=True)
     try:
         assert raw.execute("PRAGMA user_version").fetchone()[0] == 99

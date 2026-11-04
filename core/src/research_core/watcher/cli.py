@@ -1,8 +1,7 @@
-"""``research watcher`` (``tick``, ``status``) and ``research workspace`` (``sleep``, ``wake``,
+"""``research watcher status`` and ``research workspace`` (``sleep``, ``wake``,
 ``drain``, ``recover``).
 
-``tick`` is what the Orchestrator's cron script runs every minute
-(``orchestrator/scripts/watcher.py`` starts it in the workspace environment); ``status``
+``status``
 prints the last heartbeat and the has-work signal from the workspace store for a person or
 ``workspace.doctor``. ``workspace sleep`` and ``workspace wake`` are how the host starts and
 ends a sleep cycle (``watcher/sleep.py``; ``docs/hosting.md`` "Gateway, sleep and drain");
@@ -22,7 +21,6 @@ from research_core.store import admissions, settings
 from research_core.store._common import parse_iso
 from research_core.store.db import Store
 from research_core.watcher import context, drain
-from research_core.watcher import tick as tick_module
 from research_core.watcher.tick import PAUSED_DRAINED_KEY
 
 NO_HERMES_HOME = (
@@ -33,12 +31,10 @@ NO_HERMES_HOME = (
 
 def add_parser(subparsers: argparse._SubParsersAction) -> None:
     watcher = subparsers.add_parser(
-        "watcher", help="The Orchestrator's model-less cron job: run one tick, or its status"
+        "watcher", help="Inspect workspace coordinator status"
     )
     commands = watcher.add_subparsers(dest="watcher_command", metavar="<subcommand>")
     commands.required = True
-    tick = commands.add_parser("tick", help="Run one watcher tick and print its JSON summary")
-    tick.set_defaults(run=run_tick)
     status = commands.add_parser(
         "status", help="Print the last heartbeat, the has-work signal and the pause state"
     )
@@ -84,10 +80,6 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Attest the local gateway and workers have stopped; inputs are never replayed",
     )
     recover.set_defaults(run=run_recover)
-
-
-def run_tick(args: argparse.Namespace) -> int:
-    return tick_module.main([])
 
 
 def run_status(args: argparse.Namespace) -> int:

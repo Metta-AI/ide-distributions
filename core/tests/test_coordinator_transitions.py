@@ -519,3 +519,79 @@ def test_definitely_rejected_worker_messages_get_immutable_redelivery(tmp_path):
         assert current["payload"] == attempt["payload"]
         assert current["native_key"] == attempt["native_key"]
         assert current["run_id"] is None
+
+
+def test_dependency_reopened_after_reservation_settles_without_native_start(tmp_path):
+    ctx = make_ctx(tmp_path)
+    dependency = assigned(ctx)
+    complete_task(ctx, dependency)
+    task = tasks.create(
+        ctx.store,
+        HARNESS,
+        type="maintenance",
+        title="Dependent work",
+        description="Requires completed prerequisite",
+        depends_on=["T-1"],
+    )
+    command = SimpleNamespace(
+        env=ctx.env, store=ctx.store, wstore=ctx.wstore, actor=HARNESS, coworld=lambda: ctx.coworld
+    )
+    reserved = Coordinator.reserve(
+        command,
+        task_id=2,
+        task_updated=task["updated"],
+        profile="researcher",
+        assignment_id="dependent",
+        context="Continue after prerequisite",
+        rationale="Dependency is complete",
+    )
+    tasks.reopen(ctx.store, HARNESS, 1, reason="Prerequisite needs revision")
+    for _ in range(3):
+        dispatch_inputs(ctx)
+        coordinator(ctx).finish_assignments(ctx.wstore)
+    admission = ctx.wstore.one(
+        "SELECT * FROM client_admissions WHERE op_id=?", (reserved["op_id"],)
+    )
+    assert admission["status"] == "failed" and not admission["dispatch_started"]
+    assert "waits for T-1" in admission["error"]
+    assert len(ctx.hermes.runs) == 1
+    assert tasks.read(ctx.store, 2)["status"] == "unclaimed"
+    assert ctx.wstore.one("SELECT 1 FROM task_assignments WHERE task_id=2") is None
+
+
+def test_dispatch_polls_running_receipt_once_per_interval_and_acknowledges_once(
+    tmp_path, monkeypatch
+):
+    import asyncio
+    import time
+
+    from research_core import serve
+
+    ctx = make_ctx(tmp_path)
+    row = assigned(ctx)
+    server = serve.SeamServer(ws=ctx.ws, hermes=ctx.hermes, env=dict(ctx.env))
+    monkeypatch.setattr(serve, "RUN_POLL_INTERVAL_S", 60)
+    acknowledged = []
+    acknowledge = server.coordinator.acknowledge_inputs
+
+    def track(store, admission):
+        acknowledged.append(admission["op_id"])
+        acknowledge(store, admission)
+
+    monkeypatch.setattr(server.coordinator, "acknowledge_inputs", track)
+    ctx.hermes.calls.clear()
+    try:
+        for _ in range(3):
+            asyncio.run(server.dispatch_messages())
+        assert acknowledged == [row["op_id"]]
+        assert sum(method == "status" for method, _ in ctx.hermes.calls) == 1
+        ctx.hermes.complete(row["run_id"])
+        server._last_native_poll[(row["profile"], row["run_id"])] = time.monotonic() - 61
+        asyncio.run(server.dispatch_messages())
+        assert (
+            ctx.wstore.one("SELECT status FROM client_admissions WHERE op_id=?", (row["op_id"],))[0]
+            == "completed"
+        )
+        assert acknowledged == [row["op_id"]]
+    finally:
+        server._http.server_close()

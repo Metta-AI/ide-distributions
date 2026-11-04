@@ -28,6 +28,7 @@ from __future__ import annotations
 import hashlib
 import json
 import secrets
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -108,6 +109,10 @@ class RunsUnavailable(RunsBusy):
     A special case of :class:`RunsBusy`: ``except RunsBusy`` covers both, and code that cares
     whether the gateway is reachable at all can catch this one first.
     """
+
+
+class RunsNotSent(RunsUnavailable):
+    """Connection setup failed before HTTP request bytes could reach the gateway."""
 
 
 class RunsAuthError(RunsError):
@@ -399,7 +404,13 @@ class HermesRuns:
             response = _Response(error.code, _parse_body(error.read()))
         except OSError as error:  # URLError (connection refused), timeouts, resets
             detail = f"{type(error).__name__}: {error}".strip(": ")
-            raise RunsUnavailable(f"gateway unreachable: {detail}", route=route) from error
+            cause = error.reason if isinstance(error, urllib.error.URLError) else error
+            error_type = (
+                RunsNotSent
+                if isinstance(cause, (ConnectionRefusedError, socket.gaierror))
+                else RunsUnavailable
+            )
+            raise error_type(f"gateway unreachable: {detail}", route=route) from error
         if response.status in accept:
             return response
         raise self._error_for(route, response)
