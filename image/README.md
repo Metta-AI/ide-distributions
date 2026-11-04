@@ -133,8 +133,8 @@ request can exceed that budget; Docker must be healthy before interpreting a ben
 Container timing ends at application health. Platform control readiness and browser usability
 remain separate gates; the smoke's deliberately unavailable platform does not prove either.
 
-The packaging comparison workflow builds the pull request's source and lockfile twice on one
-Linux runner: once with the base revision's Dockerfile and once with the proposed Dockerfile.
+The startup comparison workflow builds the PR base and candidate from their own source and
+lockfile on one Linux runner.
 Each image runs one fresh boot and five retained boots with the same smoke command. This
 isolates packaging changes; it does not compare different application revisions. Both build
 identities, the baseline Dockerfile, and all per-boot timing reports are retained as artifacts.
@@ -157,6 +157,12 @@ do not duplicate these first-readiness events.
 
 These milestones do not claim a completed model turn. Use Metta's packaged chat harness
 for container-to-completed-chat measurements and retained-session verification.
+
+Hermes's base image disables runtime bytecode writes, and hosting mounts its root filesystem
+read-only. The image compiles Hermes's application modules and installed dependencies at build
+time so each gateway restart can load cached bytecode. Tests and optional skill examples are
+excluded from source compilation. The comparison artifact also contains gateway import timings
+and bytecode counts for both images; compilation benefit must be established by the boot results.
 
 The hosted local speech-model path is applied by profile preparation through Hermes's existing
 configuration API. It is included in `profile_prepare` timing. Startup does not launch a separate

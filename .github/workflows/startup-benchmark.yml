@@ -20,6 +20,15 @@ jobs:
           docker build --platform linux/amd64 -f "$RUNNER_TEMP/baseline-source/image/Dockerfile" -t startup-baseline "$RUNNER_TEMP/baseline-source"
           docker build --platform linux/amd64 -f image/Dockerfile -t startup-candidate .
           docker image inspect startup-baseline startup-candidate --format '{{.RepoTags}} {{.Id}} {{.Size}}'
+      - name: Profile gateway imports in both packaged interpreters
+        run: |
+          for variant in baseline candidate; do
+            docker run --rm --entrypoint /opt/hermes/.venv/bin/python "startup-$variant" \
+              -X importtime -c 'import hermes_cli.main; import gateway.run' > "$RUNNER_TEMP/$variant-imports.log" 2>&1
+            docker run --rm --entrypoint /opt/hermes/.venv/bin/python "startup-$variant" \
+              -c 'import pathlib,sysconfig; root=pathlib.Path("/opt/hermes"); site=pathlib.Path(sysconfig.get_path("purelib")); print("gateway pyc",len(list((root/"gateway").rglob("*.pyc"))),"CLI pyc",len(list((root/"hermes_cli").rglob("*.pyc"))),"dependency pyc",len(list(site.rglob("*.pyc"))))' \
+              > "$RUNNER_TEMP/$variant-bytecode.txt"
+          done
       - name: Measure baseline startup
         env:
           STARTUP_CYCLES: "6"
@@ -36,5 +45,7 @@ jobs:
         with:
           name: workspace-packaging-comparison
           path: |
+            ${{ runner.temp }}/*-imports.log
+            ${{ runner.temp }}/*-bytecode.txt
             ${{ runner.temp }}/baseline-proof
             ${{ runner.temp }}/candidate-proof
