@@ -52,6 +52,11 @@ with Store.open(layout.from_env().store_path, kind="workspace") as store:
     assert store.get_meta("runtime_recovery_count") == "1"
 print("PASS automatic lost-receipt recovery: one runtime restart, no input replay")
 PY
+# Check the command path while awake, before sleep sign-off changes its preconditions.
+docker exec -e HERMES_HOME=/workspace/host/profiles/researcher "$name" \
+  /opt/hermes/.venv/bin/python /opt/distribution/image/system_tests/check-transitions.py \
+  > "$scratch/transition-commands.json"
+cat "$scratch/transition-commands.json"
 docker exec -e HERMES_HOME=/workspace/host/profiles/orchestrator "$name" \
   /opt/workspace-env/bin/research workspace sleep --wait 0 > "$scratch/recovery-sleep.json"
 docker logs "$name" > "$scratch/recovery.log" 2>&1
@@ -65,10 +70,5 @@ assert len(events) == 1, events
 assert events[0].completed_recoveries == 0, events
 print("PASS recovery telemetry: one request, durable recovery count=1")
 ' < "$scratch/recovery.log"
-# Exercise the new command path in the normal running image, after lifecycle proof.
-docker exec -e HERMES_HOME=/workspace/host/profiles/researcher "$name" \
-  /opt/hermes/.venv/bin/python /opt/distribution/image/system_tests/check-transitions.py \
-  > "$scratch/transition-commands.json"
-cat "$scratch/transition-commands.json"
 docker stop --time 30 "$name" >/dev/null
 docker rm "$name" >/dev/null
