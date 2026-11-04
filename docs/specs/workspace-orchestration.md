@@ -136,8 +136,9 @@ The previous draft's blanket sleep refusal and operator-only resolution states w
 ## Coordinator ownership revision
 
 `Coordinator` owns assignment admission, attempt outcomes, continuation, retry budgets,
-release, and model handoffs. `task.assign` and `task.release` are synchronous coordinator
-commands serialized by the same admission lock. Workers persist task results and messages;
+release, and model handoffs. `task.assign` and `task.release` persist durable commands and may
+return pending receipts. Coordinator application uses the same admission lock. Workers report
+task results and messages through the inbox;
 they cannot dispatch replacement attempts.
 
 There are three service activities:
