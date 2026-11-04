@@ -82,8 +82,8 @@ commands with their owner, deadline, and attempt count.
 
 Verification consists of an independent executable model and SQLite refinement tests:
 
-- One task with two attempts: 9,828 reachable states and 68,946 explored edges.
-- Two concurrent tasks with one attempt each: 54,756 states and 448,812 edges.
+- One task with two attempts: 19,404 reachable states and 136,662 explored edges.
+- Two concurrent tasks with one attempt each: 213,444 states and 1,763,916 edges.
 - Every explored state satisfies execution exclusion, absorbing terminal outcomes, the pause
   gate, finite attempt budgets, and durable handoffs. Every state has a recovery route to an
   explicit disposition. Event delivery can be duplicated, delayed, or lost before replay.
@@ -92,6 +92,17 @@ Verification consists of an independent executable model and SQLite refinement t
 - The packaged probe invokes the pinned interpreter's plugin callback against the running
   image coordinator. It checks stable replay, changed-payload refusal, one task, one coordinator
   owner, and user approval while the normal pause gate is closed. No model is invoked.
+- Release tests cover accepted native start before its receipt, lost replies, and coordinator
+  replacement. The independent model includes release requests and verified exclusion.
+- Inbox tests accept reports before worker exit and apply them afterward. Pending reports pin
+  the originating attempt against retry, resume, and guidance-driven replacement. Explicit lease
+  epochs survive command persistence; superseded attempts cannot apply new reports.
+
+The packaged restart probe injects a ledger obligation rather than an actual native worker.
+It proves retained bookkeeping, runtime identity replacement, and recovery signaling. It does
+not prove that a native worker accepted before a lost reply was excluded by container exit.
+That combined packaged fault cut remains unverified; native/component tests and process-boundary
+inspection provide separate evidence, not a substitute for that missing end-to-end cut.
 
 This is bounded verification of the task/execution contract. Progress assumes eventual storage
 and service availability, observation, and supervisor recovery. It does not prove arbitrary shell
