@@ -120,7 +120,7 @@ def run_status(args: argparse.Namespace) -> int:
                 payload["pending_transitions"] = [
                     dict(row)
                     for row in store.q(
-                        "SELECT id,tool,actor,owner_instance,deadline,attempts"
+                        "SELECT id,tool,actor,owner_instance,attempts,last_error,retry_at"
                         " FROM transition_commands WHERE result IS NULL"
                     )
                 ]

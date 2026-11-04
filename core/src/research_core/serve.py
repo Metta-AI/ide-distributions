@@ -351,7 +351,7 @@ class SeamServer:
                 else [
                     dict(row)
                     for row in stores.store().q(
-                        "SELECT id,tool,actor,owner_instance,attempts"
+                        "SELECT id,tool,actor,owner_instance,attempts,last_error,retry_at"
                         " FROM transition_commands WHERE result IS NULL"
                     )
                 ],
