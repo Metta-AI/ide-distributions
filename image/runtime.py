@@ -95,6 +95,7 @@ async def run(stack: AsyncExitStack) -> None:
         "API_SERVER_KEY": key,
         "GATEWAY_MULTIPLEX_PROFILES": "true",
         "IDE_RESEARCHER_PROFILES": "researcher",
+        "IDE_LOCAL_STT_MODEL": "/opt/models/whisper-base",
         "IDE_INFERENCE_LEASE_FILE": str(lease_file),
         "SOFTMAX_PLAYER_CREDENTIAL": bootstrap.credential.get_secret_value(),
         "COGAMES_API_URL": bootstrap.platform_url.removesuffix("/observatory"),
@@ -169,9 +170,6 @@ async def run(stack: AsyncExitStack) -> None:
             env=profile_env,
         )
         report("profile_prepare", phase_started, role=role)
-        await command(
-            HERMES, "config", "set", "stt.local.model", "/opt/models/whisper-base", env=profile_env
-        )
 
     async def observe_ready(phase: str, ready: asyncio.Event) -> None:
         since = time.monotonic()

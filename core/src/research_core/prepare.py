@@ -646,6 +646,9 @@ def prepare(
 
     cli.dry_run = check
     actions.extend(apply_config(cli, role, core_src, active))
+    if "IDE_LOCAL_STT_MODEL" in env:
+        cli.config_set("stt.local.model", env["IDE_LOCAL_STT_MODEL"])
+        actions.append("configured the hosted local speech model")
 
     # Hermes captures a login-shell environment before running terminal commands. Restore the
     # workspace CLI directory through its supported shell initialization hook after that login.

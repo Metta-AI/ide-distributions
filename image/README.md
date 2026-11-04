@@ -158,6 +158,13 @@ do not duplicate these first-readiness events.
 These milestones do not claim a completed model turn. Use Metta's packaged chat harness
 for container-to-completed-chat measurements and retained-session verification.
 
+The hosted local speech-model path is applied by profile preparation through Hermes's existing
+configuration API. It is included in `profile_prepare` timing. Startup does not launch a separate
+`hermes config set` process per profile. `IDE_LOCAL_STT_MODEL` selects the bundled model;
+standalone preparation without that setting preserves its existing speech configuration.
+The startup comparison workflow builds the PR base and candidate from their respective source
+and lockfiles, then measures a fresh boot and five retained restarts for each.
+
 ## Container policy builds
 
 The image packages `buildctl` alongside the locked Coworld CLI. Hosting supplies a private
