@@ -38,7 +38,7 @@ Where you are (the workspace root and the session's Coworld's folder), the image
 
 ## Native terminal store commands
 
-The native terminal has a session working directory but does not inject a session ID into child commands.
-Use `research store snapshot --store coworld --coworld <session-coworld-id>` and the same
+Hermes injects the current session ID into each native terminal command; research resolves that immutable session.
+To name the same Coworld explicitly, use `research store snapshot --store coworld --coworld <session-coworld-id>` and the same
 `--coworld` selector for store events or user edits. Without a session scope or named selector,
 Coworld reads fail. Custom research tool calls already carry the immutable session ID.

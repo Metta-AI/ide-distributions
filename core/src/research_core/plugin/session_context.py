@@ -39,7 +39,7 @@ def render(ctx: Any, session_id: str, max_chars: int = MAX_CHARS) -> str:
             f"This session belongs to {coworld.coworld_id}; do not change its Coworld."
         )
         parts.append(
-            "In the native terminal, scope store commands explicitly: "
+            "Native terminal commands inherit this session ID. Named store reads can use: "
             f"research store snapshot --store coworld --coworld {coworld.coworld_id}. "
             "Custom research tools already carry this session's binding."
         )

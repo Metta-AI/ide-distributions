@@ -13,6 +13,7 @@ from dotenv import dotenv_values
 sys.path.insert(0, "/opt/distribution/image")
 sys.path.insert(0, "/opt/hermes")
 from application import Operation, response
+from gateway.session_context import scoped_current_session_id
 from hermes_cli.plugins import discover_plugins
 from hermes_constants import reset_hermes_home_override, set_hermes_home_override
 from inference import Availability
@@ -127,53 +128,69 @@ async def main():
                     ctx.store.close()
             # Interleave the two native terminals after both have initialized.
             for game, session_id, task_id in reversed(bound):
-                ctx = ToolContext.from_env("orchestrator", {**env, "IDE_SESSION_ID": session_id})
-                try:
-                    assert sessions.read(ctx.wstore, session_id)["coworld_id"] == game
-                    result = json.loads(terminal_tool(command="pwd", task_id=task_id))
-                    assert str(ctx.coworld().code) in result["output"], result
-                    scoped = json.loads(
-                        terminal_tool(
-                            command=f"research store snapshot --store coworld --coworld {game}",
-                            task_id=task_id,
+                with scoped_current_session_id(session_id):
+                    ctx = ToolContext.from_env(
+                        "orchestrator", {**env, "IDE_SESSION_ID": session_id}
+                    )
+                    try:
+                        assert sessions.read(ctx.wstore, session_id)["coworld_id"] == game
+                        result = json.loads(terminal_tool(command="pwd", task_id=task_id))
+                        assert str(ctx.coworld().code) in result["output"], result
+                        scoped = json.loads(
+                            terminal_tool(
+                                command=f"research store snapshot --store coworld --coworld {game}",
+                                task_id=task_id,
+                            )
                         )
-                    )
-                    assert scoped["exit_code"] == 0, scoped
-                    assert json.loads(scoped["output"].strip())["coworld_id"] == game, scoped
-                    missing = json.loads(
-                        terminal_tool(
-                            command=(
-                                "env -u IDE_SESSION_ID -u HERMES_SESSION_ID -u IDE_COWORLD_ID "
-                                "research store snapshot --store coworld"
-                            ),
-                            task_id=task_id,
+                        assert scoped["exit_code"] == 0, scoped
+                        implicit = json.loads(
+                            terminal_tool(
+                                command="research store snapshot --store coworld", task_id=task_id
+                            )
                         )
-                    )
-                    assert missing["exit_code"] != 0 and "--coworld" in missing["output"], missing
-                    foreign_game = next(other for other, _, _ in bound if other != game)
-                    refused = json.loads(
-                        terminal_tool(
-                            command=(
-                                f"env IDE_SESSION_ID={session_id} research store snapshot "
-                                f"--store coworld --coworld {foreign_game}"
-                            ),
-                            task_id=task_id,
+                        assert (
+                            implicit["exit_code"] == 0
+                            and json.loads(implicit["output"].strip())["coworld_id"] == game
+                        ), implicit
+                        assert json.loads(scoped["output"].strip())["coworld_id"] == game, scoped
+                        missing = json.loads(
+                            terminal_tool(
+                                command=(
+                                    "env -u IDE_SESSION_ID -u HERMES_SESSION_ID -u IDE_COWORLD_ID "
+                                    "research store snapshot --store coworld"
+                                ),
+                                task_id=task_id,
+                            )
                         )
-                    )
-                    assert (
-                        refused["exit_code"] != 0
-                        and "differs from this session" in refused["output"]
-                    ), refused
-                    snapshot = await seam.get(
-                        "/snapshot", params={"store": "coworld", "coworld": game}
-                    )
-                    snapshot.raise_for_status()
-                    titles = [task["title"] for task in snapshot.json()["records"]["tasks"]]
-                    assert game in titles and all(
-                        other_game not in titles for other_game, _, _ in bound if other_game != game
-                    ), titles
-                finally:
-                    ctx.wstore.close()
+                        assert missing["exit_code"] != 0 and "--coworld" in missing["output"], (
+                            missing
+                        )
+                        foreign_game = next(other for other, _, _ in bound if other != game)
+                        refused = json.loads(
+                            terminal_tool(
+                                command=(
+                                    f"env IDE_SESSION_ID={session_id} research store snapshot "
+                                    f"--store coworld --coworld {foreign_game}"
+                                ),
+                                task_id=task_id,
+                            )
+                        )
+                        assert (
+                            refused["exit_code"] != 0
+                            and "differs from this session" in refused["output"]
+                        ), refused
+                        snapshot = await seam.get(
+                            "/snapshot", params={"store": "coworld", "coworld": game}
+                        )
+                        snapshot.raise_for_status()
+                        titles = [task["title"] for task in snapshot.json()["records"]["tasks"]]
+                        assert game in titles and all(
+                            other_game not in titles
+                            for other_game, _, _ in bound
+                            if other_game != game
+                        ), titles
+                    finally:
+                        ctx.wstore.close()
             mismatch = await seam.post(
                 "/message",
                 json={
