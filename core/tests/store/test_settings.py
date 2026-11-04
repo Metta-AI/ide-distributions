@@ -22,9 +22,18 @@ DEFAULTS = {
     "xp.ask_above_requests_per_experiment": None,
     "ideation.park_after_rounds": 3,
     "recovery.max_attempts": 2,
+    "recovery.delivery_backoff_seconds": 5,
+    "recovery.receipt_timeout_seconds": 60,
     "anti_stall.hour": "04:00",
 }
-WORKSPACE_KEYS = {"paused", "max_researchers", "recovery.max_attempts", "anti_stall.hour"}
+WORKSPACE_KEYS = {
+    "paused",
+    "max_researchers",
+    "recovery.max_attempts",
+    "anti_stall.hour",
+    "recovery.delivery_backoff_seconds",
+    "recovery.receipt_timeout_seconds",
+}
 
 
 def test_registry_has_the_appendix_h_defaults_and_scopes():
@@ -42,6 +51,8 @@ def test_get_returns_the_default_when_unset(coworld_store, workspace_store):
     assert settings.get(coworld_store, "approval_required.task_types") == []
     assert settings.get(workspace_store, "paused") is False
     assert settings.get(workspace_store, "max_researchers") == 2
+    assert settings.get(workspace_store, "recovery.delivery_backoff_seconds") == 5
+    assert settings.get(workspace_store, "recovery.receipt_timeout_seconds") == 60
 
 
 def test_get_refuses_a_key_from_the_wrong_store(coworld_store, workspace_store):
@@ -109,6 +120,10 @@ def test_update_requires_cites_and_reports_type_problems_together(workspace_stor
         ("workspace", "max_researchers", "2", ("int",)),
         ("workspace", "max_researchers", -1, ("at least 0",)),
         ("workspace", "recovery.max_attempts", 1.5, ("int",)),
+        ("workspace", "recovery.delivery_backoff_seconds", 0, ("at least 1",)),
+        ("workspace", "recovery.delivery_backoff_seconds", True, ("int",)),
+        ("workspace", "recovery.receipt_timeout_seconds", 0, ("at least 1",)),
+        ("workspace", "recovery.receipt_timeout_seconds", 1.5, ("int",)),
         ("workspace", "anti_stall.hour", "25:00", ("HH:MM",)),
         ("workspace", "anti_stall.hour", "4am", ("HH:MM",)),
         ("coworld", "submissions.mode", "sometimes", ("ask", "autonomous")),
@@ -161,10 +176,18 @@ def test_update_accepts_the_workspace_keys(workspace_store, harness):
     settings.update(workspace_store, harness, "anti_stall.hour", "23:30", cites="message:1")
     settings.update(workspace_store, harness, "paused", True, cites="message:2")
     settings.update(workspace_store, harness, "recovery.max_attempts", 0, cites="message:3")
+    settings.update(
+        workspace_store, harness, "recovery.delivery_backoff_seconds", 10, cites="message:4"
+    )
+    settings.update(
+        workspace_store, harness, "recovery.receipt_timeout_seconds", 90, cites="message:5"
+    )
     assert settings.all(workspace_store) == {
         "paused": True,
         "max_researchers": 2,
         "recovery.max_attempts": 0,
+        "recovery.delivery_backoff_seconds": 10,
+        "recovery.receipt_timeout_seconds": 90,
         "anti_stall.hour": "23:30",
     }
 

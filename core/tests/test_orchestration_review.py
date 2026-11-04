@@ -286,17 +286,33 @@ def test_slow_worker_native_admission_does_not_hold_chat_admission_lock(tmp_path
         assert pending.result(timeout=3) in native.runs
 
 
-@pytest.mark.parametrize("status", [None, 400, 403, 429, 503])
-def test_definite_steer_rejection_releases_admission_without_restart(tmp_path, status):
-    from research_core.watcher.hermes_api import RunsAuthError, RunsError
+@pytest.mark.parametrize("status", [None, 400, 403, 429, 503, "refused"])
+def test_definite_steer_rejection_preserves_exact_recovery_policy_without_restart(tmp_path, status):
+    from research_core.watcher.hermes_api import (
+        RunsAuthError,
+        RunsBusy,
+        RunsError,
+        RunsUnavailable,
+    )
 
     class RejectedSteer(FakeHermesRuns):
         reject = True
 
+        attempts = 0
+
         def steer(self, run_id, text, *, profile):
+            self.attempts += 1
             if self.reject:
                 self.reject = False
-                error_type = RunsAuthError if status is None else RunsError
+                if status == "refused":
+                    return False
+                error_type = {
+                    None: RunsAuthError,
+                    400: RunsError,
+                    403: RunsError,
+                    429: RunsBusy,
+                    503: RunsUnavailable,
+                }[status]
                 raise error_type(
                     "Rejected", status=status, code="gateway_draining" if status == 503 else ""
                 )
@@ -323,41 +339,68 @@ def test_definite_steer_rejection_releases_admission_without_restart(tmp_path, s
         owner.start(
             profile="orchestrator", session_id="chat", text="followup", idempotency_key="followup"
         )
-    assert raised.value.status == status
+    assert raised.value.status == (None if status == "refused" else status)
     row = ctx.wstore.one("SELECT * FROM client_admissions WHERE op_id=?", (op_id,))
     assert row["dispatch_started"] == 0 and row["execution_uncertain"] == 0
     owner.reconcile()
     assert not admissions.restart_required(ctx.wstore)
     assert ctx.wstore.get_meta("runtime_recovery_count") is None
     assert native.runs[other].status == "running"
-    assert row["status"] == "failed"
-    with pytest.raises(RunsError, match="failed"):
-        owner.start(
-            profile="orchestrator", session_id="chat", text="followup", idempotency_key="followup"
+    if status in {429, 503, "refused"}:
+        assert row["status"] == "queued" and row["retry_at"] is not None
+        assert raised.value.retryable
+        with pytest.raises(RunsBusy) as waiting:
+            owner.start(
+                profile="orchestrator",
+                session_id="chat",
+                text="followup",
+                idempotency_key="followup",
+            )
+        assert waiting.value.code == "delivery_backoff" and native.attempts == 1
+        with ctx.wstore.tx(HARNESS) as tx:
+            tx.execute(
+                "UPDATE client_admissions SET retry_at='2000-01-01T00:00:00Z' WHERE op_id=?",
+                (op_id,),
+            )
+        retry_key = "followup"
+    else:
+        assert row["status"] == "failed" and row["retry_at"] is None
+        with pytest.raises(RunsError) as closed:
+            owner.start(
+                profile="orchestrator",
+                session_id="chat",
+                text="followup",
+                idempotency_key="followup",
+            )
+        assert closed.value.code == "execution_closed" and closed.value.detail == "Rejected"
+        assert native.attempts == 1
+        retry_key = "followup-retry"
+        admissions.enqueue(
+            ctx.wstore,
+            HARNESS,
+            key=retry_key,
+            session_id="chat",
+            profile="orchestrator",
+            text="followup",
+            origin="client",
         )
-    admissions.enqueue(
-        ctx.wstore,
-        HARNESS,
-        key="followup-retry",
-        session_id="chat",
-        profile="orchestrator",
-        text="followup",
-        origin="client",
-    )
     assert (
         owner.start(
-            profile="orchestrator",
-            session_id="chat",
-            text="followup",
-            idempotency_key="followup-retry",
+            profile="orchestrator", session_id="chat", text="followup", idempotency_key=retry_key
         )
         == run_id
     )
-    assert native.steered[run_id] == ["followup"]
-    assert (
-        ctx.wstore.one("SELECT status FROM client_admissions WHERE op_id=?", (op_id,))[0]
-        == "failed"
-    )
+    assert native.steered[run_id] == ["followup"] and native.attempts == 2
+    assert native.runs[other].status == "running" and not admissions.restart_required(ctx.wstore)
+    current = ctx.wstore.one("SELECT * FROM client_admissions WHERE op_id=?", (op_id,))
+    if status in {429, 503, "refused"}:
+        assert current["status"] == "running" and current["retry_at"] is None
+        assert current["native_key"] == "followup" and current["run_id"] == run_id
+        assert ctx.wstore.one("SELECT count(*) FROM client_admissions")[0] == 2
+    else:
+        assert current["status"] == "failed" and current["run_id"] is None
+        assert current["native_key"] == "followup" and current["payload"] == row["payload"]
+        assert ctx.wstore.one("SELECT count(*) FROM client_admissions")[0] == 3
 
 
 def test_lost_steering_receipt_closes_only_delivery_and_is_not_resent(tmp_path):
@@ -625,12 +668,15 @@ def test_failed_reopening_does_not_discard_existing_execution(tmp_path, lost_sta
 
 
 def test_unsent_steer_retries_after_connection_recovers_without_uncertainty(tmp_path):
-    from research_core.watcher.hermes_api import RunsNotSent
+    from research_core.watcher.hermes_api import RunsBusy, RunsNotSent
 
     class RefusedConnection(FakeHermesRuns):
         refuse = True
 
+        attempts = 0
+
         def steer(self, run_id, text, *, profile):
+            self.attempts += 1
             if self.refuse:
                 raise RunsNotSent("Connection refused before send")
             return super().steer(run_id, text, profile=profile)
@@ -657,12 +703,27 @@ def test_unsent_steer_retries_after_connection_recovers_without_uncertainty(tmp_
         )
     [pending] = ctx.wstore.q("SELECT * FROM client_admissions WHERE native_key='two'")
     assert not pending["dispatch_started"] and not pending["execution_uncertain"]
+    assert pending["status"] == "queued" and pending["retry_at"] is not None
     native.refuse = False
+    with pytest.raises(RunsBusy) as waiting:
+        owner.start(
+            profile="orchestrator", session_id="chat", text="followup", idempotency_key="two"
+        )
+    assert waiting.value.code == "delivery_backoff" and native.attempts == 1
+    with ctx.wstore.tx(HARNESS) as tx:
+        tx.execute(
+            "UPDATE client_admissions SET retry_at='2000-01-01T00:00:00Z' WHERE op_id=?",
+            (pending["op_id"],),
+        )
     assert (
         owner.start(
             profile="orchestrator", session_id="chat", text="followup", idempotency_key="two"
         )
         == first
     )
-    assert native.steered[first] == ["followup"]
-    assert not admissions.restart_required(ctx.wstore)
+    assert native.steered[first] == ["followup"] and native.attempts == 2
+    [recovered] = ctx.wstore.q("SELECT * FROM client_admissions WHERE native_key='two'")
+    assert recovered["op_id"] == pending["op_id"] and recovered["run_id"] == first
+    assert recovered["status"] == "running" and recovered["retry_at"] is None
+    assert ctx.wstore.one("SELECT count(*) FROM client_admissions")[0] == 2
+    assert not recovered["execution_uncertain"] and not admissions.restart_required(ctx.wstore)
