@@ -38,7 +38,8 @@ when you call the script). With `IDE_WORKSPACE` unset the workspace defaults to
 2. creates or migrates the workspace store and every registered Coworld store;
 3. re-applies the config keys the machinery relies on (`approvals.mode: off`, no deny list,
    memory off, `tools.tool_search.enabled: off`, the plugin and toolset, `cron.catch_up_missed`,
-   the Orchestrator's compaction settings), removes retired keys, points every profile at the
+   the Orchestrator's compaction settings, the tool-result prune trigger, the disabled Hermes
+   toolsets), removes retired keys, points every profile at the
    active Coworld (`skills.external_dirs`, `skills.trusted_project_dirs`, `terminal.cwd`), and
    applies shipped values only where the owner kept an earlier default; it never changes the
    model, but adds the OpenRouter host pins for the Kimi models (`provider_routing.models`,
@@ -163,6 +164,11 @@ process). Nothing on the volume survives losing the volume, so backups are part 
   covers the files; the records refer to them by path).
 - Monitor the age of the latest restorable backup (the newest folder whose `restore-check`
   passed) and alert when it exceeds the loss window.
+
+Live transcript rows are not always what a model first received. Once a request reaches
+`compression.proactive_prune_tokens`, Hermes rewrites old large tool results to one-line summaries
+under the same row id, so `session.messages` returns the summary. The original stays in `state.db`
+as an archived row (`active = 0`, `compacted = 1`).
 
 A snapshot taken after `research workspace sleep` exited 0 needs nothing more. For a snapshot
 of a workspace that stays awake, run `research store quiesce --then <snapshot command>`, or
