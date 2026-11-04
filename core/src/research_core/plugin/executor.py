@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -114,6 +115,12 @@ def run_in_workspace(
         )
     except subprocess.TimeoutExpired:
         return error_result(f"tool {name} timed out after {timeout} s", command=command)
+    # The child owns execution/validation telemetry. Relay only its allowlisted event;
+    # emitting another event here would count workspace calls twice.
+    for line in completed.stderr.splitlines():
+        if line.startswith('{"event":"workspace_tool","schema_version":1,'):
+            sys.stderr.write(line + "\n")
+            sys.stderr.flush()
     stdout = completed.stdout.strip()
     if completed.returncode != 0 or not stdout:
         return error_result(

@@ -15,6 +15,8 @@ def make_ctx(tmp_path, role="orchestrator"):
 @pytest.fixture
 def demo_tool():
     def handler(call: ToolCall) -> dict:
+        if call.action == "failed":
+            return {"ok": False, "error": "secret-token"}
         if call.action == "boom":
             raise ToolError(["it broke", "and more"], hint="try again")
         if call.action == "store":
@@ -41,6 +43,7 @@ def demo_tool():
                 {"goal": {"type": "string"}, "limit": {"type": "integer"}},
                 ("goal",),
             ),
+            ActionSpec("failed", "Return a failed result."),
             ActionSpec("boom", "Fail loudly."),
             ActionSpec("store", "Fail in the store."),
             ActionSpec("crash", "Crash."),
@@ -86,7 +89,8 @@ def test_validate_reports_every_problem_at_once(demo_tool):
 def test_validate_action_gating(demo_tool):
     _, problems = base.validate_args(demo_tool, "researcher", {"action": "create", "title": "x"})
     assert problems == [
-        "action 'create' is not available to the researcher; allowed: read, boom, store, crash"
+        "action 'create' is not available to the researcher; "
+        "allowed: read, failed, boom, store, crash"
     ]
     _, problems = base.validate_args(demo_tool, "researcher", {"action": "nope"})
     assert problems[0].startswith("unknown action 'nope'")
@@ -213,3 +217,35 @@ def test_an_action_that_needs_an_object_gets_no_guessed_example(tmp_path):
     assert "example" not in refused["usage"]
     assert "evidence" in refused["usage"]["required"]
     assert refused["error"].endswith("usage.required describes each.")
+
+
+@pytest.mark.parametrize(
+    ("name", "args", "outcome", "action"),
+    [
+        ("demo", {"action": "read", "goal": "secret-token"}, "succeeded", "read"),
+        ("demo", {"action": "create"}, "validation_rejected", "create"),
+        ("demo", {"action": "secret-token"}, "validation_rejected", None),
+        ("demo", {"action": "failed"}, "failed", "failed"),
+        ("demo", {"action": "boom"}, "tool_rejected", "boom"),
+        ("demo", {"action": "store"}, "store_rejected", "store"),
+        ("demo", {"action": "crash"}, "internal_error", "crash"),
+        ("secret-token", {}, "unknown_tool", None),
+    ],
+)
+def test_tool_telemetry_outcomes_and_payload_privacy(
+    demo_tool, tmp_path, capsys, name, args, outcome, action
+):
+    base.run_tool(name, args, make_ctx(tmp_path))
+    output = capsys.readouterr().err
+    assert "secret-token" not in output
+    (event,) = [json.loads(line) for line in output.splitlines()]
+    assert event.pop("elapsed_ms") >= 0
+    assert event == {
+        "event": "workspace_tool",
+        "schema_version": 1,
+        "session_id": "s1",
+        "role": "orchestrator",
+        "tool": "unknown" if name == "secret-token" else "demo",
+        "action": action,
+        "outcome": outcome,
+    }
