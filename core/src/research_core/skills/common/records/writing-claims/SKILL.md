@@ -44,4 +44,4 @@ A mixin may register game types; its skills say how to cite them. `claim.inspect
 
 ## Preferences and lessons
 
-A user's preference is not a claim: the Orchestrator records it as a directive. A lesson from a failed approach is a claim tagged `lesson` whose body says what to do instead. Imported seed material carries the tag `imported` and `doc` evidence.
+A user's preference is not a claim: the Orchestrator records it as a directive, or as a setting when one covers it. A lesson from a failed approach is a claim tagged `lesson` whose body says what to do instead. Imported seed material carries the tag `imported` and `doc` evidence.
