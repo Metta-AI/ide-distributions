@@ -285,7 +285,12 @@ def full_toolset(role: Role, schemas: SchemaSet, model: str) -> list[dict]:
     """Every tool a session of the role offers ``model``, as Hermes sends them: sorted by name,
     sanitized, and for a Kimi model rewritten for Moonshot's schema flavour."""
     sanitizer, moonshot = hermes_sanitizers()
-    builtins = json.loads(HERMES_BUILTIN_TOOLS.read_text())
+    # The profiles disable Hermes's browser toolset (prepare.PROTECTED_KEYS); the snapshot has it.
+    builtins = [
+        tool
+        for tool in json.loads(HERMES_BUILTIN_TOOLS.read_text())
+        if not tool["function"]["name"].startswith("browser_")
+    ]
     ide = [{"type": "function", "function": s} for s in schemas.tools(role)]
     tools = sanitizer.sanitize_tool_schemas(
         sorted([*builtins, *ide], key=lambda tool: tool["function"]["name"])

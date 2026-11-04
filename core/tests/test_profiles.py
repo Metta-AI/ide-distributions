@@ -35,7 +35,8 @@ def test_config_has_protected_keys_and_no_gates(role):
     assert config["plugins"]["enabled"] == [role]
     assert config["platform_toolsets"]["api_server"] == ["hermes-api-server", f"ide-{role}"]
     assert config["known_plugin_toolsets"]["cron"] == [f"ide-{role}"]
-    assert "agent" not in config or "max_turns" not in config["agent"]
+    assert config["agent"] == {"disabled_toolsets": ["browser", "connections", "cronjob"]}
+    assert config["compression"]["proactive_prune_tokens"] == 64000
     assert "timeouts" not in config
     assert "kanban" not in config
 
@@ -47,6 +48,7 @@ def test_orchestrator_config_compaction_and_catch_up():
         "protect_last_n": 30,
         "threshold": 0.6,
         "target_ratio": 0.3,
+        "proactive_prune_tokens": 64000,
     }
     assert config["cron"]["catch_up_missed"] is True
 
