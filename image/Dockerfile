@@ -21,7 +21,10 @@ COPY orchestrator /opt/distribution/orchestrator
 COPY researcher /opt/distribution/researcher
 COPY image /opt/distribution/image
 RUN bash /opt/distribution/image/install-native-attachments.sh \
-    && /opt/hermes/.venv/bin/python -m compileall -q -x '/(tests|optional-skills|\.venv|\.git|node_modules)/' /opt/hermes \
+    && /opt/hermes/.venv/bin/python -m compileall -q -l /opt/hermes \
+    && /opt/hermes/.venv/bin/python -m compileall -q -x '/(tests|node_modules)/' \
+       /opt/hermes/agent /opt/hermes/cron /opt/hermes/gateway /opt/hermes/hermes_cli \
+       /opt/hermes/plugins /opt/hermes/pm /opt/hermes/tools \
     && chmod -R a+rX /opt/models/whisper-base \
     && rm -rf /tmp/uv-cache
 COPY image/workspace-path.sh /etc/profile.d/workspace-path.sh
