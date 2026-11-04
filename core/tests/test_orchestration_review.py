@@ -330,13 +330,34 @@ def test_definite_steer_rejection_releases_admission_without_restart(tmp_path, s
     assert not admissions.restart_required(ctx.wstore)
     assert ctx.wstore.get_meta("runtime_recovery_count") is None
     assert native.runs[other].status == "running"
-    assert (
+    assert row["status"] == "failed"
+    with pytest.raises(RunsError, match="failed"):
         owner.start(
             profile="orchestrator", session_id="chat", text="followup", idempotency_key="followup"
+        )
+    admissions.enqueue(
+        ctx.wstore,
+        HARNESS,
+        key="followup-retry",
+        session_id="chat",
+        profile="orchestrator",
+        text="followup",
+        origin="client",
+    )
+    assert (
+        owner.start(
+            profile="orchestrator",
+            session_id="chat",
+            text="followup",
+            idempotency_key="followup-retry",
         )
         == run_id
     )
     assert native.steered[run_id] == ["followup"]
+    assert (
+        ctx.wstore.one("SELECT status FROM client_admissions WHERE op_id=?", (op_id,))[0]
+        == "failed"
+    )
 
 
 def test_lost_steering_receipt_closes_only_delivery_and_is_not_resent(tmp_path):
