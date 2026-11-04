@@ -492,7 +492,6 @@ def test_release_before_start_receipt_retains_execution_authority(tmp_path, lost
                 store=store,
                 wstore=wstore,
                 actor=Actor.session(row["session_id"]),
-                env=ctx.env,
                 coworld=lambda: ctx.coworld,
                 hermes_session_id=lambda: row["session_id"],
             )
