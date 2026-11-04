@@ -441,3 +441,28 @@ def test_platform_failure_does_not_claim_wait_when_command_is_unapplied(
     error = PlatformError("Platform unavailable", status=503)
     context = wait._wait_on_platform(ctx, "credits", error)
     assert context == {"waiting": False, "transition": result}
+
+
+def test_refused_wait_preserves_original_platform_error(tmp_path, monkeypatch):
+    from research_core.platform.errors import PlatformError
+    from research_core.tools import task
+    from research_core.tools.base import ToolContext, ToolError
+    from tests.test_coordinator_transitions import assigned
+    from tests.watcher._support import make_ctx
+
+    tick = make_ctx(tmp_path)
+    row = assigned(tick)
+    ctx = ToolContext(
+        role="researcher", actor=Actor.session(row["session_id"]), workspace=tick.ws, env=tick.env
+    )
+    ctx.store, ctx.wstore = tick.store, tick.wstore
+
+    def refuse(call):
+        raise ToolError("Worker authority retired")
+
+    monkeypatch.setattr(task, "dispatch", refuse)
+    error = wait.tool_error(ctx, "credits", PlatformError("Platform unavailable", status=503))
+    assert error.problems == ["Platform unavailable"]
+    assert error.context["status"] == 503 and error.context["route"] == "credits"
+    assert error.context["waiting"] is False
+    assert error.context["wait_skipped"] == "Worker authority retired"
