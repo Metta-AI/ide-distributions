@@ -366,3 +366,44 @@ def test_admission_schema_does_not_activate_legacy_quarantine_before_its_owner_e
         "SELECT status,dispatch_started,resolution_required,error FROM client_admissions"
     ).fetchone() == ("queued", 1, 0, "lost native response")
     assert conn.execute("SELECT id FROM change_log WHERE token IS NULL").fetchall() == untracked
+
+
+@pytest.mark.parametrize("lost_receipt", [False, True])
+def test_attempt_pointer_migration_uses_latest_execution_not_first_attempt_or_steer(lost_receipt):
+    conn = sqlite3.connect(":memory:", isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    for version, path in migrate.migration_files("workspace"):
+        if version <= 6:
+            conn.executescript(path.read_text())
+    conn.execute(
+        "INSERT INTO sessions(id,profile,kind,started,run_id)"
+        " VALUES ('worker','researcher','task','2026-11-01T00:00:00Z','second-run')"
+    )
+    for op_id, status, mode, run_id in (
+        ("first", "failed", "start", "first-run"),
+        ("second", "running", "start", "second-run"),
+        ("guidance", "running", "steer", "second-run"),
+        ("queued-guidance", "queued", "start", None),
+    ):
+        conn.execute(
+            "INSERT INTO client_admissions(op_id,kind,request,session_id,message,payload,status,"
+            "created_at,delivery_mode,run_id,dispatch_started)"
+            " VALUES (?,'message','{}','worker','','{}',?,"
+            "'2026-11-01T00:00:00Z',?,?,?)",
+            (op_id, status, mode, run_id, int(status != "queued")),
+        )
+    if lost_receipt:
+        conn.execute(
+            "INSERT INTO client_admissions(op_id,kind,request,session_id,message,payload,status,"
+            "created_at,delivery_mode,dispatch_started)"
+            " VALUES ('lost-receipt','message','{}','worker','','{}','queued',"
+            "'2026-11-01T00:00:00Z','start',1)"
+        )
+    conn.execute(
+        "INSERT INTO task_assignments(coworld_id,task_id,op_id,session_id,profile,task_updated,"
+        "rationale,context) VALUES ('world',1,'first','worker','researcher','','','')"
+    )
+    conn.execute("PRAGMA user_version=6")
+    migrate.apply_migrations(conn, "workspace")
+    expected = "lost-receipt" if lost_receipt else "second"
+    assert conn.execute("SELECT current_attempt_id FROM task_assignments").fetchone()[0] == expected

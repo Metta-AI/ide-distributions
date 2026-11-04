@@ -202,23 +202,38 @@ def test_release_uses_committed_terminal_fact_when_native_receipt_was_retired(tm
     assert ctx.wstore.one("SELECT count(*) FROM client_admissions")[0] == 1
 
 
-def test_native_stop_deadline_requests_exclusion_instead_of_wedging_release(tmp_path):
+def test_slow_known_stop_retains_ownership_without_runtime_exclusion(tmp_path):
     ctx = make_ctx(tmp_path)
-    assigned(ctx)
+    row = assigned(ctx)
     owner = Coordinator(ctx.ws, ctx.hermes, "same-runtime")
+    sessions.register(
+        ctx.wstore, Actor.harness(), session_id="unrelated", profile="orchestrator", kind="chat"
+    )
+    unrelated = owner.start(
+        profile="orchestrator",
+        session_id="unrelated",
+        text="Independent work",
+        idempotency_key="other",
+    )
+    stops = []
+    ctx.hermes.stop = lambda run_id, **kwargs: stops.append(run_id)
     with ctx.wstore.tx(Actor.harness()) as tx:
         tx.execute("UPDATE client_admissions SET runtime_id='same-runtime'")
         tx.execute(
             "UPDATE task_assignments SET state='release_requested',"
             "recovery_deadline='2000-01-01T00:00:00Z'"
         )
+    for _ in range(3):
+        owner.finish_assignments(ctx.wstore)
+    assert stops == [row["run_id"]] * 3
+    assert not admissions.restart_required(ctx.wstore)
+    assert tasks.read(ctx.store, 1)["status"] == "in-progress"
+    assert ctx.hermes.status(unrelated, profile="orchestrator").status == "running"
+    [visible] = [w for w in admissions.work_status(ctx.wstore) if w["attempt_id"] == row["op_id"]]
+    assert visible["state"] == "waiting" and "stopping" in visible["reason"]
+    assert visible["owner"].startswith("native:") and visible["trigger"]
+    ctx.hermes.complete(row["run_id"])
     owner.finish_assignments(ctx.wstore)
-    [uncertain] = ctx.wstore.q("SELECT * FROM client_admissions")
-    assert uncertain["execution_uncertain"] and uncertain["status"] == "interrupted"
-    assert ctx.wstore.one("SELECT count(*) FROM task_assignments")[0] == 1
-    replacement = Coordinator(ctx.ws, ctx.hermes, "replacement-runtime")
-    replacement.reconcile_inputs(ctx.wstore)
-    replacement.finish_assignments(ctx.wstore)
     assert tasks.read(ctx.store, 1)["status"] == "unclaimed"
     assert not ctx.wstore.q("SELECT * FROM task_assignments")
 
@@ -334,7 +349,7 @@ def test_release_before_start_receipt_retains_execution_authority(tmp_path, lost
     assert not ctx.wstore.q("SELECT * FROM task_assignments")
 
 
-@pytest.mark.parametrize("rejection", ["auth", "busy", "draining", "false"])
+@pytest.mark.parametrize("rejection", ["auth"])
 @pytest.mark.parametrize("permanent", [False, True])
 @pytest.mark.parametrize("with_messages", [False, True])
 def test_rejected_event_guidance_has_bounded_durable_redelivery(
@@ -469,3 +484,129 @@ def test_target_end_redelivery_does_not_spend_zero_failure_budget(tmp_path):
         )[0]
         == 0
     )
+
+
+@pytest.mark.parametrize("kind", ["false", "busy", "draining"])
+@pytest.mark.parametrize("with_messages", [False, True])
+def test_transient_steer_rejections_wait_with_visible_backoff(tmp_path, kind, with_messages):
+    from research_core.watcher.hermes_api import RunsBusy, RunsUnavailable
+
+    ctx = make_ctx(tmp_path)
+    row = assigned(ctx)
+    owner = coordinator(ctx)
+    ctx.wstore.set_meta("coordinator_instance", owner.instance_id)
+    if with_messages:
+        tasks.message(
+            ctx.store, Actor.harness(), 1, text="Keep guidance", direction="to_researcher"
+        )
+    with ctx.store.tx(Actor.harness()) as tx:
+        tx.event("task.wait_resolved", "T-1", {"kind": "user", "note": "approved"})
+    calls = []
+    steer = ctx.hermes.steer
+    reject = True
+
+    def transient(run_id, text, *, profile):
+        calls.append(run_id)
+        if reject:
+            if kind == "busy":
+                raise RunsBusy("Rate limited", status=429)
+            if kind == "draining":
+                raise RunsUnavailable("Gateway draining", status=503, code="gateway_draining")
+            return False
+        return steer(run_id, text, profile=profile)
+
+    ctx.hermes.steer = transient
+    owner.advance_events(ctx)
+    for _ in range(4):  # More transient refusals than the ordinary failure budget.
+        dispatch_inputs(ctx)
+        [delivery] = ctx.wstore.q("SELECT * FROM client_admissions WHERE origin='continuation'")
+        assert delivery["status"] == "queued" and delivery["delivery_failures"] == 0
+        assert delivery["retry_at"] and not delivery["dispatch_started"]
+        [waiting] = [
+            w for w in admissions.work_status(ctx.wstore) if w["attempt_id"] == delivery["op_id"]
+        ]
+        assert waiting["state"] == "waiting" and waiting["owner"].startswith("coordinator:")
+        assert delivery["retry_at"] in waiting["trigger"]
+        attempts = len(calls)
+        owner.advance_attempts(ctx)
+        owner.deliver_worker_messages(ctx)
+        dispatch_inputs(ctx)
+        assert len(calls) == attempts  # Polling before the deadline cannot hammer the gateway.
+        with ctx.wstore.tx(Actor.harness()) as tx:
+            tx.execute(
+                "UPDATE client_admissions SET retry_at='2000-01-01T00:00:00Z' WHERE op_id=?",
+                (delivery["op_id"],),
+            )
+    reject = False
+    dispatch_inputs(ctx)
+    dispatch_inputs(ctx)
+    assert not tasks.pending_messages(ctx.store, 1, "to_researcher")
+    assert len(ctx.hermes.steered[row["run_id"]]) == 1
+    [delivery] = ctx.wstore.q("SELECT * FROM client_admissions WHERE origin='continuation'")
+    assert delivery["status"] == "running" and delivery["retry_at"] is None
+
+
+def test_abandoned_task_cancels_queued_successor_without_dispatch_crash(tmp_path):
+    ctx = make_ctx(tmp_path)
+    row = assigned(ctx)
+    ctx.hermes.fail(row["run_id"], "crash")
+    owner = coordinator(ctx)
+    owner.reconcile()
+    owner.advance_attempts(ctx)
+    tasks.abandon(
+        ctx.store, Actor.harness(), 1, failure={"what_failed": "abandoned", "next_step": "review"}
+    )
+    dispatch_inputs(ctx)
+    dispatch_inputs(ctx)
+    successor = ctx.wstore.one("SELECT * FROM client_admissions WHERE origin='continuation'")
+    assert successor["status"] == "cancelled" and successor["advanced_at"]
+    assert successor["disposition"] == "task ownership ended before transfer"
+    assert not ctx.wstore.q("SELECT * FROM task_assignments")
+    assert len(ctx.hermes.runs) == 1
+
+
+def test_settled_or_inactive_attempts_do_not_fetch_transcripts(tmp_path):
+    ctx = make_ctx(tmp_path)
+    row = assigned(ctx)
+    owner = coordinator(ctx)
+    ctx.hermes.complete(row["run_id"])
+    tasks.wait(ctx.store, Actor.session(row["session_id"]), 1, kind="user", detail="planned wait")
+    owner.reconcile()
+    calls = []
+    ctx.hermes.session_messages = lambda *args, **kwargs: calls.append(args) or []
+    owner.advance_attempts(ctx)
+    assert calls == []
+    with ctx.wstore.tx(Actor.harness()) as tx:
+        tx.execute("UPDATE client_admissions SET advanced_at=NULL")
+    ctx.coworld = None
+    for _ in range(3):
+        owner.advance_attempts(ctx)
+    assert calls == []
+
+
+def test_retry_transcript_omits_whole_messages_to_preserve_json(tmp_path):
+    ctx = make_ctx(tmp_path)
+    row = assigned(ctx)
+    owner = coordinator(ctx)
+    ctx.hermes.fail(row["run_id"], "crash")
+    owner.reconcile()
+    ctx.hermes.session_messages = lambda *args, **kwargs: [
+        {"role": "user", "content": "x" * 40000},
+        {"role": "assistant", "content": "recent"},
+    ]
+    owner.advance_attempts(ctx)
+    successor = ctx.wstore.one("SELECT * FROM client_admissions WHERE origin='continuation'")
+    text = json.loads(successor["payload"])["input"]
+    encoded = text.split("32000 characters):\n", 1)[1].split("\n\n", 1)[0]
+    assert json.loads(encoded) == [{"role": "assistant", "content": "recent"}]
+
+
+def test_work_status_omits_acknowledged_history(tmp_path):
+    ctx = make_ctx(tmp_path)
+    row = assigned(ctx)
+    ctx.hermes.complete(row["run_id"])
+    tasks.wait(ctx.store, Actor.session(row["session_id"]), 1, kind="user", detail="planned wait")
+    owner = coordinator(ctx)
+    owner.reconcile()
+    owner.advance_attempts(ctx)
+    assert admissions.work_status(ctx.wstore) == []

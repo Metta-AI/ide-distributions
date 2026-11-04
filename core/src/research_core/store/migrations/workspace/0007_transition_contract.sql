@@ -1,6 +1,9 @@
 -- Assignment identity survives retries; execution identity does not.
 ALTER TABLE task_assignments ADD COLUMN current_attempt_id TEXT REFERENCES client_admissions(op_id);
-UPDATE task_assignments SET current_attempt_id=op_id;
+UPDATE task_assignments SET current_attempt_id=COALESCE(
+    (SELECT a.op_id FROM client_admissions a WHERE a.session_id=task_assignments.session_id
+     AND a.delivery_mode='start' ORDER BY a.dispatch_started DESC,a.rowid DESC LIMIT 1), op_id
+);
 CREATE TRIGGER task_assignment_initial_attempt AFTER INSERT ON task_assignments
 WHEN NEW.current_attempt_id IS NULL BEGIN
     UPDATE task_assignments SET current_attempt_id=NEW.op_id WHERE op_id=NEW.op_id;
@@ -42,3 +45,4 @@ CREATE TRIGGER transition_effects_log_delete AFTER DELETE ON transition_effects 
 END;
 ALTER TABLE task_assignments ADD COLUMN recovery_deadline TEXT;
 ALTER TABLE client_admissions ADD COLUMN delivery_failures INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE client_admissions ADD COLUMN retry_at TEXT;

@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Literal, get_args
 from uuid import NAMESPACE_URL, uuid5
 
+from research_core.store import settings
 from research_core.store.actors import Actor
 from research_core.store.db import Store, Tx
 from research_core.store.errors import StoreError
@@ -175,10 +176,15 @@ def work_status(store: Store, lease_file: Path | None = None) -> list[dict]:
     from research_core import inference
 
     owner = store.get_meta("coordinator_instance") or "workspace coordinator awaiting startup"
-    paused = store.one("SELECT value FROM settings WHERE key='paused'")
-    paused = paused is not None and json.loads(paused[0])
+    paused = settings.get(store, "paused")
     result = []
-    for row in store.q("SELECT * FROM client_admissions WHERE kind='message' ORDER BY rowid"):
+    for row in store.q(
+        "SELECT a.*,t.state AS assignment_state FROM client_admissions a"
+        " LEFT JOIN task_assignments t ON t.current_attempt_id=a.op_id"
+        " WHERE a.kind='message' AND (a.status IN ('queued','running')"
+        " OR a.execution_uncertain=1 OR a.resolution_required=1 OR a.advanced_at IS NULL"
+        " OR a.disposition='delivery retries exhausted') ORDER BY a.rowid"
+    ):
         phase = row["status"]
         responsible = row["owner_instance"] or owner
         reason = row["error"]
@@ -190,7 +196,10 @@ def work_status(store: Store, lease_file: Path | None = None) -> list[dict]:
             trigger = "private runtime namespace replaced; coordinator reconciles evidence"
         elif phase == "queued":
             responsible = owner
-            if paused and not row["dispatch_started"]:
+            if row["retry_at"]:
+                phase, reason = "waiting", "transient steering rejection"
+                trigger = f"coordinator retries this delivery at {row['retry_at']}"
+            elif paused and not row["dispatch_started"]:
                 phase, reason, trigger = "waiting", "workspace paused", "workspace resume"
             elif not row["dispatch_started"] and not inference.available(lease_file):
                 blocked = inference.blocking_state(lease_file)
@@ -201,10 +210,15 @@ def work_status(store: Store, lease_file: Path | None = None) -> list[dict]:
                 reason, trigger = "durable admission queued", "coordinator dispatch"
         elif phase == "running":
             responsible = f"native:{row['profile']}:{row['run_id']}"
-            reason, trigger = (
-                "execution active",
-                "native outcome; reconciliation recovers missed facts",
-            )
+            if row["assignment_state"] == "release_requested":
+                phase = "waiting"
+                reason = "recorded run is stopping; task ownership retained"
+                trigger = "coordinator polls this run until terminal outcome"
+            else:
+                reason, trigger = (
+                    "execution active",
+                    "native outcome; reconciliation recovers missed facts",
+                )
         elif row["advanced_at"] is None:
             responsible = owner
             phase, reason, trigger = (

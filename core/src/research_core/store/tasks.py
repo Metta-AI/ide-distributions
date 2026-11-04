@@ -454,9 +454,14 @@ def claim_result(
         return _record(store, _row(store, n))
 
 
+@dataclass(frozen=True)
+class TransferRefused:
+    problems: list[str]
+
+
 def transfer_attempt(
     store: Store, actor: Actor, task_id: int | str, *, previous: str, successor: str
-) -> dict[str, Any]:
+) -> dict[str, Any] | TransferRefused:
     """Coordinator-only holder transfer after exact predecessor exclusion; replay is harmless.
 
     Keep task progress, waits, branch and worktree. Historical holders retain their epoch.
@@ -471,7 +476,7 @@ def transfer_attempt(
         if row["held_by"] == successor:
             return _record(store, row)
         if row["status"] != "in-progress" or row["held_by"] != previous:
-            raise LeaseError([f"{_t(n)} no longer belongs to predecessor {previous}"])
+            return TransferRefused([f"{_t(n)} no longer belongs to predecessor {previous}"])
         epoch = row["lease_epoch"] + 1
         tx.execute(
             "UPDATE tasks SET held_by=?,lease_epoch=?,run_id=NULL,lease_renewed=?,updated=?"

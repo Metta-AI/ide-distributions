@@ -153,6 +153,8 @@ class Coordinator:
                 )
             if row["run_id"]:
                 return row["run_id"]
+            if row["retry_at"] and parse_iso(store.now()) < parse_iso(row["retry_at"]):
+                raise RunsBusy(f"Steering waits until {row['retry_at']}", code="delivery_backoff")
             observed = {}
             capabilities = None
             snapshot = sessions.read(store, session_id)
@@ -216,6 +218,7 @@ class Coordinator:
                     # Settle definite rejection so durable advancement bounds redelivery.
                     # Generic server errors and missing replies may follow acceptance.
                     # Keep those delivery receipts unconfirmed; their target run stays known.
+                    backoff_seconds = int(settings.get(store, "recovery.delivery_backoff_seconds"))
                     call_returned = False
                     try:
                         accepted = self.native.steer(
@@ -233,19 +236,31 @@ class Coordinator:
                             )
                         )
                         if not call_returned and rejected:
+                            transient = error.status == 429 or (
+                                error.status == 503
+                                and error.code in {"gateway_draining", "inference_unavailable"}
+                            )
                             with store.tx(ACTOR) as tx:
                                 tx.execute(
-                                    "UPDATE client_admissions SET dispatch_started=0,"
-                                    "status=CASE WHEN status IN ('queued','running')"
-                                    " THEN 'failed' ELSE status END"
-                                    " WHERE op_id=?",
-                                    (op_id,),
+                                    "UPDATE client_admissions SET dispatch_started=0,status=CASE"
+                                    " WHEN status IN ('queued','running') THEN ? ELSE status END,"
+                                    "retry_at=?,error=? WHERE op_id=?",
+                                    (
+                                        "queued" if transient else "failed",
+                                        (
+                                            parse_iso(tx.at) + timedelta(seconds=backoff_seconds)
+                                        ).isoformat()
+                                        if transient
+                                        else None,
+                                        str(error),
+                                        op_id,
+                                    ),
                                 )
                     with admissions.dispatch_lock(store), store.tx(ACTOR) as tx:
                         if accepted:
                             tx.execute(
                                 "UPDATE client_admissions SET run_id=?,status=CASE WHEN "
-                                "status='queued' THEN 'running' ELSE status END"
+                                "status='queued' THEN 'running' ELSE status END,retry_at=NULL"
                                 " WHERE op_id=?",
                                 (snapshot["run_id"], op_id),
                             )
@@ -256,10 +271,14 @@ class Coordinator:
                             )
                         else:
                             tx.execute(
-                                "UPDATE client_admissions SET dispatch_started=0,status=CASE WHEN"
-                                " status IN ('queued','running') THEN 'failed' ELSE status END,"
-                                "error='Run refused steering' WHERE op_id=?",
-                                (op_id,),
+                                "UPDATE client_admissions SET dispatch_started=0,retry_at=?,"
+                                "error='Run refused steering; waiting for retry' WHERE op_id=?",
+                                (
+                                    (
+                                        parse_iso(tx.at) + timedelta(seconds=backoff_seconds)
+                                    ).isoformat(),
+                                    op_id,
+                                ),
                             )
                     if not accepted:
                         raise RunsBusy("Run refused steering", code="steer_deferred")
@@ -301,10 +320,7 @@ class Coordinator:
                                 code="execution_closed",
                                 retryable=False,
                             )
-                        assignment = store.one(
-                            "SELECT * FROM task_assignments WHERE session_id=?", (session_id,)
-                        )
-                        if assignment is None or assignment["profile"] != profile:
+                        if assignment["profile"] != profile:
                             raise RunsError(
                                 "Worker has no recorded assignment",
                                 code="assignment_missing",
@@ -383,13 +399,32 @@ class Coordinator:
                                     raise RunsBusy(
                                         "Predecessor is not excluded", code="session_unresolved"
                                     )
-                                tasks.transfer_attempt(
+                                transferred = tasks.transfer_attempt(
                                     task_store,
                                     Actor.harness(),
                                     reservation["task_id"],
                                     previous=worker["parent"],
                                     successor=session_id,
                                 )
+                                if isinstance(transferred, tasks.TransferRefused):
+                                    with store.tx(ACTOR) as tx:
+                                        tx.execute(
+                                            "UPDATE client_admissions SET status='cancelled',"
+                                            "disposition='task ownership ended before transfer',"
+                                            "advanced_at=?,error=? WHERE op_id=?",
+                                            (tx.at, "; ".join(transferred.problems), op_id),
+                                        )
+                                        tx.execute(
+                                            "DELETE FROM task_assignments"
+                                            " WHERE current_attempt_id=?",
+                                            (op_id,),
+                                        )
+                                    sessions.end(store, ACTOR, session_id)
+                                    raise RunsError(
+                                        "; ".join(transferred.problems),
+                                        code="assignment_stale",
+                                        retryable=False,
+                                    )
                             else:
                                 claim = tasks.claim_result(
                                     task_store,
@@ -630,7 +665,17 @@ class Coordinator:
             tx.execute(
                 "UPDATE task_assignments SET state='release_requested',"
                 "recovery_deadline=COALESCE(recovery_deadline,?) WHERE session_id=?",
-                ((parse_iso(tx.at) + timedelta(seconds=60)).isoformat(), session_id),
+                (
+                    (
+                        parse_iso(tx.at)
+                        + timedelta(
+                            seconds=int(
+                                settings.get(ctx.stores, "recovery.receipt_timeout_seconds")
+                            )
+                        )
+                    ).isoformat(),
+                    session_id,
+                ),
             )
         if is_live(run_status(ctx, session)):
             sessions.set_stopped_by(ctx.wstore, ctx.actor, session_id, "watcher:abandon")
@@ -1001,11 +1046,35 @@ class Coordinator:
             " AND execution_uncertain=0 ORDER BY rowid"
         ):
             snapshot = sessions.read(ctx.wstore, row["session_id"])
-            history = (
-                self.native.session_messages(snapshot["id"], profile=snapshot["profile"])
-                if snapshot["kind"] == "task" and row["delivery_mode"] == "start"
-                else []
-            )
+            if snapshot["coworld_id"] is not None and (
+                ctx.coworld is None or snapshot["coworld_id"] != ctx.coworld.coworld_id
+            ):
+                continue
+            history = []
+            if (
+                snapshot["kind"] == "task"
+                and row["delivery_mode"] == "start"
+                and not snapshot["stopped_by"]
+                and not settings.get(ctx.stores, "paused")
+                and ctx.wstore.one(
+                    "SELECT 1 FROM task_assignments WHERE current_attempt_id=? AND state='held'",
+                    (row["op_id"],),
+                )
+            ):
+                task = self._task_of(ctx, snapshot)
+                failures = ctx.wstore.one(
+                    "SELECT count(*) FROM client_admissions a JOIN sessions s ON s.id=a.session_id"
+                    " WHERE s.coworld_id=? AND s.task_id=? AND a.failure_counted=1",
+                    (snapshot["coworld_id"], snapshot["task_id"]),
+                )[0] + int(not row["failure_counted"])
+                if (
+                    task is not None
+                    and self._recoverable(task, snapshot["id"])
+                    and failures < int(settings.get(ctx.stores, "recovery.max_attempts"))
+                ):
+                    history = self.native.session_messages(
+                        snapshot["id"], profile=snapshot["profile"]
+                    )
             with admissions.dispatch_lock(ctx.wstore):
                 row = ctx.wstore.one(
                     "SELECT * FROM client_admissions WHERE op_id=?", (row["op_id"],)
@@ -1139,7 +1208,8 @@ class Coordinator:
         history = []
         if session["kind"] == "task":
             current = ctx.wstore.one(
-                "SELECT a.* FROM task_assignments t JOIN client_admissions a"
+                "SELECT a.*,t.state AS assignment_state FROM task_assignments t"
+                " JOIN client_admissions a"
                 " ON a.op_id=t.current_attempt_id WHERE t.session_id=?",
                 (session["id"],),
             )
@@ -1151,11 +1221,21 @@ class Coordinator:
                 observed = self.native.status(current["run_id"], profile=session["profile"])
                 self.settle_attempt(ctx.wstore, current["op_id"], observed)
             current = ctx.wstore.one(
-                "SELECT a.* FROM task_assignments t JOIN client_admissions a"
+                "SELECT a.*,t.state AS assignment_state FROM task_assignments t"
+                " JOIN client_admissions a"
                 " ON a.op_id=t.current_attempt_id WHERE t.session_id=?",
                 (session["id"],),
             )
-            if current is not None and current["status"] not in {"queued", "running"}:
+            if (
+                current is not None
+                and current["status"] not in {"queued", "running"}
+                and not current["execution_uncertain"]
+                and not current["resolution_required"]
+                and current["assignment_state"] == "held"
+                and not settings.get(ctx.stores, "paused")
+                and ctx.coworld is not None
+                and session["coworld_id"] == ctx.coworld.coworld_id
+            ):
                 history = self.native.session_messages(session["id"], profile=session["profile"])
         with admissions.dispatch_lock(ctx.wstore):
             return self._queue_continuation(
@@ -1274,6 +1354,10 @@ class Coordinator:
         if predecessor is not None:
             target = "api_" + uuid5(NAMESPACE_URL, f"worker:{session['profile']}:{key}").hex
             task = tasks.read(ctx.store, session["task_id"])
+            # Keep whole messages so the bounded transcript remains valid JSON.
+            recent_history = list(history[-16:])
+            while recent_history and len(json.dumps(recent_history, sort_keys=True)) > 32000:
+                recent_history.pop(0)
             # New execution sessions inherit durable task progress, not mutable runtime identity.
             text = (
                 "Continue this task from its durable handoff. Inspect the recorded worktree "
@@ -1282,7 +1366,7 @@ class Coordinator:
                 + "\nPrevious execution outcome: "
                 + predecessor["status"]
                 + "\nRecent conversation (last 16 messages, 32000 characters):\n"
-                + json.dumps(history[-16:], sort_keys=True)[-32000:]
+                + json.dumps(recent_history, sort_keys=True)
                 + "\n\n"
                 + text
             )
@@ -1623,7 +1707,17 @@ class Coordinator:
                 tx.execute(
                     "UPDATE task_assignments SET state='release_requested',"
                     "recovery_deadline=COALESCE(recovery_deadline,?) WHERE op_id=?",
-                    ((parse_iso(tx.at) + timedelta(seconds=60)).isoformat(), assignment["op_id"]),
+                    (
+                        (
+                            parse_iso(tx.at)
+                            + timedelta(
+                                seconds=int(
+                                    settings.get(ctx.wstore, "recovery.receipt_timeout_seconds")
+                                )
+                            )
+                        ).isoformat(),
+                        assignment["op_id"],
+                    ),
                 )
                 tx.event(
                     "task.release_requested",
@@ -1661,8 +1755,10 @@ class Coordinator:
                 and not excluded
                 and assignment["status"] in {"queued", "running"}
             ):
-                if assignment["recovery_deadline"] and parse_iso(store.now()) >= parse_iso(
-                    assignment["recovery_deadline"]
+                if (
+                    assignment["attempt_run_id"] is None
+                    and assignment["recovery_deadline"]
+                    and parse_iso(store.now()) >= parse_iso(assignment["recovery_deadline"])
                 ):
                     self.close_unreplayable(
                         store,
