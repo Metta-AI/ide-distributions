@@ -6,6 +6,10 @@ The coordinator is the authority for task transitions and execution admissions. 
 chooses work and reviews results. Workers report progress, waits, and outcomes. Their tools
 submit durable commands; they do not apply task lifecycle transitions in their native process.
 
+The server acquires exclusive lifetime ownership and persists its instance identity before HTTP
+or dispatch starts. HTTP and CLI status read that same identity. An immediate dispatcher failure
+cannot block HTTP startup/shutdown; the error propagates and releases ownership.
+
 | Facet / transition | Authority | Next action owner | Durable boundary |
 |---|---|---|---|
 | User input → accepted input | HTTP intake | Coordinator instance | SQLite receipt + queued event |
