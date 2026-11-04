@@ -236,9 +236,13 @@ class Coordinator:
                             )
                         )
                         if not call_returned and rejected:
-                            transient = error.status == 429 or (
-                                error.status == 503
-                                and error.code in {"gateway_draining", "inference_unavailable"}
+                            transient = (
+                                isinstance(error, RunsNotSent)
+                                or error.status == 429
+                                or (
+                                    error.status == 503
+                                    and error.code in {"gateway_draining", "inference_unavailable"}
+                                )
                             )
                             with store.tx(ACTOR) as tx:
                                 tx.execute(
@@ -435,8 +439,11 @@ class Coordinator:
                                     branch=f"task/{reservation['task_id']}",
                                 )
                                 if isinstance(claim, tasks.ClaimRefused):
-                                    raise RunsError("; ".join(claim.problems),
-                                                    code="assignment_stale", retryable=False)
+                                    raise RunsError(
+                                        "; ".join(claim.problems),
+                                        code="assignment_stale",
+                                        retryable=False,
+                                    )
                     if not capabilities["supported"] or not capabilities["durable"]:
                         raise RunsError(
                             "Durable native admission unavailable",

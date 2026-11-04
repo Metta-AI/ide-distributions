@@ -486,10 +486,10 @@ def test_target_end_redelivery_does_not_spend_zero_failure_budget(tmp_path):
     )
 
 
-@pytest.mark.parametrize("kind", ["false", "busy", "draining"])
+@pytest.mark.parametrize("kind", ["false", "busy", "draining", "unsent"])
 @pytest.mark.parametrize("with_messages", [False, True])
 def test_transient_steer_rejections_wait_with_visible_backoff(tmp_path, kind, with_messages):
-    from research_core.watcher.hermes_api import RunsBusy, RunsUnavailable
+    from research_core.watcher.hermes_api import RunsBusy, RunsNotSent, RunsUnavailable
 
     ctx = make_ctx(tmp_path)
     row = assigned(ctx)
@@ -508,6 +508,8 @@ def test_transient_steer_rejections_wait_with_visible_backoff(tmp_path, kind, wi
     def transient(run_id, text, *, profile):
         calls.append(run_id)
         if reject:
+            if kind == "unsent":
+                raise RunsNotSent("Connection refused before send")
             if kind == "busy":
                 raise RunsBusy("Rate limited", status=429)
             if kind == "draining":
