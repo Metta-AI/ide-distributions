@@ -141,18 +141,14 @@ and recovery telemetry. It does not launch a native worker before losing its acc
 The combined packaged cut—actual worker acceptance, lost receipt, then verified exclusion by
 container exit—remains unverified. Component and process-boundary evidence do not replace it.
 
-[Image smoke run 41765328188](https://github.com/Metta-AI/ide-distributions/actions/runs/41765328188)
-passed an earlier probe at revision `7026c2c`. That probe ran after sleep sign-off and did not
-exercise worker-report authority. It is historical evidence, not proof of the revised awake
-and fixture-backed report assertions. Match subsequent image artifacts to their tested revision.
-
 Native descendant containment and lossless delivery of background results remain runtime limits.
 The coordinator does not claim arbitrary shell or remote effects are reversible. No upstream
 change, private runtime patch, or alternate credential path supplies missing guarantees.
 
 ## Merge and deployment sequencing
 
-Merge the complete reviewed stack through the atomic Graphite stack path. Relevant `main`
+Merge the complete reviewed stack through one landing PR targeting `main`. Preserve the reviewed
+layer commits and update `main` once; do not merge review layers sequentially. Relevant `main`
 pushes trigger [the distribution release workflow](../../.github/workflows/release-hermes.yml),
 which dispatches Metta's image build. Image publication, hosted qualification, promotion, and
 workspace adoption are separate milestones.
