@@ -818,7 +818,8 @@ def snapshot(store: Store, coworld_id: str | None = None) -> dict[str, Any]:
         existing = set(_copyable_tables(store.conn, "main"))
         records: dict[str, Any] = {}
         for spec in RECORDS.values():
-            if spec.table in existing:
+            # Both directive kinds share a table name, so match the spec to this store too.
+            if spec.store == store.kind and spec.table in existing:
                 rows = store.q(f"SELECT * FROM {spec.table} ORDER BY rowid")
                 records[spec.table] = [_record(spec, row) for row in rows]
         records["settings"] = settings.all(store)

@@ -451,7 +451,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
     {key: "settings", label: "Settings", stores: ["workspace", "coworld"], table: "settings", columns: ["key", "value", "scope"]},
   ];
   const COLUMN_LABELS = {id: "Id", title: "Title", status: "Status", updated: "Last update", type: "Type", summary: "Summary", source: "Source", uploaded: "Uploaded", created: "Created", text: "Text", scope: "Scope", store: "Store", key: "Key", value: "Value"};
-  const REF_TABS = {G: "goals", T: "tasks", V: "versions", C: "claims", X: "experiments", D: "directives"};
+  const REF_TABS = {G: "goals", T: "tasks", V: "versions", C: "claims", X: "experiments", D: "directives", W: "directives"};
   const TONES = {
     ok: ["active", "complete", "completed", "confirmed", "done", "ok", "champion", "placed", "answered", "merged"],
     info: ["running", "in-progress", "processing", "queued", "open", "qualifying", "competing", "submitted", "uploaded", "start", "steer"],
@@ -496,7 +496,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
     const d = new Date(iso.endsWith("Z") || iso.includes("+") ? iso : iso + "Z");
     return Number.isNaN(d.getTime()) ? esc(iso) : `<time datetime="${esc(iso)}" title="${esc(iso)}">${d.toLocaleTimeString([], {hour12: false})}</time>`;
   };
-  const linkify = (text) => esc(text).replace(/\b([GTVCXDN])-(\d+)\b/g, (m) => `<button type="button" class="ref" data-ref="${m}">${m}</button>`);
+  const linkify = (text) => esc(text).replace(/\b([GTVCXDWN])-(\d+)\b/g, (m) => `<button type="button" class="ref" data-ref="${m}">${m}</button>`);
   const json = (value) => esc(JSON.stringify(value, null, 2));
   const setText = (id, html) => { $(id).innerHTML = html; };
   const showError = (message) => { const el = $("page-error"); el.textContent = message; el.hidden = false; };

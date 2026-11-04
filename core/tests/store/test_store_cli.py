@@ -764,6 +764,20 @@ def test_a_stale_or_unreadable_quiesce_marker_is_ignored(workspace):
 # --- snapshot -------------------------------------------------------------------------------
 
 
+def test_snapshot_shows_each_directive_with_the_id_of_its_store(workspace, capsys):
+    make_goal(workspace.store)
+    directives.add(workspace.wstore, HARNESS, text="No Fridays", scope="workspace", source="m1")
+    directives.add(workspace.store, HARNESS, text="Small diffs", scope="goal:1", source="m2")
+
+    code, coworld = run(capsys, "snapshot")
+    assert code == 0, coworld
+    assert [d["id"] for d in coworld["records"]["directives"]] == ["D-1"]
+
+    code, workspace_snapshot = run(capsys, "snapshot", "--store", "workspace")
+    assert code == 0, workspace_snapshot
+    assert [d["id"] for d in workspace_snapshot["records"]["directives"]] == ["W-1"]
+
+
 def test_snapshot_has_records_settings_ui_state_and_seq(workspace, capsys):
     make_goal(workspace.store)
     settings.update(workspace.store, HARNESS, "submissions.mode", "ask", cites="m")
