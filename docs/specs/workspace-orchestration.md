@@ -40,10 +40,10 @@ also supply an operation ID. `task.command` reads the result after a pending res
 
 Acceptance remains durable when the coordinator is unavailable. The caller waits briefly and
 can receive `transition_pending`; it must reuse the operation ID rather than invent a retry.
-The first coordinator ownership claim starts the 120-second application budget. Three failed
-application attempts or budget exhaustion produce an explicit failed result. Waiting for the
-first owner does not expire a command. Committed workspace effect receipts remain recoverable
-after either budget is exhausted.
+Commands have no expiry or coordinator retry cutoff. Unexpected coordinator faults preserve
+accepted intent, record the error, and schedule another attempt with bounded backoff. The retry
+count is diagnostic. A domain refusal is an explicit terminal result; coordinator unavailability
+is not. Committed workspace effect receipts remain recoverable across coordinator failures.
 
 Researcher report acceptance checks the current holder, lease epoch, assignment, and originating
 execution. New reports from a terminal or superseded execution are refused. Accepted reports
