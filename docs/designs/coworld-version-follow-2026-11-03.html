@@ -1,0 +1,1428 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Follow the canonical Coworld version, and tell the Orchestrator when an invariant breaks</title>
+<!--
+  Ink & Print design/plan document template (Softmax house style).
+
+  HOW TO USE (renderer subagent):
+  - Replace the contents of the article element (id "doc") with the real document.
+    The placeholder content below doubles as a component style guide — copy the
+    markup patterns (masthead, TOC, section, figure, table, callout, code,
+    citation) and delete what you don't use.
+  - Do NOT modify the two DC-COMMENTS blocks (styles, and markup + script). They
+    are the tested commenting system; copy them verbatim. The one thing you may fill
+    is the CONTENT of <script id="dc-preload" type="application/json">: a
+    dc-comments/1 `comments` array, each comment optionally carrying
+    `replies: [{author, text, created}]`, so the reader sees their comments and
+    the agent's replies together in the sidebar.
+  - Copy the DOC-NAV script (right after the article element) verbatim too. It opens
+    collapsed sections when a link points into them.
+  - Every h2 section is a fold: <section id="x"><details class="fold" open>
+    <summary><h2>…</h2></summary> … </details></section>. Appendix sections
+    carry class="appendix" (check_doc.py leaves them out of the word count) and use
+    <details class="fold"> without `open`, so they start collapsed.
+  - Open questions are numbered (id="oq-N"), each with Context / Options /
+    Recommendation labels (span.oq-label), and linked both ways with the body
+    markers <sup class="oq-ref" id="oq-N-from-<slug>">.
+  - Theme: Ink & Print by default; <html data-theme="cozy"> switches to the
+    cozy token set. Draw figure SVGs in the active theme's colors.
+  - The body describes the current design only. Settled decisions go in the
+    Decision Record appendix. Change logs do not go in the document at all.
+  - Keep the doc self-contained: inline SVG for figures, no JS deps beyond this
+    file. Google Fonts is the only permitted external fetch.
+-->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Merriweather:wght@400;700;900&family=Merriweather+Sans:wght@400;600;700&family=Fraunces:opsz,wght@9..144,400;9..144,600;9..144,700&family=Literata:opsz,wght@7..72,400;7..72,600&display=swap" rel="stylesheet">
+<style>
+  /* ============ Ink & Print tokens ============ */
+  :root {
+    --bg: #fffdf4;            /* cream paper */
+    --surface: #fffaf0;
+    --surface-alt: #f8f6ef;
+    --fg: #111827;            /* warm near-black — never pure #000 */
+    --fg-subtle: #555555;
+    --fg-muted: #999999;
+    --ink-navy: #1a3875;
+    --ink-sage: #6e8050;
+    --ink-terracotta: #b36e4e;
+    --ink-gold: #d4a853;
+    --accent: #859ebe;
+    --accent-soft: #eef2f7;
+    --cta: #0e2758;
+    --cta-foreground: #fffdf4;
+    --border: #e4dac8;
+    --border-strong: #d4c9b5;
+    --border-subtle: #f0ebe1;
+    --serif: 'Merriweather', Georgia, serif;
+    --sans: 'Merriweather Sans', 'Helvetica Neue', sans-serif;
+    --mono: ui-monospace, 'SF Mono', Menlo, monospace;
+  }
+
+  /* ============ Cozy theme (opt-in: <html data-theme="cozy">) ============
+     Warmer paper, brown-black ink, moss and honey accents, soft serif type,
+     sentence-case headings, rounded corners. Same components, same layout. */
+  :root[data-theme="cozy"] {
+    --bg: #fbf4e6;
+    --surface: #fdf8ee;
+    --surface-alt: #f4ead8;
+    --fg: #2e241c;
+    --fg-subtle: #6b5a4a;
+    --fg-muted: #a08f7c;
+    --ink-navy: #3d5a3a;        /* moss: headings and links */
+    --ink-sage: #6f8a4f;
+    --ink-terracotta: #b0603c;
+    --ink-gold: #d39b3a;        /* honey */
+    --accent: #b9a27a;
+    --accent-soft: #f1e8d3;
+    --cta: #4a3626;
+    --cta-foreground: #fdf8ee;
+    --border: #e6d7bd;
+    --border-strong: #d6c19d;
+    --border-subtle: #efe4cf;
+    --serif: 'Fraunces', Georgia, serif;
+    --sans: 'Literata', Georgia, serif;
+  }
+  :root[data-theme="cozy"] body { font-size: 16px; line-height: 1.75; }
+  :root[data-theme="cozy"] h2 {
+    text-transform: none;
+    letter-spacing: 0;
+    font-size: 22px;
+    font-weight: 600;
+  }
+  :root[data-theme="cozy"] header.masthead h1 { font-weight: 700; }
+  :root[data-theme="cozy"] .callout,
+  :root[data-theme="cozy"] pre,
+  :root[data-theme="cozy"] code { border-radius: 8px; }
+
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--fg);
+    font-family: var(--sans);
+    font-size: 15px;
+    line-height: 1.7;
+  }
+
+  /* ============ Page grid: reading column + comment rail ============ */
+  .dc-page {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 320px;
+    gap: 0;
+    max-width: 1240px;
+    margin: 0 auto;
+  }
+  article#doc {
+    max-width: 72ch;
+    margin: 0 auto;
+    padding: 56px 40px 120px;
+    min-width: 0;
+  }
+
+  /* ============ Typography ============ */
+  .eyebrow {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--fg-subtle);
+  }
+  header.masthead { border-bottom: 2px solid var(--border-strong); padding-bottom: 20px; margin-bottom: 32px; }
+  header.masthead h1 {
+    font-family: var(--serif);
+    font-weight: 900;
+    font-size: 34px;
+    line-height: 1.2;
+    margin: 8px 0 10px;
+  }
+  header.masthead .context { color: var(--fg-subtle); font-size: 13.5px; margin: 0; }
+  h2 {
+    font-family: var(--serif);
+    font-weight: 700;
+    font-size: 15px;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--ink-navy);
+    margin: 48px 0 12px;
+  }
+  h3 { font-family: var(--serif); font-weight: 700; font-size: 16.5px; margin: 32px 0 8px; }
+  p { margin: 0 0 14px; }
+  a { color: var(--ink-navy); text-decoration-color: var(--accent); text-underline-offset: 3px; }
+  a:hover { color: var(--cta); }
+  strong { font-weight: 700; }
+  ul, ol { padding-left: 24px; margin: 0 0 14px; }
+  li { margin-bottom: 4px; }
+  hr { border: 0; border-top: 1px solid var(--border); margin: 40px 0; }
+
+  /* Key-points opener: every section starts with scannable bullets */
+  .key-points {
+    list-style: none;
+    padding: 0 0 0 2px;
+    margin: 0 0 18px;
+  }
+  .key-points li { padding-left: 18px; position: relative; margin-bottom: 6px; }
+  .key-points li::before { content: '—'; position: absolute; left: 0; color: var(--ink-gold); font-weight: 700; }
+
+  /* ============ TOC ============ */
+  nav.toc { margin: 28px 0 8px; }
+  nav.toc ol { list-style: none; padding: 0; column-count: 2; column-gap: 40px; margin: 10px 0 0; }
+  nav.toc li { margin-bottom: 5px; break-inside: avoid; }
+  nav.toc a { text-decoration: none; border-bottom: 1px dotted var(--border-strong); }
+  nav.toc .toc-num { font-family: var(--mono); font-size: 12px; color: var(--fg-muted); margin-right: 8px; }
+
+  /* ============ Tables ============ */
+  table {
+    border-collapse: collapse;
+    width: 100%;
+    margin: 18px 0 22px;
+    font-size: 13.5px;
+  }
+  th {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-subtle);
+    text-align: left;
+    padding: 6px 12px 6px 0;
+    border-bottom: 2px solid var(--border-strong);
+  }
+  td { padding: 7px 12px 7px 0; border-bottom: 1px solid var(--border-subtle); vertical-align: top; }
+  td.num, th.num { text-align: right; font-family: var(--mono); font-size: 12.5px; font-feature-settings: 'tnum' 1; }
+
+  /* ============ Figures ============ */
+  figure { margin: 24px 0 28px; }
+  figure svg { max-width: 100%; height: auto; display: block; }
+  figcaption {
+    margin-top: 10px;
+    font-size: 12px;
+    color: var(--fg-subtle);
+  }
+  figcaption .fig-label {
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    font-size: 10.5px;
+    color: var(--ink-navy);
+    margin-right: 8px;
+  }
+
+  /* ============ Code & citations ============ */
+  code {
+    font-family: var(--mono);
+    font-size: 12.5px;
+    background: var(--surface-alt);
+    padding: 1px 5px;
+    border-radius: 3px;
+  }
+  pre {
+    background: var(--surface-alt);
+    border: 1px solid var(--border-subtle);
+    border-radius: 3px;
+    padding: 14px 16px;
+    overflow-x: auto;
+    margin: 16px 0 20px;
+  }
+  pre code { background: none; padding: 0; font-size: 12.5px; line-height: 1.6; }
+  .cite {
+    font-family: var(--mono);
+    font-size: 11.5px;
+    color: var(--fg-subtle);
+    background: var(--surface-alt);
+    padding: 1px 6px;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  /* Superscript source references — body prose never carries raw file paths.
+     Full citation lives in the title (hover) and in the numbered Sources list. */
+  sup.ref { line-height: 0; }
+  sup.ref a {
+    font-family: var(--mono);
+    font-size: 10.5px;
+    font-weight: 700;
+    color: var(--ink-navy);
+    text-decoration: none;
+    padding: 0 1px;
+  }
+  sup.ref a:hover { text-decoration: underline; }
+  ol.sources { margin: 12px 0; padding-left: 30px; }
+  ol.sources li {
+    font-size: 13px;
+    padding: 2px 0;
+  }
+  ol.sources li::marker {
+    font-family: var(--mono);
+    font-weight: 700;
+    color: var(--ink-navy);
+  }
+  ol.sources li:target { background: var(--accent-soft); }
+
+  /* ============ Callouts ============ */
+  .callout { padding: 12px 16px; margin: 18px 0; font-size: 13.5px; border-radius: 3px; }
+  .callout .callout-label {
+    display: block;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    margin-bottom: 4px;
+  }
+  .callout-info { background: var(--accent-soft); }
+  .callout-info .callout-label { color: var(--ink-navy); }
+  .callout-warn { background: rgba(179, 110, 78, 0.08); border-left: 3px solid var(--ink-terracotta); }
+  .callout-warn .callout-label { color: var(--ink-terracotta); }
+  .callout-open { background: rgba(212, 168, 83, 0.10); }
+  .callout-open .callout-label { color: #8a6a1f; }
+
+  /* ============ Collapsible sections (native <details class="fold">) ============
+     Every h2 section and every appendix is a fold; long h3 subsections may be.
+     The heading sits inside <summary>, so its text stays part of the document
+     for comment anchoring. */
+  details.fold > summary { list-style: none; cursor: pointer; }
+  details.fold > summary::-webkit-details-marker { display: none; }
+  details.fold > summary > h2,
+  details.fold > summary > h3 { display: flex; align-items: baseline; gap: 10px; }
+  details.fold > summary > h2::before,
+  details.fold > summary > h3::before {
+    content: '';
+    flex: none;
+    width: 6px;
+    height: 6px;
+    border-right: 1.5px solid var(--fg-muted);
+    border-bottom: 1.5px solid var(--fg-muted);
+    transform: translateY(-2px) rotate(-45deg);
+    transition: transform 120ms ease-out;
+  }
+  details.fold[open] > summary > h2::before,
+  details.fold[open] > summary > h3::before { transform: translateY(-4px) rotate(45deg); }
+  details.fold > summary:hover > h2,
+  details.fold > summary:hover > h3 { color: var(--cta); }
+  details.fold > summary:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+  .fold-controls { margin: 10px 0 0; font-size: 12px; color: var(--fg-muted); }
+  .fold-controls button {
+    font: inherit;
+    color: var(--ink-navy);
+    background: none;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    text-decoration: underline dotted var(--border-strong);
+    text-underline-offset: 3px;
+  }
+  .appendix-label { color: var(--fg-muted); }
+
+  /* ============ Open questions: two-way links ============
+     In the body, a gold "Q1" marker sits where a section depends on an
+     unresolved question; the question's entry links back to each marker. */
+  sup.oq-ref { line-height: 0; }
+  sup.oq-ref a {
+    font-family: var(--sans);
+    font-size: 10px;
+    font-weight: 700;
+    color: #8a6a1f;
+    background: rgba(212, 168, 83, 0.16);
+    border-radius: 999px;
+    padding: 1px 5px;
+    margin-left: 2px;
+    text-decoration: none;
+  }
+  sup.oq-ref a:hover { background: rgba(212, 168, 83, 0.32); }
+  ol.open-questions { padding-left: 0; list-style: none; counter-reset: oq; }
+  ol.open-questions > li {
+    counter-increment: oq;
+    position: relative;
+    padding: 10px 0 10px 40px;
+    border-top: 1px solid var(--border-subtle);
+  }
+  ol.open-questions > li::before {
+    content: 'Q' counter(oq);
+    position: absolute;
+    left: 0;
+    top: 12px;
+    font-size: 11px;
+    font-weight: 700;
+    color: #8a6a1f;
+  }
+  ol.open-questions p { margin: 0 0 6px; }
+  .oq-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--fg-subtle);
+    margin-right: 6px;
+  }
+  .oq-from { font-size: 12.5px; color: var(--fg-subtle); }
+  ol.open-questions > li:target,
+  sup.oq-ref:target a,
+  .oq-anchor:target { background: rgba(212, 168, 83, 0.28); }
+
+  /* Decision record — Decision Record appendix only. The body states the
+     current design; it never carries labeled decision callouts. */
+  .decision { border-top: 1px solid var(--border); padding: 14px 0 4px; margin: 14px 0; }
+  .decision .decision-label { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-sage); }
+  .decision p { margin-top: 6px; }
+
+  blockquote {
+    margin: 16px 0 20px;
+    padding: 2px 0 2px 16px;
+    border-left: 2px solid var(--border-strong);
+    color: var(--fg-subtle);
+    font-family: var(--serif);
+    font-size: 14px;
+  }
+  td, .cite, ol.sources li { overflow-wrap: anywhere; }
+  .cite { white-space: normal; }
+
+  @media (max-width: 1100px) {
+    .dc-page { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 640px) {
+    article#doc { padding: 32px 16px 96px; }
+    header.masthead h1 { font-size: 26px; }
+    nav.toc ol { column-count: 1; }
+    table { display: block; overflow-x: auto; }
+  }
+  @media print {
+    #dc-sidebar, #dc-fab, #dc-toggle { display: none !important; }
+    .dc-page { grid-template-columns: 1fr; }
+  }
+
+  /* ================================================================
+     DC-COMMENTS BEGIN — styles (copy verbatim; do not modify)
+     ================================================================ */
+  ::highlight(dc-hl) { background: rgba(212, 168, 83, 0.28); }
+  ::highlight(dc-hl-active) { background: rgba(212, 168, 83, 0.6); }
+
+  #dc-fab {
+    position: absolute;
+    z-index: 40;
+    display: none;
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--cta-foreground);
+    background: var(--cta);
+    border: 1px solid #0a1c42;
+    border-radius: 3px;
+    padding: 5px 10px;
+    cursor: pointer;
+  }
+  #dc-fab:hover { background: var(--ink-navy); }
+
+  #dc-sidebar {
+    border-left: 1px solid var(--border);
+    background: var(--surface);
+    padding: 24px 20px 60px;
+    font-size: 13px;
+    position: sticky;
+    top: 0;
+    height: 100dvh;
+    overflow-y: auto;
+  }
+  #dc-sidebar h2.dc-title {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.12em;
+    color: var(--fg-subtle);
+    margin: 0 0 4px;
+  }
+  .dc-actions { display: flex; gap: 6px; flex-wrap: wrap; margin: 10px 0 18px; }
+  .dc-btn {
+    font-family: var(--sans);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--fg);
+    background: var(--surface);
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    padding: 4px 9px;
+    cursor: pointer;
+  }
+  .dc-btn:hover { background: var(--surface-alt); }
+  .dc-btn:focus-visible, #dc-fab:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .dc-empty { color: var(--fg-muted); font-style: italic; }
+  .dc-item { border-top: 1px solid var(--border-subtle); padding: 12px 0; cursor: pointer; }
+  .dc-item.dc-resolved { opacity: 0.5; }
+  .dc-quote {
+    border-left: 2px solid var(--ink-gold);
+    padding-left: 8px;
+    color: var(--fg-subtle);
+    font-style: italic;
+    font-size: 12px;
+    margin-bottom: 6px;
+    overflow-wrap: break-word;
+  }
+  .dc-orphan-tag {
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--ink-terracotta);
+    background: rgba(179, 110, 78, 0.12);
+    border-radius: 999px;
+    padding: 1px 7px;
+    margin-left: 6px;
+  }
+  .dc-text { white-space: pre-wrap; overflow-wrap: break-word; }
+  .dc-item textarea {
+    width: 100%;
+    min-height: 64px;
+    font-family: var(--sans);
+    font-size: 13px;
+    color: var(--fg);
+    background: var(--bg);
+    border: 1px solid var(--border-strong);
+    border-radius: 3px;
+    padding: 6px 8px;
+    resize: vertical;
+  }
+  .dc-item textarea:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .dc-meta { display: flex; align-items: center; gap: 10px; margin-top: 6px; font-size: 11px; color: var(--fg-muted); }
+  .dc-meta label { display: flex; align-items: center; gap: 4px; cursor: pointer; }
+  .dc-meta .dc-del { margin-left: auto; color: var(--ink-terracotta); background: none; border: none; font-size: 11px; cursor: pointer; padding: 0; }
+  .dc-meta .dc-del:hover { text-decoration: underline; }
+  #dc-status { font-size: 11px; color: var(--ink-sage); min-height: 16px; margin-top: 8px; }
+
+  #dc-toggle { display: none; }
+  @media (max-width: 1100px) {
+    #dc-sidebar {
+      position: fixed;
+      right: 0;
+      top: 0;
+      width: 320px;
+      max-width: 90vw;
+      transform: translateX(100%);
+      transition: transform 200ms ease-out;
+      z-index: 50;
+      box-shadow: -4px 0 16px rgba(0, 0, 0, 0.08);
+    }
+    #dc-sidebar.dc-open { transform: translateX(0); }
+    #dc-toggle {
+      display: block;
+      position: fixed;
+      right: 16px;
+      bottom: 16px;
+      z-index: 51;
+      font-family: var(--sans);
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--cta-foreground);
+      background: var(--cta);
+      border: 1px solid #0a1c42;
+      border-radius: 999px;
+      padding: 9px 15px;
+      cursor: pointer;
+    }
+  }
+  /* replies rendered under a comment (from the comment's `replies` array) */
+  .dc-replies { margin-top: 8px; padding-left: 10px; border-left: 2px solid var(--border-strong); }
+  .dc-reply-author { font-family: var(--sans); font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ink-navy); }
+  .dc-reply-text { font-size: 12.5px; line-height: 1.5; color: var(--fg); white-space: pre-wrap; margin-top: 2px; }
+  .dc-reply-text a { color: var(--ink-navy); word-break: break-all; }
+  /* ============ DC-COMMENTS END — styles ============ */
+</style>
+</head>
+<body>
+<div class="dc-page">
+<article id="doc">
+
+  <header class="masthead">
+    <span class="eyebrow">Fix plan · November 3, 2026 · Proposed</span>
+    <h1>Follow the canonical Coworld version, and tell the Orchestrator when an invariant breaks</h1>
+    <p class="context">A fix plan for the ide-distributions research profiles (core, orchestrator, researcher), from the repair work on the Nov 2, 2026 runaway-spend incident.</p>
+  </header>
+
+
+  <section id="summary">
+    <h2>Executive Summary</h2>
+    <p>On Nov 2, 2026, a hosted workspace spent its $10 key in 27 minutes. About half went to 14 wakes (Orchestrator model runs that the watcher starts) from the champion-sync step. First, the workspace pins one Coworld version forever. The leagues follow each new canonical version, so the workspace falls behind within hours, and every comparison by version id breaks. Second, a watcher step that finds a broken condition frequently skips with no signal to the Orchestrator.</p>
+    <p>The plan has three parts. Part A, in PR #153, is a stopgap: champion sync joins leagues by Coworld name. Part B keys each workspace Coworld by name and makes the watcher follow the canonical version. A new version updates the Coworld in place and starts one debounced upgrade wake. Part C repairs the code bugs that hide failures and adds deduplicated alarms for breaks from outside. The largest cost is a migration that re-keys every store row that names a Coworld.</p>
+  </section>
+
+  <nav class="toc">
+    <span class="eyebrow">Contents</span>
+    <ol>
+      <li><span class="toc-num">1</span><a href="#problem-1">Problem 1 · The workspace pins one version</a></li>
+      <li><span class="toc-num">2</span><a href="#problem-2">Problem 2 · The watcher goes silent</a></li>
+      <li><span class="toc-num">3</span><a href="#part-a">Part A · Join leagues by name</a></li>
+      <li><span class="toc-num">4</span><a href="#part-b">Part B · Follow the canonical version</a></li>
+      <li><span class="toc-num">5</span><a href="#part-c">Part C · Tell the Orchestrator</a></li>
+      <li><span class="toc-num">6</span><a href="#order">Order, validation and risks</a></li>
+      <li><span class="toc-num">7</span><a href="#alternatives">Alternatives considered</a></li>
+      <li><span class="toc-num">8</span><a href="#open-questions">Open questions</a></li>
+      <li><span class="toc-num">A</span><a href="#detail">Appendix A · Implementation detail</a></li>
+      <li><span class="toc-num">B</span><a href="#decision-record">Appendix B · Decision Record</a></li>
+      <li><span class="toc-num">C</span><a href="#sources">Appendix C · Sources</a></li>
+    </ol>
+    <p class="fold-controls"><button type="button" data-fold="open">Expand all</button> · <button type="button" data-fold="close">Collapse all</button></p>
+  </nav>
+
+  <section id="problem-1">
+    <details class="fold" open>
+      <summary><h2>1 · Problem 1: the workspace pins one version, and a new version wipes everything</h2></summary>
+      <ul class="key-points">
+        <li>Leagues follow the canonical version of a Coworld. The workspace keys everything by the one version id that it switched to.</li>
+        <li>No code updates a Coworld to a new version. A switch to a new id makes a new, empty Coworld and a full setup wake.</li>
+        <li>On Nov 2, no league matched the pinned id, and a fallback to every league started 14 wakes.</li>
+      </ul>
+
+      <p>A Coworld is a game on the Softmax platform, with its own leagues. Every version is its own <code>cow_</code> id under one Coworld name. generals-competition has 25 versions, and seven came out between Nov 2 at 10:19 AM PST (0.6.3) and Nov 3 at 11:58 AM PST (0.7.3).</p>
+
+      <figure>
+        <svg viewBox="0 0 720 230" role="img" aria-label="Timeline of generals-competition versions from Nov 2 10:19 AM to Nov 3 11:58 AM. The leagues follow each canonical version. The workspace stays at 0.6.3.">
+          <defs>
+            <marker id="arrow1" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8" fill="none" stroke="#859ebe" stroke-width="1.2"/>
+            </marker>
+          </defs>
+          <!-- time axis -->
+          <line x1="40" y1="78" x2="690" y2="78" stroke="#d4c9b5" stroke-width="1.5"/>
+          <line x1="372" y1="70" x2="372" y2="190" stroke="#e4dac8" stroke-width="1" stroke-dasharray="3 3"/>
+          <text x="372" y="208" text-anchor="middle" font-family="Merriweather Sans" font-size="10.5" fill="#555555">Nov 3, 12:00 AM</text>
+          <text x="57" y="208" text-anchor="middle" font-family="Merriweather Sans" font-size="10.5" fill="#555555">Nov 2, 10:19 AM</text>
+          <text x="648" y="208" text-anchor="end" font-family="Merriweather Sans" font-size="10.5" fill="#555555">Nov 3, 11:58 AM</text>
+          <!-- version dots: x = 50 + (hours since Nov 2 00:00 minus 10) * 23 -->
+          <circle cx="57" cy="78" r="4.5" fill="#1a3875"/>
+          <circle cx="128" cy="78" r="4.5" fill="#1a3875"/>
+          <circle cx="170" cy="78" r="4.5" fill="#1a3875"/>
+          <circle cx="227" cy="78" r="4.5" fill="#1a3875"/>
+          <circle cx="302" cy="78" r="4.5" fill="#1a3875"/>
+          <circle cx="640" cy="78" r="4.5" fill="#1a3875"/>
+          <circle cx="648" cy="78" r="5.5" fill="#d4a853" stroke="#1a3875" stroke-width="1.2"/>
+          <g font-family="Merriweather Sans" font-size="11" fill="#111827" text-anchor="middle">
+            <text x="57" y="62">0.6.3</text>
+            <text x="57" y="48" font-size="9.5" fill="#555555">10:19 AM</text>
+            <text x="128" y="62">0.6.4</text>
+            <text x="128" y="48" font-size="9.5" fill="#555555">1:23 PM</text>
+            <text x="170" y="34">0.6.5</text>
+            <text x="170" y="20" font-size="9.5" fill="#555555">3:12 PM</text>
+            <text x="227" y="62">0.7.0</text>
+            <text x="227" y="48" font-size="9.5" fill="#555555">5:41 PM</text>
+            <text x="302" y="62">0.7.1</text>
+            <text x="302" y="48" font-size="9.5" fill="#555555">8:57 PM</text>
+            <text x="612" y="62" text-anchor="end">0.7.2</text>
+            <text x="612" y="48" text-anchor="end" font-size="9.5" fill="#555555">Nov 3, 11:38 AM</text>
+            <text x="676" y="34" text-anchor="start" font-weight="700" fill="#1a3875">0.7.3</text>
+            <text x="676" y="20" text-anchor="start" font-size="9.5" fill="#555555">11:58 AM</text>
+          </g>
+          <line x1="616" y1="58" x2="637" y2="73" stroke="#d4c9b5" stroke-width="1"/>
+          <line x1="674" y1="32" x2="652" y2="72" stroke="#d4c9b5" stroke-width="1"/>
+          <!-- leagues lane: a step at each version -->
+          <text x="40" y="118" font-family="Merriweather Sans" font-size="11" font-weight="700" fill="#1a3875">Leagues run the canonical version</text>
+          <rect x="57" y="126" width="71" height="12" fill="#eef2f7" stroke="#859ebe"/>
+          <rect x="128" y="126" width="42" height="12" fill="#eef2f7" stroke="#859ebe"/>
+          <rect x="170" y="126" width="57" height="12" fill="#eef2f7" stroke="#859ebe"/>
+          <rect x="227" y="126" width="75" height="12" fill="#eef2f7" stroke="#859ebe"/>
+          <rect x="302" y="126" width="338" height="12" fill="#eef2f7" stroke="#859ebe"/>
+          <rect x="640" y="126" width="8" height="12" fill="#eef2f7" stroke="#859ebe"/>
+          <rect x="648" y="126" width="34" height="12" fill="#1a3875"/>
+          <text x="470" y="135" text-anchor="middle" font-family="Merriweather Sans" font-size="9.5" fill="#1a3875">0.7.1</text>
+          <!-- workspace lane -->
+          <text x="40" y="164" font-family="Merriweather Sans" font-size="11" font-weight="700" fill="#b36e4e">Workspace stays at the id it switched to</text>
+          <rect x="57" y="172" width="625" height="12" fill="rgba(179,110,78,0.15)" stroke="#b36e4e"/>
+          <text x="370" y="181" text-anchor="middle" font-family="Merriweather Sans" font-size="9.5" fill="#b36e4e">0.6.3 (pinned)</text>
+        </svg>
+        <figcaption><span class="fig-label">Figure 1</span>The seven dated generals-competition versions from the platform read on Nov 3 (times in PST). Each new canonical version moves the leagues with it. The workspace stays at 0.6.3. Versions 0.7.2 and 0.7.3 came out 20 minutes apart.</figcaption>
+      </figure>
+
+      <p>A league with an admin game-version lock keeps the version from lock time<sup class="ref"><a href="#src-1" title="metta workspaces/observatory/platform/packages/core/src/observatory_core/v2/coworlds.py:392-402">1</a></sup>. A league's <code>game.coworld_id</code> is the version that it runs, and <code>game.coworld_name</code> is the Coworld name. A game also carries <code>canonical_coworld_id</code><sup class="ref"><a href="#src-2" title="metta workspaces/observatory/platform/api/src/observatory_api/flags/leagues.py:34-48; GamePublic fields from GET /v2/games (canonical_coworld_id)">2</a></sup>.</p>
+
+      <p>The workspace (the hosted research environment) stores the exact version id that it switched to. The Coworld folder has the name of that id<sup class="ref"><a href="#src-3" title="core/src/research_core/layout.py:19-27">3</a></sup>. The registry row uses it as the key, and Sessions (agent conversations) have an index on it<sup class="ref"><a href="#src-4" title="core/src/research_core/store/migrations/workspace/0001_init.sql:57, 101-120">4</a></sup>. The folder holds the code repository, source checkout, worktrees, documents and record store (<code>state/store.db</code>)<sup class="ref"><a href="#src-5" title="core/src/research_core/layout.py:30-70">5</a></sup>.</p>
+
+      <p><code>workspace.coworld_switch</code> takes a version id<sup class="ref"><a href="#src-6" title="core/src/research_core/tools/workspace.py:356-358">6</a></sup>. The Orchestrator (the agent that plans research and gives Tasks to Researcher agents) calls it, or the bridge's <code>store apply</code> allow-list sends it to <code>research coworld switch</code><sup class="ref"><a href="#src-7" title="core/src/research_core/coworld_cli.py:1-5">7</a></sup>. Nothing in metta calls it, so the pin is in ide-distributions (the harness), not in the client.</p>
+
+
+      <p>No code path updates a Coworld to a new version. A switch to a new id makes a new, empty Coworld, with a new folder, code repository and record store (<a href="#detail">Appendix A</a> shows how a switch works). It starts a full setup wake (about $3.20 on Nov 2), and Researcher work stops until the workspace switches back<sup class="ref"><a href="#src-8" title="core/src/research_core/coworld_setup.py:59-117">8</a></sup>.</p>
+
+      <p>On Nov 2, champion sync (the watcher step that reads league results) matched leagues by exact version id<sup class="ref"><a href="#src-11" title="core/src/research_core/watcher/champion_sync.py:102-107 (main); branch jame-176-champion-wakes champion_sync.py:69-70, 108-111">11</a></sup>. None of the three Generals leagues (Build 1v1, FFA, Classic 1v1) matched, so the code used every league on the platform and started the 14 wakes.</p>
+
+      <p>The platform still runs old policies after a version change, but a new version can break them. Thus the agent must know about each change, to check its policies.</p>
+    </details>
+  </section>
+
+  <section id="problem-2">
+    <details class="fold" open>
+      <summary><h2>2 · Problem 2: when an invariant breaks, the watcher goes silent</h2></summary>
+      <ul class="key-points">
+        <li>Watcher step errors and notes reach nobody, and the heartbeat stays fresh while other steps fail.</li>
+        <li>A read of every watcher step found 12 silent failures, and five are code bugs.</li>
+      </ul>
+
+      <p>The watcher is a Hermes cron job that operates every minute<sup class="ref"><a href="#src-12" title="orchestrator/cron/jobs.json:18-22">12</a></sup>. When a condition is false, many steps skip, and nothing tells the Orchestrator. Three mechanics make this systematic:</p>
+      <ul>
+        <li><code>tick.run_step</code> turns a step's exception into <code>{"error": …}</code> in printed JSON and exits 0. Nothing stores it, so the doctor (the workspace health check), the briefing (the status text for the Orchestrator) and notices never see it<sup class="ref"><a href="#src-13" title="core/src/research_core/watcher/tick.py:84-88, 153-154">13</a></sup>.</li>
+        <li><code>ctx.note()</code> adds to a list that nothing reads<sup class="ref"><a href="#src-14" title="core/src/research_core/watcher/context.py:68-69">14</a></sup>.</li>
+        <li>Each tick writes the heartbeat first, so the doctor's heartbeat check finds only a watcher that does not operate<sup class="ref"><a href="#src-15" title="core/src/research_core/watcher/heartbeat.py:33-35; core/src/research_core/tools/workspace.py:32, 297-300">15</a></sup>.</li>
+      </ul>
+      <p>Notices reach the user on the next chat turn only. Only management wakes (<code>recovery.failed</code>, <code>merge.failed</code>, <code>wake.failed</code>, <code>store.*</code>) wake it, and they need the runs API (the gateway interface that starts model runs)<sup class="ref"><a href="#src-16" title="core/src/research_core/plugin/turn.py (header); core/src/research_core/watcher/handlers.py:87-123">16</a></sup>. Table 1 ranks the silent failures by likelihood times damage.</p>
+
+      <table>
+        <thead>
+          <tr><th>#</th><th>Case</th><th>Likelihood</th><th>Damage</th><th>Kind</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>1</td><td>The gateway is busy (429 at its run cap) and defers a no-model resume, but the event is acknowledged anyway (<code>task.wait_resolved</code>, <code>task.reviewed</code>, <code>session.dead</code>)<sup class="ref"><a href="#src-17" title="core/src/research_core/watcher/wakes.py:206; core/src/research_core/watcher/resume.py:121-133, 168-169">17</a></sup>. The stuck rescue fires one time for each lease, then never again<sup class="ref"><a href="#src-18" title="core/src/research_core/watcher/recovery.py:241-261">18</a></sup>.</td><td>High</td><td>High: a Researcher Task stays in progress forever</td><td>Code bug</td></tr>
+          <tr><td>2</td><td>The runs API status read fails (auth, unreachable) and stops the wakes, dispatch and messages steps every tick. The heartbeat stays fresh<sup class="ref"><a href="#src-19" title="core/src/research_core/watcher/wakes.py:103-114; watcher/dispatch.py:93-105; watcher/messages.py:49">19</a></sup>.</td><td>Medium</td><td>Total: no wakes, no dispatch</td><td>Outside break. Agent cannot be woken</td></tr>
+          <tr><td>3</td><td>A busy or unavailable model-wake start never counts toward give-up: no <code>wake.failed</code>, no notice<sup class="ref"><a href="#src-20" title="core/src/research_core/watcher/wakes.py:227-233, 281-284">20</a></sup>.</td><td>Medium</td><td>High while it lasts</td><td>Code bug</td></tr>
+          <tr><td>4</td><td>Champion sync finds no league for the active Coworld, or the platform read fails permanently<sup class="ref"><a href="#src-11" title="core/src/research_core/watcher/champion_sync.py:102-107 (main); branch jame-176-champion-wakes champion_sync.py:69-70, 108-111">11</a></sup>.</td><td>Medium (certain under Problem 1)</td><td>Medium: champion changes never seen</td><td>Outside break</td></tr>
+          <tr><td>5</td><td>The merge is held because <code>main</code> is dirty, and the note is dropped<sup class="ref"><a href="#src-21" title="core/src/research_core/watcher/merge.py:75-80">21</a></sup>.</td><td>Medium</td><td>Medium-high: accepted work never merges, no submission candidate</td><td>Outside break</td></tr>
+          <tr><td>6</td><td>Waits that never resolve: an empty permit or submission ref, a malformed user ref, a failed dependency, an unknown kind. Stuck detection skips Tasks that wait<sup class="ref"><a href="#src-22" title="core/src/research_core/watcher/waits.py:66-70, 130-131, 159-160, 221-234">22</a></sup>.</td><td>Low-medium</td><td>High for each Task</td><td>Mix: bad data (code must refuse) and failed dependency (Orchestrator decision)</td></tr>
+          <tr><td>7</td><td>The goals step raises before anti-stall in the same function, so the daily backstop never operates. A malformed <code>anti_stall.hour</code> raises every tick<sup class="ref"><a href="#src-23" title="core/src/research_core/watcher/goals.py:40-45, 102-104">23</a></sup>.</td><td>Low</td><td>High: the backstop for all other silent failures is gone</td><td>Code bug</td></tr>
+          <tr><td>8</td><td>Capability checks fail inside the worktree or git step: no bookkeeping, and a full check operates again every minute<sup class="ref"><a href="#src-24" title="core/src/research_core/watcher/checks.py:160-176, 264-271">24</a></sup>.</td><td>Low-medium</td><td>Medium</td><td>Outside break</td></tr>
+          <tr><td>9</td><td>A no-model handler that raises is retried forever, with no limit or notice. A message with no holder Session is held forever<sup class="ref"><a href="#src-25" title="core/src/research_core/watcher/wakes.py:200-205; watcher/messages.py:46-48">25</a></sup>.</td><td>Low</td><td>Medium</td><td>Code bug</td></tr>
+          <tr><td>10</td><td>The context build fails, and the tick returns 0<sup class="ref"><a href="#src-26" title="core/src/research_core/watcher/tick.py:144-146">26</a></sup>.</td><td>Low</td><td>Total, but the stale heartbeat shows it next turn</td><td>Outside break. Agent cannot be woken</td></tr>
+          <tr><td>11</td><td>More than 500 unacknowledged events block newer ones (<code>events.unhandled</code> LIMIT 500), an inference<sup class="ref"><a href="#src-27" title="core/src/research_core/store/events.py:131-143">27</a></sup>.</td><td>Low</td><td>Medium</td><td>Code bug</td></tr>
+          <tr><td>12</td><td><code>store.schema_newer</code> pauses the workspace and emits a wake that cannot operate while paused<sup class="ref"><a href="#src-28" title="core/src/research_core/watcher/store_checks.py:224-252; watcher/tick.py:50">28</a></sup>.</td><td>Low</td><td>Low: the user gets a notice</td><td>Design quirk</td></tr>
+        </tbody>
+      </table>
+    </details>
+  </section>
+
+  <section id="part-a">
+    <details class="fold" open>
+      <summary><h2>3 · Part A: join leagues by Coworld name (PR #153)</h2></summary>
+      <ul class="key-points">
+        <li>Champion sync joins leagues by <code>game.coworld_name</code>, not by version id. The fallback to every league stays removed.</li>
+        <li>No league with the active Coworld's name gives one deduplicated notice and a briefing line, and no wake.</li>
+        <li>A league on a different version still syncs, with one "workspace is behind" notice for each version pair, and no wake.</li>
+      </ul>
+      <p>A separate agent does this work now, as a stopgap. Under Part B, a version difference lasts one check interval at most, so these notices become rare.</p>
+    </details>
+  </section>
+
+  <section id="part-b">
+    <details class="fold" open>
+      <summary><h2>4 · Part B: the workspace follows the canonical version</h2></summary>
+      <ul class="key-points">
+        <li>A workspace Coworld has its name as its key. The current version is a field, and a switch always lands on the canonical version.</li>
+        <li>Every 10 minutes the watcher reads the canonical version. A new one starts an upgrade in place that keeps all records.</li>
+        <li>One debounced upgrade wake then checks the policies on the new version.</li>
+      </ul>
+
+      <figure>
+        <svg viewBox="0 0 720 290" role="img" aria-label="Upgrade flow: a new canonical version, the watcher step, the upgrade code steps, the coworld.version_changed event, then the debounced upgrade wake.">
+          <defs>
+            <marker id="arrow2" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+              <path d="M0,0 L8,4 L0,8" fill="none" stroke="#859ebe" stroke-width="1.2"/>
+            </marker>
+          </defs>
+          <g font-family="Merriweather Sans" text-anchor="middle">
+            <rect x="6" y="20" width="122" height="84" rx="3" fill="#fffaf0" stroke="#d4c9b5"/>
+            <text x="67" y="46" font-size="12" font-weight="700" fill="#111827">New canonical</text>
+            <text x="67" y="61" font-size="12" font-weight="700" fill="#111827">version</text>
+            <text x="67" y="81" font-size="10" fill="#555555">on the Softmax</text>
+            <text x="67" y="94" font-size="10" fill="#555555">platform</text>
+
+            <rect x="150" y="20" width="122" height="84" rx="3" fill="#eef2f7" stroke="#859ebe"/>
+            <text x="211" y="46" font-size="12" font-weight="700" fill="#1a3875">Watcher step</text>
+            <text x="211" y="66" font-size="10" fill="#555555">reads canonical by</text>
+            <text x="211" y="79" font-size="10" fill="#555555">name, one read</text>
+            <text x="211" y="92" font-size="10" fill="#555555">each 10 minutes</text>
+
+            <rect x="294" y="20" width="122" height="84" rx="3" fill="#eef2f7" stroke="#1a3875" stroke-width="1.5"/>
+            <text x="355" y="46" font-size="12" font-weight="700" fill="#1a3875">Upgrade code</text>
+            <text x="355" y="66" font-size="10" fill="#555555">coworld_setup.</text>
+            <text x="355" y="79" font-size="10" fill="#555555">upgrade(), in place,</text>
+            <text x="355" y="92" font-size="10" fill="#555555">no model</text>
+
+            <rect x="438" y="20" width="122" height="84" rx="3" fill="#fffaf0" stroke="#d4c9b5"/>
+            <text x="499" y="46" font-size="12" font-weight="700" fill="#111827">Event</text>
+            <text x="499" y="66" font-size="9.5" fill="#1a3875" font-family="ui-monospace, Menlo, monospace">coworld.</text>
+            <text x="499" y="79" font-size="9.5" fill="#1a3875" font-family="ui-monospace, Menlo, monospace">version_changed</text>
+            <text x="499" y="94" font-size="10" fill="#555555">with the diffs</text>
+
+            <rect x="582" y="20" width="132" height="84" rx="3" fill="rgba(212,168,83,0.14)" stroke="#d4a853"/>
+            <text x="648" y="46" font-size="12" font-weight="700" fill="#111827">Upgrade wake</text>
+            <text x="648" y="66" font-size="10" fill="#555555">starts after a quiet</text>
+            <text x="648" y="79" font-size="10" fill="#555555">period, one wake for</text>
+            <text x="648" y="92" font-size="10" fill="#555555">the latest version</text>
+          </g>
+          <line x1="128" y1="62" x2="148" y2="62" stroke="#859ebe" stroke-width="1.5" marker-end="url(#arrow2)"/>
+          <line x1="272" y1="62" x2="292" y2="62" stroke="#859ebe" stroke-width="1.5" marker-end="url(#arrow2)"/>
+          <line x1="416" y1="62" x2="436" y2="62" stroke="#859ebe" stroke-width="1.5" marker-end="url(#arrow2)"/>
+          <line x1="560" y1="62" x2="580" y2="62" stroke="#859ebe" stroke-width="1.5" marker-end="url(#arrow2)"/>
+          <!-- upgrade steps panel -->
+          <line x1="355" y1="104" x2="355" y2="128" stroke="#859ebe" stroke-width="1" stroke-dasharray="3 3"/>
+          <rect x="150" y="128" width="410" height="150" rx="3" fill="#fffaf0" stroke="#d4c9b5"/>
+          <g font-family="Merriweather Sans" font-size="10.5" fill="#111827">
+            <text x="164" y="150" font-weight="700" fill="#1a3875">Upgrade code steps</text>
+            <text x="164" y="172">1. Read the manifest of the new version (source URL, commit).</text>
+            <text x="164" y="191">2. Move the source checkout to the new commit.</text>
+            <text x="164" y="210">3. Never overwrite code/. Fast-forward an unedited mixin only.</text>
+            <text x="164" y="229">4. Import new seed files; list changed and removed ones.</text>
+            <text x="164" y="248">5. Record the change, emit coworld.version_changed.</text>
+            <text x="164" y="267">6. Mark the capability checks due.</text>
+          </g>
+          <text x="590" y="150" font-family="Merriweather Sans" font-size="10" fill="#555555">Records, Tasks,</text>
+          <text x="590" y="164" font-family="Merriweather Sans" font-size="10" fill="#555555">Versions, worktrees</text>
+          <text x="590" y="178" font-family="Merriweather Sans" font-size="10" fill="#555555">and documents</text>
+          <text x="590" y="192" font-family="Merriweather Sans" font-size="10" fill="#555555">stay in place.</text>
+        </svg>
+        <figcaption><span class="fig-label">Figure 2</span>The upgrade flow. Code moves the source reference and records the change with no model. Only the last step, the debounced upgrade wake, costs model money. Several quick versions start one wake for the latest version.</figcaption>
+      </figure>
+
+      <h3 id="b1">B1 · Identity by name</h3>
+      <p>A workspace Coworld has its name as its identity<sup class="oq-ref" id="oq-1-from-b1"><a href="#oq-1" title="Open question 1 — identity key: Coworld name or the first version id?">Q1</a></sup>, and the registry row, folder and record store use the name as their key. The current version is a field: version id, version string, source commit, previous version and time of change. Every platform call that needs a version (upload, evaluate, XP requests, submit) uses this current id, never a cached one.</p>
+      <p>A migration gives current workspaces the new folder name and re-keys the registry row and Sessions. The <code>coworld</code> field in <code>MIXIN.md</code> names the Coworld by name, and its mismatch check stops the comparison to the version id<sup class="ref"><a href="#src-29" title="core/src/research_core/coworld_setup.py:238-239">29</a></sup>.</p>
+
+      <h3 id="b2">B2 · Switch</h3>
+      <p><code>workspace.coworld_switch</code> takes a Coworld name, or a version id that it resolves to its name. It always lands on the canonical version.</p>
+
+      <h3 id="b3">B3 · Follow</h3>
+      <p>A watcher step reads the canonical version for the active Coworld's name, one read on each 10-minute champion-sync interval<sup class="oq-ref" id="oq-7-from-b3"><a href="#oq-7" title="Open question 7 — canonical check cadence: the 10-minute champion-sync interval, or every tick?">Q7</a></sup>. The platform client has <code>find_canonical_coworld(name)</code>, so metta needs no change. A different canonical version starts the upgrade<sup class="oq-ref" id="oq-2-from-b3"><a href="#oq-2" title="Open question 2 — when the upgrade code step runs: immediately, or at a safe point with no Researcher in progress?">Q2</a></sup>.</p>
+
+      <h3 id="b4">B4 · The upgrade in code</h3>
+      <p>The new function <code>coworld_setup.upgrade(name, new_version_id)</code> does the six steps in Figure 2, with no model. It moves the read-only source checkout to the new commit and never overwrites <code>code/</code> (the agent's repository and mixin). It fast-forwards <code>code/mixin/</code> only when the workspace never edited it, and otherwise it puts the mixin diff in the event payload<sup class="oq-ref" id="oq-3-from-b4"><a href="#oq-3" title="Open question 3 — mixin update: fast-forward an unedited mixin automatically, or always leave it to the wake?">Q3</a></sup>. <a href="#detail">Appendix A</a> gives each step.</p>
+      <p>Records, Tasks, Versions, worktrees and documents stay where they are. Researchers in progress continue, and their subsequent platform calls use the new version id<sup class="oq-ref" id="oq-2-from-b4"><a href="#oq-2" title="Open question 2 — when the upgrade code step runs: immediately, or at a safe point with no Researcher in progress?">Q2</a></sup>.</p>
+
+      <h3 id="b5">B5 · The upgrade wake</h3>
+      <p>The upgrade wake is a new wake kind for <code>coworld.version_changed</code>. Its prompt gives the manifest diff, the source changes between the two commits and the mixin diff. The agent updates an edited <code>code/mixin/</code> if the source mixin changed, then rebuilds and evaluates the champion on the new version. If the policy breaks, the agent opens a Task to repair it and resubmits only then<sup class="oq-ref" id="oq-4-from-b5"><a href="#oq-4" title="Open question 4 — resubmission: only when a fix is needed, or always resubmit a rebuilt policy?">Q4</a></sup>. Last, <code>ui.notify</code> tells the user what changed and what the agent did.</p>
+      <p>The wake starts only after the version stays the same for a quiet period<sup class="oq-ref" id="oq-6-from-b5"><a href="#oq-6" title="Open question 6 — debounce for the upgrade wake: 30 minutes of stability, or another value?">Q6</a></sup>. Thus several quick versions start one wake for the latest, which matters for spend.</p>
+
+      <h3 id="b6">B6 · Results across versions</h3>
+      <p>Each experiment run and Version records its Coworld version. The stats code flags comparisons that mix versions, because a result from 0.6.3 can be false on 0.7.3.</p>
+
+      <h3 id="b7">B7 · Champion sync after B1 to B3</h3>
+      <p>Champion sync matches leagues by name and expects the workspace's version. A difference that lasts past one check interval means a league locked to an older version, which is normal and rare<sup class="oq-ref" id="oq-5-from-b7"><a href="#oq-5" title="Open question 5 — a league locked to an older version: follow canonical with one notice, or also keep a way to build for the locked version?">Q5</a></sup>, or a failed upgrade, which is a Part C alarm.</p>
+    </details>
+  </section>
+
+  <section id="part-c">
+    <details class="fold" open>
+      <summary><h2>5 · Part C: tell the Orchestrator when an invariant breaks</h2></summary>
+      <ul class="key-points">
+        <li>The code bugs from Table 1 get direct repairs.</li>
+        <li>A break from outside raises a persisted, deduplicated alarm: a wake when the agent can act, otherwise a user notice.</li>
+      </ul>
+
+      <h3 id="c1">C1 · Repair the code bugs</h3>
+      <p>Cases #1, #3, #7, #9, #11 and the malformed-wait half of #6 get code repairs, not alarms. <a href="#detail">Appendix A</a> lists each repair.</p>
+
+      <h3 id="c2">C2 · Watcher alarms</h3>
+      <p>A step that finds a broken invariant from outside raises an alarm: a persisted condition with the key (step, condition, subject). The first time that the condition holds, the step emits <code>watcher.alarm</code>, which starts one management wake and adds a briefing line. It stays quiet while the condition holds and arms again when it clears. The current <code>stuck:</code> and <code>schema_newer:</code> markers, which a meta value guards, have the same shape<sup class="ref"><a href="#src-18" title="core/src/research_core/watcher/recovery.py:241-261">18</a></sup><sup class="ref"><a href="#src-28" title="core/src/research_core/watcher/store_checks.py:224-252; watcher/tick.py:50">28</a></sup>. The same step error on N consecutive ticks also becomes an alarm, and <code>ctx.notes</code> goes away or feeds alarms.</p>
+
+      <h3 id="c3">C3 · Wake or notice</h3>
+      <table>
+        <thead>
+          <tr><th>Result</th><th>Cases from Table 1</th></tr>
+        </thead>
+        <tbody>
+          <tr><td>Wake (the agent can act)</td><td>#4: no league for the Coworld's name, or a failed upgrade (B7). #5: a merge held on a dirty <code>main</code>. #6: a Task that waits on a failed dependency (the Orchestrator plans again or abandons it). #8: checks that fail in the worktree or git step. Any step error repeated N ticks.</td></tr>
+          <tr><td>User notice only (the agent cannot be woken or cannot act)</td><td>#2: runs API down. #10: context build failed. For these two, the tick also exits non-zero, so Hermes raises its own cron failure notice. #12 already gives a notice.</td></tr>
+        </tbody>
+      </table>
+
+      <h3 id="c4">C4 · Wake machinery</h3>
+      <p>New wakes use the current wake machinery, so the JAME-176 loop guard, batching, and the follow-up task that stops one <code>wake.failed</code> for each event of a failed batch all apply.</p>
+    </details>
+  </section>
+
+  <section id="order">
+    <details class="fold" open>
+      <summary><h2>6 · Order, validation and risks</h2></summary>
+      <ul class="key-points">
+        <li>Part A first, then the C1 repairs, the alarms, and Part B in two steps. The largest risk is a migration error.</li>
+      </ul>
+
+      <h3 id="order-steps">Order</h3>
+      <ol>
+        <li>Part A in #153 (in progress).</li>
+        <li>C1 code-bug repairs, as a small, independent PR.</li>
+        <li>C2 and C3, the watcher alarms.</li>
+        <li>B1 and B2, identity by name, with the migration.</li>
+        <li>B3 to B6, follow and upgrade.</li>
+      </ol>
+      <p>B can start before C. C2 gives a failed upgrade its alarm.</p>
+
+      <h3 id="validation">Validation</h3>
+      <p>Fake platform, migration, regression and alarm tests, plus a cost-capped model run of the upgrade wake before release, prove the plan (<a href="#detail">Appendix A</a>).</p>
+
+      <h3 id="risks">Risks</h3>
+      <div class="callout callout-warn">
+        <span class="callout-label">Risk · migration</span>
+        The migration touches every store row that names a Coworld, and an error strands records<sup class="oq-ref" id="oq-1-from-risks"><a href="#oq-1" title="Open question 1 — identity key: Coworld name or the first version id?">Q1</a></sup>. Mitigation: test the migration on a real workspace copy, and keep the old folder until the new one passes the doctor.
+      </div>
+      <ul>
+        <li><strong>Upgrade wakes cost money.</strong> Seven Generals versions in about 26 hours would be seven wakes with no debounce. Mitigation: the debounce, plus the inference gate (JAME-174).</li>
+        <li><strong>A version change in mid-experiment mixes results.</strong> Mitigation: B6.</li>
+        <li><strong>The automatic mixin fast-forward can overwrite a workspace edit</strong> if the "never edited" check is wrong. Mitigation: compare against the recorded import commit, and when in doubt, never fast-forward.</li>
+      </ul>
+    </details>
+  </section>
+
+  <section id="alternatives">
+    <details class="fold" open>
+      <summary><h2>7 · Alternatives considered</h2></summary>
+      <ul>
+        <li><strong>Keep the pin.</strong> It drifts within hours, and id comparisons break.</li>
+        <li><strong>Move with today's <code>coworld_switch</code>.</strong> Each move makes an empty Coworld and a full setup wake.</li>
+        <li><strong>Let the agent look for new versions.</strong> Polling in the model context, which another task removes.</li>
+        <li><strong>A platform push event for new canonical versions.</strong> Not necessary: one read each 10 minutes is cheap.</li>
+        <li><strong>An upgrade all in code, with no wake.</strong> Code cannot judge whether a policy still works or merge an edited mixin.</li>
+        <li><strong>Keep the first version id as the stable key, with the current version beside it.</strong> No folder migration, but the key names a version that the workspace does not run. This is the alternative in Q1<sup class="oq-ref" id="oq-1-from-alternatives"><a href="#oq-1" title="Open question 1 — identity key: Coworld name or the first version id?">Q1</a></sup>.</li>
+        <li><strong>Make every broken invariant a wake.</strong> Some breaks (runs API down) cannot wake anyone, and noisy alarms repeat the Nov 2 storm. Thus alarms are deduplicated and split into wakes and notices.</li>
+      </ul>
+    </details>
+  </section>
+
+  <section id="open-questions">
+    <details class="fold" open>
+      <summary><h2>8 · Open questions</h2></summary>
+      <p>Each recommendation is also the default if nobody answers.</p>
+      <ol class="open-questions">
+        <li id="oq-1">
+          <p><strong>Identity key: the Coworld name, or the first version id kept as a stable key?</strong></p>
+          <p><span class="oq-label">Context</span> The key names the registry row, folder and record store (B1), and it sets the size of the migration.</p>
+          <p><span class="oq-label">Options</span> (a) The name: honest, and it matches how the platform and users name the Coworld, but every folder is renamed. (b) The first version id: no folder renames, but the key names a version that the workspace does not run.</p>
+          <p><span class="oq-label">Recommendation</span> (a).</p>
+          <p class="oq-from">Raised in <a href="#oq-1-from-b1">§4 B1 Identity by name</a>, <a href="#oq-1-from-risks">§6 Risks</a>, <a href="#oq-1-from-alternatives">§7 Alternatives considered</a></p>
+        </li>
+        <li id="oq-2">
+          <p><strong>When does the upgrade code step run?</strong></p>
+          <p><span class="oq-label">Context</span> B3 and B4 start the upgrade while Researchers can be in progress.</p>
+          <p><span class="oq-label">Options</span> (a) Immediately: the step only moves the source reference and records the change. (b) At a safe point with no Researcher in progress, which delays the move.</p>
+          <p><span class="oq-label">Recommendation</span> (a).</p>
+          <p class="oq-from">Raised in <a href="#oq-2-from-b3">§4 B3 Follow</a>, <a href="#oq-2-from-b4">§4 B4 The upgrade in code</a></p>
+        </li>
+        <li id="oq-3">
+          <p><strong>How does the mixin update?</strong></p>
+          <p><span class="oq-label">Context</span> B4 updates <code>code/mixin/</code> when the source mixin changes, and a wrong "never edited" check can overwrite an edit.</p>
+          <p><span class="oq-label">Options</span> (a) Fast-forward an unedited mixin, else leave it to the upgrade wake. (b) Always leave it to the wake, which costs agent work for each change.</p>
+          <p><span class="oq-label">Recommendation</span> (a).</p>
+          <p class="oq-from">Raised in <a href="#oq-3-from-b4">§4 B4 The upgrade in code</a></p>
+        </li>
+        <li id="oq-4">
+          <p><strong>When does the upgrade wake resubmit?</strong></p>
+          <p><span class="oq-label">Context</span> B5. The platform still runs old policies.</p>
+          <p><span class="oq-label">Options</span> (a) Resubmit only when a repair is necessary. (b) Always resubmit a rebuilt policy.</p>
+          <p><span class="oq-label">Recommendation</span> (a).</p>
+          <p class="oq-from">Raised in <a href="#oq-4-from-b5">§4 B5 The upgrade wake</a></p>
+        </li>
+        <li id="oq-5">
+          <p><strong>What happens for a league locked to a version older than canonical?</strong></p>
+          <p><span class="oq-label">Context</span> B7: a lock keeps a league on the version from lock time.</p>
+          <p><span class="oq-label">Options</span> (a) The workspace still follows canonical, and the agent gets one notice. (b) The workspace also keeps a way to build for the locked version.</p>
+          <p><span class="oq-label">Recommendation</span> (a).</p>
+          <p class="oq-from">Raised in <a href="#oq-5-from-b7">§4 B7 Champion sync after B1 to B3</a></p>
+        </li>
+        <li id="oq-6">
+          <p><strong>What is the debounce for the upgrade wake?</strong></p>
+          <p><span class="oq-label">Context</span> B5 waits for a quiet period. A shorter one starts more wakes, and a longer one delays the policy check. Two Generals versions came 20 minutes apart.</p>
+          <p><span class="oq-label">Options</span> (a) 30 minutes of stability. (b) Another value.</p>
+          <p><span class="oq-label">Recommendation</span> (a).</p>
+          <p class="oq-from">Raised in <a href="#oq-6-from-b5">§4 B5 The upgrade wake</a></p>
+        </li>
+        <li id="oq-7">
+          <p><strong>How frequently does the watcher read the canonical version?</strong></p>
+          <p><span class="oq-label">Context</span> B3. The watcher ticks every minute.</p>
+          <p><span class="oq-label">Options</span> (a) On the 10-minute champion-sync interval. (b) Every tick, with ten times more reads.</p>
+          <p><span class="oq-label">Recommendation</span> (a).</p>
+          <p class="oq-from">Raised in <a href="#oq-7-from-b3">§4 B3 Follow</a></p>
+        </li>
+      </ol>
+    </details>
+  </section>
+
+  <section id="detail" class="appendix">
+    <details class="fold">
+      <summary><h2><span class="appendix-label">Appendix A ·</span> Implementation detail</h2></summary>
+      <h3>A.1 · How a switch works today</h3>
+      <p>The switch registers the id and makes the folder and code repository. For a new Coworld, it calls <code>fetch</code> and emits <code>coworld.setup_needed</code><sup class="ref"><a href="#src-8" title="core/src/research_core/coworld_setup.py:59-117">8</a></sup>. <code>fetch</code> clones the source one time at the manifest commit, copies the mixin (a folder of files from the Coworld source) into <code>code/mixin/</code>, and imports seed claims and lessons<sup class="ref"><a href="#src-9" title="core/src/research_core/coworld_setup.py:1-12, 186-200">9</a></sup>. The setup wake is agent work on top of that: make the mixin usable, import lessons, do capability checks, make the starter policy and upload it<sup class="ref"><a href="#src-10" title="core/src/research_core/watcher/wakes/setup.md">10</a></sup>. The setup wake does not fetch the source. The code in the switch does that.</p>
+      <h3>A.2 · The upgrade steps (B4)</h3>
+      <p><code>coworld_setup.upgrade(name, new_version_id)</code> does these steps:</p>
+      <ol>
+        <li>Read the manifest of the new version (source URL and commit).</li>
+        <li>Move the source checkout, a read-only reference copy, to the new commit (<code>git fetch</code> and checkout).</li>
+        <li>Never overwrite <code>code/</code> (the agent's repository and mixin). If the workspace did not edit its mixin after the import, fast-forward <code>code/mixin/</code> to the new source's mixin. Otherwise, leave it, and put the source mixin diff in the event payload.</li>
+        <li>Import the seed files that are new in the new commit. The import is plain code: it parses the Coworld's <code>seed/</code> folders and skips a summary that is already in the store. Re-running it is not enough on its own. An edited lesson has a new summary, so it would become a second claim, and a deleted lesson would stay. So the step compares the seed files of the two commits and lists the changed and removed ones in the event payload. The upgrade wake then supersedes or retires their claims.</li>
+        <li>Record the change in the registry, and emit <code>coworld.version_changed</code> with the old and new versions, commits, a manifest diff (player runtime, variants, commands) and the mixin diff summary.</li>
+        <li>Mark the capability checks due. On its next tick the watcher runs the mixin's <code>build</code>, <code>check</code> and <code>evaluate</code> commands and a dry-run upload. That is a smoke test: it shows the policy still builds and uploads. It does not show the policy still plays well on the new version, because <code>evaluate</code> only scores results that exist. The upgrade wake runs the champion on the new version for that.</li>
+      </ol>
+      <h3>A.3 · Code-bug repairs (C1)</h3>
+      <ul>
+        <li>#1: Do not acknowledge an event whose handler deferred.</li>
+        <li>#3: Count busy and unavailable starts toward give-up after a time limit.</li>
+        <li>#7: Run anti-stall in its own step, isolated from goal conditions. Validate <code>anti_stall.hour</code> when it is set.</li>
+        <li>#9: Put a limit on no-model handler retries, then raise <code>wake.failed</code>.</li>
+        <li>#11: Page <code>events.unhandled</code> past the events that the watcher gave up on.</li>
+        <li>#6: Refuse a malformed wait at the call to <code>task.wait</code> (an empty ref, an unknown kind, a malformed user ref).</li>
+      </ul>
+      <h3>A.4 · Tests</h3>
+      <ul>
+        <li>Fake platform tests: a new canonical version in mid-research upgrades in place and keeps records and Tasks. It emits one <code>coworld.version_changed</code>, and several quick versions start one debounced wake. The source moves to the new commit. An unedited mixin fast-forwards, and an edited one stays, with a diff in the payload.</li>
+        <li>Migration test: a store keyed by version id migrates to name keys, with records and Sessions intact.</li>
+        <li>Champion sync: different versions of one Coworld still join, and no league by name raises one alarm.</li>
+        <li>Each C1 bug gets a regression test. Each C3 alarm gets a test that it fires one time and arms again after it clears.</li>
+        <li>Before release, a cost-capped model run of the upgrade wake on a real Coworld version change.</li>
+      </ul>
+    </details>
+  </section>
+
+  <section id="decision-record" class="appendix">
+    <details class="fold">
+      <summary><h2><span class="appendix-label">Appendix B ·</span> Decision Record</h2></summary>
+      <div class="decision">
+        <span class="decision-label">D1 · Settled</span>
+        <p><strong>The canonical version is always the target.</strong> Lost: "the version that the leagues run." The two are different only for a locked league.</p>
+      </div>
+      <div class="decision">
+        <span class="decision-label">D2 · Settled</span>
+        <p><strong>A version change is a notification to review the changes, never a wipe.</strong> Lost: a switch that makes a new Coworld.</p>
+      </div>
+      <div class="decision">
+        <span class="decision-label">D3 · Answered question</span>
+        <p><strong>Old policies continue to operate on the platform after a version change, and they can break.</strong> The agent must check its policies on the new version. Answer: they still count.</p>
+      </div>
+      <div class="decision">
+        <span class="decision-label">D4 · Answered question</span>
+        <p><strong>The harness (the ide-distributions watcher) owns wakes and version follow, not the client.</strong> Answer: the pin is in ide-distributions, and the IDE in metta never switches Coworlds.</p>
+      </div>
+      <div class="decision">
+        <span class="decision-label">D5 · Settled</span>
+        <p><strong>A difference between the workspace version and the league version must be very rare.</strong> When it stays, it is a fault to report.</p>
+      </div>
+      <div class="decision">
+        <span class="decision-label">D6 · Settled</span>
+        <p><strong>Part A ships in #153 as a stopgap.</strong></p>
+      </div>
+    </details>
+  </section>
+
+  <section id="sources" class="appendix">
+    <details class="fold">
+      <summary><h2><span class="appendix-label">Appendix C ·</span> Sources</h2></summary>
+      <p>All line numbers are from origin/main (8be873e6) unless the entry names a branch. Paths without a repository prefix are in ide-distributions.</p>
+      <ol class="sources">
+        <li id="src-1"><span class="cite">metta workspaces/observatory/platform/packages/core/src/observatory_core/v2/coworlds.py:392-402</span> — leagues follow the canonical version, and an admin lock pins it.</li>
+        <li id="src-2"><span class="cite">metta workspaces/observatory/platform/api/src/observatory_api/flags/leagues.py:34-48; GamePublic fields from GET /v2/games (canonical_coworld_id)</span> — league game fields.</li>
+        <li id="src-3"><span class="cite">core/src/research_core/layout.py:19-27</span> — the Coworld folder name.</li>
+        <li id="src-4"><span class="cite">core/src/research_core/store/migrations/workspace/0001_init.sql:57, 101-120</span> — the registry key and the Session index.</li>
+        <li id="src-5"><span class="cite">core/src/research_core/layout.py:30-70</span> — the contents of the Coworld folder.</li>
+        <li id="src-6"><span class="cite">core/src/research_core/tools/workspace.py:356-358</span> — <code>workspace.coworld_switch</code> takes a version id.</li>
+        <li id="src-7"><span class="cite">core/src/research_core/coworld_cli.py:1-5</span> — the <code>research coworld switch</code> command.</li>
+        <li id="src-8"><span class="cite">core/src/research_core/coworld_setup.py:59-117</span> — the switch, and the setup of a new Coworld.</li>
+        <li id="src-9"><span class="cite">core/src/research_core/coworld_setup.py:1-12, 186-200</span> — <code>fetch</code>: clone, mixin copy and seed import.</li>
+        <li id="src-10"><span class="cite">core/src/research_core/watcher/wakes/setup.md</span> — the setup wake prompt.</li>
+        <li id="src-11"><span class="cite">core/src/research_core/watcher/champion_sync.py:102-107 (main); branch jame-176-champion-wakes champion_sync.py:69-70, 108-111</span> — champion sync league match.</li>
+        <li id="src-12"><span class="cite">orchestrator/cron/jobs.json:18-22</span> — the watcher cron job.</li>
+        <li id="src-13"><span class="cite">core/src/research_core/watcher/tick.py:84-88, 153-154</span> — <code>tick.run_step</code> error handling and the exit code.</li>
+        <li id="src-14"><span class="cite">core/src/research_core/watcher/context.py:68-69</span> — <code>ctx.note()</code>.</li>
+        <li id="src-15"><span class="cite">core/src/research_core/watcher/heartbeat.py:33-35; core/src/research_core/tools/workspace.py:32, 297-300</span> — the heartbeat and the doctor check.</li>
+        <li id="src-16"><span class="cite">core/src/research_core/plugin/turn.py (header); core/src/research_core/watcher/handlers.py:87-123</span> — notices and management wakes.</li>
+        <li id="src-17"><span class="cite">core/src/research_core/watcher/wakes.py:206; core/src/research_core/watcher/resume.py:121-133, 168-169</span> — a deferred resume that the watcher acknowledges.</li>
+        <li id="src-18"><span class="cite">core/src/research_core/watcher/recovery.py:241-261</span> — the stuck rescue and the <code>stuck:</code> marker.</li>
+        <li id="src-19"><span class="cite">core/src/research_core/watcher/wakes.py:103-114; watcher/dispatch.py:93-105; watcher/messages.py:49</span> — the runs API status read.</li>
+        <li id="src-20"><span class="cite">core/src/research_core/watcher/wakes.py:227-233, 281-284</span> — model-wake start and give-up.</li>
+        <li id="src-21"><span class="cite">core/src/research_core/watcher/merge.py:75-80</span> — the merge on a dirty <code>main</code>.</li>
+        <li id="src-22"><span class="cite">core/src/research_core/watcher/waits.py:66-70, 130-131, 159-160, 221-234</span> — waits that never resolve.</li>
+        <li id="src-23"><span class="cite">core/src/research_core/watcher/goals.py:40-45, 102-104</span> — the goals step and anti-stall.</li>
+        <li id="src-24"><span class="cite">core/src/research_core/watcher/checks.py:160-176, 264-271</span> — capability checks.</li>
+        <li id="src-25"><span class="cite">core/src/research_core/watcher/wakes.py:200-205; watcher/messages.py:46-48</span> — no-model handler retries and held messages.</li>
+        <li id="src-26"><span class="cite">core/src/research_core/watcher/tick.py:144-146</span> — the context build failure.</li>
+        <li id="src-27"><span class="cite">core/src/research_core/store/events.py:131-143</span> — <code>events.unhandled</code> LIMIT 500.</li>
+        <li id="src-28"><span class="cite">core/src/research_core/watcher/store_checks.py:224-252; watcher/tick.py:50</span> — <code>store.schema_newer</code> and its marker.</li>
+        <li id="src-29"><span class="cite">core/src/research_core/coworld_setup.py:238-239</span> — the <code>MIXIN.md</code> mismatch check.</li>
+      </ol>
+    </details>
+  </section>
+
+</article>
+
+<!-- ============ DOC-NAV: folds + in-page links (keep; outside DC-COMMENTS) ============
+     Opens any closed fold that contains a link target (TOC, citation, open-question
+     markers, back-links, URL hash), wires Expand/Collapse all, and opens every
+     fold for printing. -->
+<script>
+(() => {
+  'use strict';
+  const doc = document.getElementById('doc');
+  const folds = () => doc.querySelectorAll('details.fold');
+  function reveal(el) {
+    const own = el.querySelector(':scope > details.fold'); // a TOC link targets the <section> around a fold
+    if (own) own.open = true;
+    for (let n = el; n && n !== doc; n = n.parentElement) {
+      if (n.tagName === 'DETAILS') n.open = true;
+    }
+  }
+  function targetOf(hash) {
+    return hash && hash.length > 1 ? document.getElementById(decodeURIComponent(hash.slice(1))) : null;
+  }
+  // Runs before the browser's own jump, so the target is visible when it scrolls.
+  document.addEventListener('click', e => {
+    const a = e.target.closest('a[href^="#"]');
+    if (a) { const t = targetOf(a.getAttribute('href')); if (t) reveal(t); }
+  });
+  function revealHash() {
+    const t = targetOf(location.hash);
+    if (t) { reveal(t); t.scrollIntoView(); }
+  }
+  window.addEventListener('hashchange', revealHash);
+  revealHash();
+  doc.querySelectorAll('[data-fold]').forEach(b => b.addEventListener('click', () => {
+    const open = b.dataset.fold === 'open';
+    folds().forEach(d => { d.open = open; });
+  }));
+  window.addEventListener('beforeprint', () => folds().forEach(d => { d.open = true; }));
+  // Lets the comment sidebar reveal a comment that sits inside a closed fold.
+  window.dcReveal = reveal;
+})();
+</script>
+
+<!-- ================================================================
+     DC-COMMENTS BEGIN — markup + script (copy verbatim; do not modify)
+     ================================================================ -->
+<aside id="dc-sidebar" aria-label="Comments">
+  <h2 class="dc-title">Comments <span id="dc-count"></span></h2>
+  <div class="dc-actions">
+    <button class="dc-btn" id="dc-export">Export JSON</button>
+    <button class="dc-btn" id="dc-copy">Copy JSON</button>
+    <button class="dc-btn" id="dc-import">Import…</button>
+    <input type="file" id="dc-file" accept=".json,application/json" hidden>
+  </div>
+  <div id="dc-status" role="status"></div>
+  <div id="dc-list"><p class="dc-empty">No comments yet. Select text in the document to add one.</p></div>
+</aside>
+<button id="dc-fab" type="button">+ Comment</button>
+<button id="dc-toggle" type="button">Comments</button>
+<!-- Preload slot: a renderer may put a dc-comments/1 `comments` array here (each comment optionally carrying `replies`). Merged by id into the stored comments on load. Leave empty otherwise. -->
+<script id="dc-preload" type="application/json"></script>
+
+<script>
+(() => {
+  'use strict';
+  const FORMAT = 'dc-comments/1';
+  const CTX = 32; // prefix/suffix context length, chars
+  const doc = document.getElementById('doc');
+  const fab = document.getElementById('dc-fab');
+  const listEl = document.getElementById('dc-list');
+  const countEl = document.getElementById('dc-count');
+  const statusEl = document.getElementById('dc-status');
+  const sidebar = document.getElementById('dc-sidebar');
+  const storeKey = 'dc:' + location.pathname; // per file, so a new draft starts clean
+
+  let comments = []; // {id, exact, prefix, suffix, text, created, resolved}
+  let ranges = new Map(); // id -> Range (null if orphaned)
+  let seq = 0;
+
+  // ---- text indexing: one global string over #doc's text nodes ----
+  function docText() {
+    const r = document.createRange();
+    r.selectNodeContents(doc);
+    return r.toString();
+  }
+  function globalOffset(container, offset) {
+    const r = document.createRange();
+    r.setStart(doc, 0);
+    r.setEnd(container, offset);
+    return r.toString().length;
+  }
+  function offsetsToRange(start, end) {
+    const walker = document.createTreeWalker(doc, NodeFilter.SHOW_TEXT);
+    let pos = 0, range = document.createRange(), haveStart = false;
+    while (walker.nextNode()) {
+      const node = walker.currentNode, len = node.data.length;
+      if (!haveStart && pos + len >= start) {
+        range.setStart(node, start - pos);
+        haveStart = true;
+      }
+      if (haveStart && pos + len >= end) {
+        range.setEnd(node, end - pos);
+        return range;
+      }
+      pos += len;
+    }
+    return null;
+  }
+
+  // ---- anchoring: TextQuoteSelector-style exact + prefix/suffix ----
+  function selectorFromRange(range) {
+    const text = docText();
+    const start = globalOffset(range.startContainer, range.startOffset);
+    const end = globalOffset(range.endContainer, range.endOffset);
+    return {
+      exact: text.slice(start, end),
+      prefix: text.slice(Math.max(0, start - CTX), start),
+      suffix: text.slice(end, end + CTX),
+    };
+  }
+  function locate(c) {
+    const text = docText();
+    let i = text.indexOf(c.prefix + c.exact + c.suffix);
+    if (i >= 0) return offsetsToRange(i + c.prefix.length, i + c.prefix.length + c.exact.length);
+    i = text.indexOf(c.exact);
+    if (i >= 0) return offsetsToRange(i, i + c.exact.length);
+    return null;
+  }
+  function reanchorAll() {
+    ranges = new Map(comments.map(c => [c.id, locate(c)]));
+    paint();
+  }
+
+  // ---- painting via CSS Custom Highlight API ----
+  const hl = typeof Highlight !== 'undefined' ? new Highlight() : null;
+  const hlActive = typeof Highlight !== 'undefined' ? new Highlight() : null;
+  if (hl) { CSS.highlights.set('dc-hl', hl); CSS.highlights.set('dc-hl-active', hlActive); }
+  function paint(activeId) {
+    if (!hl) return;
+    hl.clear(); hlActive.clear();
+    for (const [id, r] of ranges) {
+      if (!r) continue;
+      (id === activeId ? hlActive : hl).add(r);
+    }
+  }
+
+  // ---- persistence (best-effort; file:// storage varies by browser) ----
+  function save() {
+    try { localStorage.setItem(storeKey, JSON.stringify(comments)); } catch (e) { /* unavailable on some file:// setups */ }
+  }
+  function load() {
+    try {
+      const raw = localStorage.getItem(storeKey);
+      if (raw) comments = JSON.parse(raw);
+    } catch (e) { /* ignore */ }
+  }
+
+  // ---- sidebar rendering ----
+  function flash(msg) {
+    statusEl.textContent = msg;
+    setTimeout(() => { if (statusEl.textContent === msg) statusEl.textContent = ''; }, 2500);
+  }
+  function sortedComments() {
+    const pos = c => {
+      const r = ranges.get(c.id);
+      return r ? globalOffset(r.startContainer, r.startOffset) : Infinity; // orphans last
+    };
+    return [...comments].sort((a, b) => pos(a) - pos(b));
+  }
+  function render(editingId) {
+    countEl.textContent = comments.length ? '(' + comments.length + ')' : '';
+    listEl.textContent = '';
+    if (!comments.length) {
+      const p = document.createElement('p');
+      p.className = 'dc-empty';
+      p.textContent = 'No comments yet. Select text in the document to add one.';
+      listEl.appendChild(p);
+      return;
+    }
+    for (const c of sortedComments()) {
+      const item = document.createElement('div');
+      item.className = 'dc-item' + (c.resolved ? ' dc-resolved' : '');
+      item.dataset.id = c.id;
+
+      const quote = document.createElement('div');
+      quote.className = 'dc-quote';
+      quote.textContent = c.exact.length > 90 ? c.exact.slice(0, 90) + '…' : c.exact;
+      if (!ranges.get(c.id)) {
+        const tag = document.createElement('span');
+        tag.className = 'dc-orphan-tag';
+        tag.textContent = 'orphaned';
+        quote.appendChild(tag);
+      }
+      item.appendChild(quote);
+
+      if (c.id === editingId) {
+        const ta = document.createElement('textarea');
+        ta.value = c.text;
+        ta.placeholder = 'Write a comment… (⌘/Ctrl+Enter to save, Esc to cancel)';
+        ta.addEventListener('keydown', e => {
+          if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') commit();
+          if (e.key === 'Escape') cancel();
+        });
+        ta.addEventListener('click', e => e.stopPropagation());
+        const saveBtn = document.createElement('button');
+        saveBtn.className = 'dc-btn';
+        saveBtn.textContent = 'Save';
+        saveBtn.style.marginTop = '6px';
+        saveBtn.addEventListener('click', e => { e.stopPropagation(); commit(); });
+        function commit() {
+          c.text = ta.value.trim();
+          if (!c.text) return cancel();
+          save(); render();
+        }
+        function cancel() {
+          if (!c.text) { comments = comments.filter(x => x.id !== c.id); ranges.delete(c.id); paint(); }
+          save(); render();
+        }
+        item.appendChild(ta);
+        item.appendChild(saveBtn);
+        listEl.appendChild(item);
+        requestAnimationFrame(() => ta.focus());
+        continue;
+      }
+
+      const text = document.createElement('div');
+      text.className = 'dc-text';
+      text.textContent = c.text;
+      item.appendChild(text);
+
+      if (Array.isArray(c.replies) && c.replies.length) {
+        const box = document.createElement('div');
+        box.className = 'dc-replies';
+        for (const r of c.replies) {
+          const who = document.createElement('div');
+          who.className = 'dc-reply-author';
+          who.textContent = 'Reply from ' + (r.author || 'agent') + (r.created ? ' · ' + String(r.created).slice(0, 10) : '');
+          const body = document.createElement('div');
+          body.className = 'dc-reply-text';
+          for (const part of String(r.text || '').split(/(https?:\/\/[^\s)]+)/g)) {
+            if (/^https?:\/\//.test(part)) {
+              const a = document.createElement('a');
+              a.href = part; a.target = '_blank'; a.rel = 'noopener';
+              a.textContent = part;
+              a.addEventListener('click', e => e.stopPropagation());
+              body.appendChild(a);
+            } else body.appendChild(document.createTextNode(part));
+          }
+          box.append(who, body);
+        }
+        item.appendChild(box);
+      }
+
+      const meta = document.createElement('div');
+      meta.className = 'dc-meta';
+      const when = document.createElement('span');
+      when.textContent = c.created.slice(0, 10);
+      const resolved = document.createElement('label');
+      const cb = document.createElement('input');
+      cb.type = 'checkbox';
+      cb.checked = !!c.resolved;
+      cb.addEventListener('click', e => e.stopPropagation());
+      cb.addEventListener('change', () => { c.resolved = cb.checked; save(); render(); });
+      resolved.append(cb, 'resolved');
+      const del = document.createElement('button');
+      del.className = 'dc-del';
+      del.textContent = 'delete';
+      del.addEventListener('click', e => {
+        e.stopPropagation();
+        comments = comments.filter(x => x.id !== c.id);
+        ranges.delete(c.id);
+        paint(); save(); render();
+      });
+      meta.append(when, resolved, del);
+      item.appendChild(meta);
+
+      item.addEventListener('click', () => {
+        const r = ranges.get(c.id);
+        if (!r) return flash('Anchor not found in this version of the document.');
+        if (window.dcReveal) window.dcReveal(r.startContainer.parentElement); // open a closed fold first
+        const rect = r.getBoundingClientRect();
+        window.scrollTo({ top: window.scrollY + rect.top - 160, behavior: 'smooth' });
+        paint(c.id);
+        setTimeout(() => paint(), 2000);
+      });
+      // double-click text to edit
+      text.addEventListener('dblclick', e => { e.stopPropagation(); render(c.id); });
+      listEl.appendChild(item);
+    }
+  }
+
+  // ---- selection -> floating Comment button ----
+  document.addEventListener('mouseup', e => {
+    if (fab.contains(e.target)) return;
+    setTimeout(() => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.rangeCount) { fab.style.display = 'none'; return; }
+      const range = sel.getRangeAt(0);
+      if (!doc.contains(range.commonAncestorContainer) || !range.toString().trim()) {
+        fab.style.display = 'none';
+        return;
+      }
+      const rect = range.getBoundingClientRect();
+      fab.style.display = 'block';
+      fab.style.left = Math.min(rect.right + 8 + window.scrollX, window.scrollX + document.documentElement.clientWidth - 120) + 'px';
+      fab.style.top = (rect.top + window.scrollY - 4) + 'px';
+      fab.dataset.pending = '1';
+    }, 0);
+  });
+  fab.addEventListener('click', () => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed) return;
+    const range = sel.getRangeAt(0);
+    const c = Object.assign({ id: 'c' + Date.now().toString(36) + (seq++), text: '', created: new Date().toISOString(), resolved: false }, selectorFromRange(range));
+    comments.push(c);
+    ranges.set(c.id, range.cloneRange());
+    paint(c.id);
+    sel.removeAllRanges();
+    fab.style.display = 'none';
+    sidebar.classList.add('dc-open');
+    render(c.id);
+  });
+
+  // ---- export / import ----
+  function payload() {
+    return JSON.stringify({
+      format: FORMAT,
+      doc: document.title,
+      exported: new Date().toISOString(),
+      comments: comments,
+    }, null, 2);
+  }
+  document.getElementById('dc-export').addEventListener('click', () => {
+    const blob = new Blob([payload()], { type: 'application/json' });
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = (document.title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'doc') + '.comments.json';
+    a.click();
+    URL.revokeObjectURL(a.href);
+    flash('Downloaded.');
+  });
+  document.getElementById('dc-copy').addEventListener('click', async () => {
+    try { await navigator.clipboard.writeText(payload()); flash('Copied to clipboard.'); }
+    catch (e) { flash('Clipboard blocked — use Export instead.'); }
+  });
+  document.getElementById('dc-import').addEventListener('click', () => document.getElementById('dc-file').click());
+  document.getElementById('dc-file').addEventListener('change', e => {
+    const file = e.target.files[0];
+    if (!file) return;
+    file.text().then(raw => {
+      const data = JSON.parse(raw);
+      if (data.format !== FORMAT || !Array.isArray(data.comments)) { flash('Not a dc-comments file.'); return; }
+      const byId = new Map(comments.map(c => [c.id, c]));
+      for (const c of data.comments) byId.set(c.id, c);
+      comments = [...byId.values()];
+      reanchorAll(); save(); render();
+      flash('Imported ' + data.comments.length + ' comment(s).');
+    }).catch(() => flash('Could not parse that file.'));
+    e.target.value = '';
+  });
+
+  document.getElementById('dc-toggle').addEventListener('click', () => sidebar.classList.toggle('dc-open'));
+
+  // ---- init ----
+  load();
+  // Merge the renderer's preloaded comments (with replies) by id: a stored
+  // comment keeps its own text/resolved state and takes the preloaded replies.
+  try {
+    const pre = document.getElementById('dc-preload');
+    const preloaded = pre && pre.textContent.trim() ? JSON.parse(pre.textContent) : [];
+    if (Array.isArray(preloaded) && preloaded.length) {
+      const byId = new Map(comments.map(c => [c.id, c]));
+      for (const c of preloaded) {
+        const existing = byId.get(c.id);
+        if (existing) { if (c.replies) existing.replies = c.replies; }
+        else byId.set(c.id, c);
+      }
+      comments = [...byId.values()];
+      save();
+    }
+  } catch (e) { /* malformed preload: ignore */ }
+  reanchorAll();
+  render();
+})();
+</script>
+<!-- ============ DC-COMMENTS END ============ -->
+</div>
+</body>
+</html>
