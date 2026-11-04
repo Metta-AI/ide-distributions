@@ -102,6 +102,7 @@ def switch(
         notice = notices.add(
             wstore,
             actor,
+            coworld_id=coworld_id,
             text=f"Setting up {coworld_id} for this session.",
             refs=[cites],
         )

@@ -54,9 +54,11 @@ def conversation_for(ctx: ToolContext) -> str:
 def handle(call: ToolCall) -> dict:
     ctx = call.ctx
     if call.action == "notify":
+        coworld = ctx.coworld_or_none()
         record = notices.add(
             ctx.wstore,
             ctx.actor,
+            coworld_id=coworld.coworld_id if coworld else None,
             text=call.get("text"),
             refs=call.get("refs") or [],
             urgency=call.get("urgency") or "normal",

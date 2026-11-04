@@ -34,6 +34,7 @@ from pathlib import Path
 
 from research_core.platform.fake import COWORLD_ID, LEAGUE_ID
 from research_core.plugin import turn
+from research_core.store import sessions
 from research_core.tools.base import ToolContext, run_tool
 from research_core.watcher.hermes_api import FakeHermesRuns, FakeRun
 
@@ -81,7 +82,7 @@ class ScriptedAgent:
         if "# Setup wake" in run.input:
             self.setup(run, ctx)
             return
-        if run.input.startswith("# ") and "wake" in run.input.splitlines()[0].lower():
+        if sessions.read(ctx.wstore, run.session_id)["kind"] != "chat":
             # Another wake (review, management, anti-stall): a background Session. The
             # plugin's turn hook renders only for chat Sessions, so this one renders nothing.
             self.other_wakes.append(run.input.splitlines()[0])

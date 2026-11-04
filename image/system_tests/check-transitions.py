@@ -7,6 +7,8 @@ Run last: the system harness discards this container and fixture volume afterwar
 
 import json
 import os
+import time
+from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 from uuid import uuid4
 
@@ -31,6 +33,23 @@ def post(path, body):
         timeout=30,
     ) as response:
         return json.load(response)
+
+
+def completed(result):
+    """Follow a durable receipt without resubmitting or changing its command identity."""
+    receipt = result["command"] if result.get("status") == "pending" else result
+    if receipt.get("transition_state") != "pending":
+        return receipt
+    command_id = receipt["command_id"]
+    deadline = time.monotonic() + 60
+    while receipt["transition_state"] == "pending":
+        assert time.monotonic() < deadline, receipt
+        time.sleep(0.1)
+        query = urlencode({"coworld_id": coworld.coworld_id, "command_id": command_id})
+        with urlopen("http://127.0.0.1:8650/command?" + query, timeout=30) as response:
+            receipt = json.load(response)
+        assert receipt["command_id"] == command_id, receipt
+    return receipt
 
 
 def status():
@@ -70,7 +89,9 @@ args = {
     "description": "Verify stable tool intent and coordinator application",
     "operation_id": "packaged-proposal",
 }
-first = json.loads(registry.dispatch("task", args, session_id=session_id, task_id=session_id))
+first = completed(
+    json.loads(registry.dispatch("task", args, session_id=session_id, task_id=session_id))
+)
 assert first["ok"] and first["record"]["status"] == "proposed", first
 replay = json.loads(registry.dispatch("task", args, session_id=session_id, task_id=session_id))
 assert replay == first, (first, replay)
@@ -97,6 +118,7 @@ approved = post(
         "args": {"task_id": record["id"], "operation_id": "approve-proof"},
     },
 )
+approved = completed(approved)
 assert approved["record"]["status"] == "unclaimed", approved
 
 # Fixture-backed worker authority: a queued attempt, not an accepted native/model run.
@@ -164,6 +186,7 @@ report_args = {
 reported = json.loads(
     registry.dispatch("task", report_args, session_id=worker_id, task_id=worker_id)
 )
+reported = completed(reported)
 assert reported["ok"] and reported["record"]["waiting_on"]["kind"] == "user", reported
 report_replay = json.loads(
     registry.dispatch("task", report_args, session_id=worker_id, task_id=worker_id)

@@ -124,7 +124,7 @@ def test_submit_user_request_never_refused(lab):
     (event,) = lab.events("version.submitted")
     assert event["autonomous"] is False and event["cites"] == "msg-7"
     assert event["league"] == "league_fake" and event["submission_id"] == result["submission"]["id"]
-    (notice,) = notices.unread(lab.wstore)
+    (notice,) = notices.unread(lab.wstore, coworld_id="cow_fake")
     assert notice["text"] == "Submitted V-1 to Fake League (champion)" and notice["refs"] == ["V-1"]
     assert "note" not in result
 
@@ -169,7 +169,10 @@ def test_submit_autonomous_quality_bar(lab):
     assert allowed["status"] == "champion" and allowed["champion"]["version_id"] == 3
     (_, event) = lab.events("version.submitted")
     assert event["autonomous"] is True and event["cites"] is None
-    assert any("Submitted V-3 to Fake League" in n["text"] for n in notices.unread(lab.wstore))
+    assert any(
+        "Submitted V-3 to Fake League" in n["text"]
+        for n in notices.unread(lab.wstore, coworld_id="cow_fake")
+    )
 
 
 def test_submit_autonomous_without_champion_runs_the_check(lab):

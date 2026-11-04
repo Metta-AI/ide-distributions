@@ -244,7 +244,7 @@ def test_setup_is_idempotent_and_cannot_rebind_a_session(ctx, upstream, tmp_path
         "cites": "msg-1",
         "problems": [],
     }
-    notice = notices.unread(ctx.wstore)
+    notice = notices.unread(ctx.wstore, coworld_id=COWORLD)
     assert len(notice) == 1 and notice[0]["text"].startswith("Setting up cow_fake")
     assert notice[0]["refs"] == ["msg-1"] and first["notice"] == notice[0]["id"]
 

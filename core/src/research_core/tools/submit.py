@@ -119,6 +119,7 @@ def handle(call: ToolCall) -> dict:
     notices.add(
         ctx.wstore,
         ctx.actor,
+        coworld_id=ctx.coworld().coworld_id,
         text=f"Submitted {vid} to {league.name} ({status})",
         refs=[vid],
     )

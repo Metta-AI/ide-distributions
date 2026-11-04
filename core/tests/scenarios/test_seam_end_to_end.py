@@ -24,7 +24,8 @@ from research_core.client import ScriptedClient
 from research_core.platform.fake import FakePlatform
 from research_core.scripted_agent import CITES, REQUEST, ScriptedAgent
 from research_core.serve import SeamServer
-from research_core.store import coworlds, notices
+from research_core.store import coworlds, notices, sessions
+from research_core.store.actors import Actor
 from research_core.tools.base import ToolContext, run_tool
 from research_core.watcher import context as watcher_context
 from research_core.watcher.hermes_api import FakeHermesRuns
@@ -47,7 +48,7 @@ class Scenario:
         self.agent = ScriptedAgent(self.env, source, commit, coworld_id=COWORLD_ID)
         self.hermes = FakeHermesRuns(script=self.agent)
         self.agent.hermes = self.hermes
-        self.server = SeamServer(ws=self.ws, hermes=self.hermes)
+        self.server = SeamServer(ws=self.ws, hermes=self.hermes, env=self.env)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
         self.client = ScriptedClient(self.server.url)
         self.session_id = self.client.open(
@@ -185,3 +186,25 @@ def test_concurrent_chat_and_wakes_never_touch_the_chat_session(scenario):
     assert third["delivered"] == "queued" and third["run_id"] != first["run_id"]
     dispatched_second = scenario.client.wait_admission(second["op_id"])
     assert "Submitted V-1" in scenario.agent.rendered[dispatched_second["run_id"]]
+
+
+def test_management_wake_without_heading_preserves_chat_notices(scenario):
+    ctx = scenario.ctx()
+    wake_id = "management-wake"
+    sessions.register(
+        ctx.wstore,
+        Actor.harness(),
+        session_id=wake_id,
+        profile="orchestrator",
+        kind="wake",
+        coworld_id=COWORLD_ID,
+    )
+    notices.add(ctx.wstore, Actor.harness(), text="Game news", coworld_id=COWORLD_ID)
+    run_id = scenario.hermes.start(
+        profile="orchestrator",
+        session_id=wake_id,
+        text="Assign research work using task.assign.",
+    )
+    assert run_id not in scenario.agent.rendered
+    assert scenario.hermes.runs[run_id].status == "completed"
+    assert [n["text"] for n in notices.unread(ctx.wstore, coworld_id=COWORLD_ID)] == ["Game news"]

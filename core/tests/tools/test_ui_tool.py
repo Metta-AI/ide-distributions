@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import json
+
 import pytest
 
 import research_core.tools.ui  # noqa: F401  (registers the tool)
 from research_core.store import notices, sessions, ui_state
 from research_core.store.actors import Actor
+from research_core.tools.base import run_tool
 from research_core.tools.ui import PANEL_KINDS
 
 ANSWER_NOTE = "the answer arrives as a UI action; if no client can answer, ask in chat"
@@ -138,7 +141,7 @@ def test_notify_writes_an_unread_notice_with_no_client_attached(call, ctx_factor
     assert result["ok"] is True
     assert result["record"]["id"] == "N-1" and result["record"]["urgency"] == "high"
     wstore = ctx_factory().wstore
-    unread = notices.unread(wstore)
+    unread = notices.unread(wstore, coworld_id="cow_fake")
     assert [n["text"] for n in unread] == ["T-3 finished"]
     assert unread[0]["refs"] == ["T-3"]
     kinds = [e.kind for e in wstore.events_after(0)]
@@ -182,3 +185,13 @@ def test_ask_opens_a_question_and_says_how_the_answer_arrives(call, ctx_factory,
 def test_researcher_cannot_use_ui(call):
     result = call("ui", {"action": "notify", "text": "hi"}, role="researcher")
     assert result["ok"] is False and "unknown tool 'ui'" in result["error"]
+
+
+def test_user_identity_notice_uses_bound_game(ctx_factory, register_session):
+    register_session("s1", "chat")
+    ctx = ctx_factory(session_id="s1")
+    ctx.actor = Actor.user("fixture-user")
+    result = json.loads(run_tool("ui", {"action": "notify", "text": "Game news"}, ctx))
+    assert result["ok"] is True
+    assert [n["text"] for n in notices.unread(ctx.wstore, coworld_id="cow_fake")] == ["Game news"]
+    assert notices.unread(ctx.wstore) == []
