@@ -102,5 +102,3 @@ def accept(
         commit_ms=(committed - written) * 1000,
         registration_ms=(written - registering) * 1000 if registration is not None else 0,
     )
-
-

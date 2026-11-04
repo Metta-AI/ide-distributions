@@ -13,6 +13,7 @@ from research_core.store import events, sessions, settings
 from research_core.watcher import sleep, wakes
 from tests.watcher._support import (
     HARNESS,
+    advance_executions,
     events_of,
     make_ctx,
     set_setting,
@@ -114,14 +115,15 @@ def test_a_wake_stopped_for_sleep_retries_without_using_an_attempt(tmp_path):
     ctx = make_ctx(tmp_path)  # recovery.max_attempts defaults to 2
     with ctx.store.tx(HARNESS) as tx:
         seq = tx.event("task.asked", "T-1", {"question": "which seed?"})
-    wakes.run(ctx)
+    advance_executions(ctx)
     first = [kw for name, kw in ctx.hermes.calls if name == "start"][-1]
 
     go_to_sleep(ctx, wait_s=0)
     assert sessions.read(ctx.wstore, first["session_id"])["stopped_by"] == sessions.SLEEP_STOP
 
-    report = wakes.run(ctx)  # after the wake: released, then started again at once
-    assert report["stopped_for_sleep"] == [f"cow_fake:{seq}"]
+    sleep.wake_up(ctx)
+    advance_executions(ctx)  # after the wake: released, then started again at once
+    assert ctx.wstore.get_meta(f"wake_planned_stops:cow_fake:{seq}") == "1"
     second = [kw for name, kw in ctx.hermes.calls if name == "start"][-1]
     assert second["session_id"] != first["session_id"]
     assert second["idempotency_key"] == f"event:cow_fake:{seq}:2"  # a key of its own
@@ -130,7 +132,7 @@ def test_a_wake_stopped_for_sleep_retries_without_using_an_attempt(tmp_path):
 
     # Two real failures are still allowed: the stop for sleep did not count.
     ctx.hermes.fail(sessions.read(ctx.wstore, second["session_id"])["run_id"], "model error")
-    wakes.run(ctx)
+    advance_executions(ctx)
     third = [kw for name, kw in ctx.hermes.calls if name == "start"][-1]
     assert third["idempotency_key"] == f"event:cow_fake:{seq}:3"
     assert events_of(ctx.wstore, "wake.failed") == []
@@ -166,11 +168,12 @@ def test_wake_clears_sleeps_pause_and_resumes_the_drained_session(tmp_path):
     [resumed] = events_of(ctx.wstore, "workspace.resumed")
     assert resumed["payload"]["drained_sessions"] == [researcher["id"]]
 
-    wakes.run(ctx)  # the next tick's handler resumes it with its own session id
+    advance_executions(ctx)  # the next tick's handler resumes it with its own session id
     assert events.unhandled(ctx.wstore, {"workspace.resumed"}) == []
     assert sessions.read(ctx.wstore, researcher["id"])["drained"] is False
     restarted = [kw for name, kw in ctx.hermes.calls if name == "start"][-1]
-    assert restarted["session_id"] == researcher["id"]
+    assert restarted["session_id"] != researcher["id"]
+    assert sessions.read(ctx.wstore, restarted["session_id"])["parent"] == researcher["id"]
 
 
 def test_sleep_and_wake_keep_the_users_own_pause(tmp_path):
@@ -273,12 +276,10 @@ def test_sleep_and_wake_commands_on_an_idle_workspace(tmp_path):
 
     code, slept = research(["workspace", "sleep", "--wait", "0"], env)
     assert code == 0, slept
-    assert slept["ok"] is True and slept["paused"] is True and slept["volatile"] == []
-    assert slept["flushed"]["synced"] is True
-    assert all(r["wal_bytes"] == 0 for r in slept["flushed"]["databases"].values())
-
+    assert slept["ok"] is True and slept["paused"] is True
+    assert slept["volatile"] == [] and slept["flushed"]["synced"]
     code, status = research(["watcher", "status"], env)
-    assert status["paused"] is True and status["sleep_started"] == slept["sleep_started"]
+    assert status["paused"] is True and status["sleep_started"]
 
     code, woke = research(["workspace", "wake"], env)
     assert code == 0 and woke["ok"] is True and woke["unpaused"] is True

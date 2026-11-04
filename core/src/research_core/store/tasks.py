@@ -31,6 +31,7 @@ from __future__ import annotations
 import builtins
 import re
 from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from research_core import task_types
@@ -351,6 +352,12 @@ def link(
 # --- leases ---------------------------------------------------------------------------------
 
 
+@dataclass(frozen=True)
+class ClaimRefused:
+    problems: tuple[str, ...]
+    lease: bool = False
+
+
 def claim(
     store: Store,
     actor: Actor,
@@ -361,6 +368,25 @@ def claim(
     branch: str,
     kind: str = "task",
 ) -> dict[str, Any]:
+    """Claim the task, raising the existing typed store refusal for tool callers."""
+    result = claim_result(
+        store, actor, task_id, run_id=run_id, worktree=worktree, branch=branch, kind=kind
+    )
+    if isinstance(result, ClaimRefused):
+        raise (LeaseError if result.lease else StoreError)(builtins.list(result.problems))
+    return result
+
+
+def claim_result(
+    store: Store,
+    actor: Actor,
+    task_id: int | str,
+    *,
+    run_id: str | None,
+    worktree: str,
+    branch: str,
+    kind: str = "task",
+) -> dict[str, Any] | ClaimRefused:
     """Take the Task's lease: status ``in-progress``, ``held_by`` the session, epoch raised.
 
     Refused when the Task is not unclaimed, not approved, waits for a dependency, or is held
@@ -375,7 +401,7 @@ def claim(
     require(problems, _text(branch), "branch is required")
     require(problems, kind in SESSION_KINDS, f"kind must be task or change, not {kind!r}")
     if problems:
-        raise StoreError(problems)
+        return ClaimRefused(tuple(problems))
     # BEGIN IMMEDIATE holds the write lock from here: the status check below is serialised
     # with every other claim, so of two concurrent claims one sees the other's result.
     with store.tx(actor) as tx:
@@ -385,9 +411,11 @@ def claim(
         if same_holder:
             pass
         elif row["status"] == "in-progress":
-            if _lease_fresh(store, row):
-                problems.append(f"{_t(n)} is held by session:{row['held_by']} with a fresh lease")
-                lease_problem = True
+            problems.append(
+                f"{_t(n)} is held by session:{row['held_by']}; "
+                "lease age cannot release execution ownership"
+            )
+            lease_problem = True
         else:
             require(
                 problems, row["status"] == "unclaimed", f"{_t(n)} is {row['status']}, not unclaimed"
@@ -397,7 +425,7 @@ def claim(
         if blocking:
             problems.append(f"{_t(n)} waits for {', '.join(blocking)} to complete")
         if problems:
-            raise (LeaseError if lease_problem else StoreError)(problems)
+            return ClaimRefused(tuple(problems), lease=lease_problem)
         epoch = row["lease_epoch"] if same_holder else row["lease_epoch"] + 1
         tx.execute(
             "UPDATE tasks SET status = 'in-progress', held_by = ?, lease_epoch = ?,"
@@ -422,6 +450,48 @@ def claim(
                 "kind": kind,
                 "took_over_from": None if same_holder else row["held_by"],
             },
+        )
+        return _record(store, _row(store, n))
+
+
+@dataclass(frozen=True)
+class TransferRefused:
+    problems: list[str]
+
+
+def transfer_attempt(
+    store: Store, actor: Actor, task_id: int | str, *, previous: str, successor: str
+) -> dict[str, Any] | TransferRefused:
+    """Coordinator-only holder transfer after exact predecessor exclusion; replay is harmless.
+
+    Keep task progress, waits, branch and worktree. Historical holders retain their epoch.
+    """
+    require_problems = []
+    require(require_problems, actor.is_harness, "only the coordinator transfers attempts")
+    if require_problems:
+        raise StoreError(require_problems)
+    n = _task_number(task_id)
+    with store.tx(actor) as tx:
+        row = _row(store, n)
+        if row["held_by"] == successor:
+            return _record(store, row)
+        if row["status"] != "in-progress" or row["held_by"] != previous:
+            return TransferRefused([f"{_t(n)} no longer belongs to predecessor {previous}"])
+        epoch = row["lease_epoch"] + 1
+        tx.execute(
+            "UPDATE tasks SET held_by=?,lease_epoch=?,run_id=NULL,lease_renewed=?,updated=?"
+            " WHERE id=?",
+            (successor, epoch, tx.at, tx.at, n),
+        )
+        tx.execute(
+            "INSERT INTO task_sessions(task_id,session_id,kind,epoch,started) "
+            "VALUES (?,?,'task',?,?)",
+            (n, successor, epoch, tx.at),
+        )
+        tx.event(
+            "task.attempt_transferred",
+            _t(n),
+            {"previous": previous, "successor": successor, "epoch": epoch},
         )
         return _record(store, _row(store, n))
 

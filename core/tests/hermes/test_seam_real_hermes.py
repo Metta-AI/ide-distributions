@@ -3,8 +3,8 @@ local stand-in for the release canary).
 
 Both profiles are installed into a temporary home and prepared; ``hermes gateway run`` serves
 them with one API key; the fake platform's manifest for ``cow_fake`` points at the fakegame
-fixture repository; the seam server runs in this process against the real gateway; the watcher
-ticks run in this process as the cron job would. "Submit the starter as my champion" on the new
+fixture repository; the seam server runs in this process against the real gateway.
+The service owns watcher ticks and native admission. "Submit the starter as my champion" on the new
 workspace must end in a submission on the fake platform within ``SCENARIO_TIMEOUT_S``.
 
 Needs ``HERMES_BIN`` and ``OPENROUTER_API_KEY`` (see ``test_spike_s1.py``). Run with::
@@ -50,8 +50,6 @@ from research_core.platform.fake import FakePlatform
 from research_core.serve import SeamServer
 from research_core.store import coworlds, notices
 from research_core.store.db import Store
-from research_core.watcher import context as watcher_context
-from research_core.watcher import tick as watcher_tick
 from research_core.watcher.hermes_api import HermesRuns, mint_session_id
 from tests.fixtures.fakegame_repo import COWORLD_ID, make_fakegame_repo
 from tests.hermes.test_spike_s1 import REPO, Host, free_port, hermes_python, openrouter_key, run
@@ -59,7 +57,7 @@ from tests.hermes.test_spike_s1 import REPO, Host, free_port, hermes_python, ope
 REQUEST = "Submit the starter as my champion."
 SCENARIO_TIMEOUT_S = int(os.environ.get("IDE_E2E_TIMEOUT_S") or 600)
 TICK_EVERY_S = 5
-CRON_TICK_EVERY_S = 60  # the Orchestrator's watcher job runs every minute
+HEALTH_POLL_EVERY_S = 60
 FAKE_PLAYER_ID = "ply_canary"
 
 KEEP = os.environ.get("IDE_E2E_KEEP") == "1"
@@ -170,17 +168,6 @@ class Submissions:
             return [row.id for row in platform.submissions(player_id=self.player_id)]
 
 
-def one_tick(env: dict[str, str], hermes: HermesRuns) -> watcher_tick.TickReport:
-    """One watcher tick in this process, as the cron job would run it."""
-    ctx = watcher_context.build(env, hermes=hermes)
-    try:
-        return watcher_tick.tick(ctx)
-    finally:
-        ctx.wstore.close()
-        if ctx.store is not None:
-            ctx.store.close()
-
-
 def test_submit_the_starter_on_a_real_gateway(host: Host, capsys):
     env = scenario_env(host)
     ws = layout.from_env(env)
@@ -196,14 +183,14 @@ def test_submit_the_starter_on_a_real_gateway(host: Host, capsys):
     hermes = HermesRuns.from_profile(
         host.profile("orchestrator"), researcher_profiles=("researcher",)
     )
-    server = SeamServer(ws=ws, hermes=hermes)
+    server = SeamServer(ws=ws, hermes=hermes, env=env)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     client = ScriptedClient(server.url, timeout_s=60)
     stay = KEEP
     try:
         try:
             if SCENARIO:
-                run_scenario(host, ws, env, hermes, client)
+                run_scenario(host, ws, env, client)
             else:
                 print("IDE_E2E_SCENARIO=0: no request was sent")
         except KeyboardInterrupt:
@@ -211,7 +198,7 @@ def test_submit_the_starter_on_a_real_gateway(host: Host, capsys):
             raise
         finally:
             if stay:
-                keep_running(host, ws, env, hermes, server, client, capsys)
+                keep_running(host, ws, env, server, client, capsys)
     finally:
         server.shutdown()
 
@@ -220,10 +207,9 @@ def run_scenario(
     host: Host,
     ws: layout.Workspace,
     env: dict[str, str],
-    hermes: HermesRuns,
     client: ScriptedClient,
 ) -> None:
-    """The acceptance scenario: one request, watcher ticks until a submission exists."""
+    """The acceptance scenario: one request, coordinator works until a submission exists."""
     player_id = env["SOFTMAX_PLAYER_ID"]
     client.open("canary", "web-ide")
     reply = client.say(REQUEST, {"contract_version": 1, "on_screen": []}, wait=True)
@@ -235,13 +221,12 @@ def run_scenario(
     while time.monotonic() - started < SCENARIO_TIMEOUT_S:
         if watch.new():
             break
-        report = one_tick(env, hermes)
         ticks += 1
         if ticks % 6 == 1:
-            print(f"tick {ticks}: {json.dumps(report.to_dict())[:400]}")
+            print(f"poll {ticks}: waiting for coordinator-owned work")
         time.sleep(TICK_EVERY_S)
     elapsed = round(time.monotonic() - started)
-    print(f"{ticks} ticks, {elapsed} s")
+    print(f"{ticks} polls, {elapsed} s")
 
     wstore = Store.open(ws.store_path, kind="workspace")
     try:
@@ -267,35 +252,22 @@ def keep_running(
     host: Host,
     ws: layout.Workspace,
     env: dict[str, str],
-    hermes: HermesRuns,
     server: SeamServer,
     client: ScriptedClient,
     capsys,
 ) -> None:
     """``IDE_E2E_KEEP=1``: stay up like the hosted sandbox. Prints where everything is and how
-    to talk to it, ticks the watcher every minute as the cron job would, and returns on Ctrl-C
+    to talk to it, observes coordinator health every minute, and returns on Ctrl-C
     so the caller can stop the seam server and the gateway."""
     with capsys.disabled():
         if client.session_id is None:
             client.open("keep", "web-ide")
         print(banner(host, ws, env, server, client), flush=True)
-        ticks = 0
         try:
             while True:
-                ticks += 1
                 stamp = datetime.now(ZoneInfo("America/Los_Angeles")).strftime("%H:%M:%S %Z")
-                try:
-                    report = one_tick(env, hermes)
-                except Exception as error:  # the next minute's tick runs anyway, as in cron
-                    print(f"[{stamp}] watcher tick {ticks} failed: {error!r}", flush=True)
-                else:
-                    errors = ", ".join(report.errors) or "none"
-                    print(
-                        f"[{stamp}] watcher tick {ticks}: has_work={report.has_work}"
-                        f" paused={report.paused} errors={errors}",
-                        flush=True,
-                    )
-                time.sleep(CRON_TICK_EVERY_S)
+                print(f"[{stamp}] coordinator health: {client.health()}", flush=True)
+                time.sleep(HEALTH_POLL_EVERY_S)
         except KeyboardInterrupt:
             print("\nCtrl-C: stopping the seam server and the gateway", flush=True)
 
@@ -374,7 +346,7 @@ def banner(
         + "'",
         f'  curl -s {gateway}/p/orchestrator/v1/runs/<run_id> -H "Authorization: Bearer $KEY"',
         "",
-        f"The watcher ticks every {CRON_TICK_EVERY_S} s below, as the cron job would.",
+        f"Coordinator health is observed every {HEALTH_POLL_EVERY_S} s below.",
     ]
     return "\n".join(lines)
 

@@ -19,7 +19,8 @@ from research_core.store import capabilities
 from research_core.store._common import now_iso, parse_iso
 from research_core.store.errors import SchemaMismatch
 from research_core.tools import _args as a
-from research_core.tools.base import ActionSpec, ToolCall, ToolError, ToolSpec, tool
+from research_core.tools.base import ActionSpec, ToolCall, ToolError, ToolSpec
+from research_core.transitions import durable_tool
 
 if TYPE_CHECKING:  # pragma: no cover
     from research_core.store.db import Store
@@ -47,6 +48,10 @@ def handle(call: ToolCall) -> dict:
     if call.action == "worktree_open":
         return open_worktree(ctx, call.get("name"))
     if call.action == "change_complete":
+        if ctx.coordinator_instance is None:
+            from research_core.transitions import submit
+
+            return submit(call)
         return complete_change(
             ctx, call.get("worktree"), call.get("commit"), call.get("summary") or ""
         )
@@ -339,7 +344,7 @@ def list_capabilities(ctx: ToolContext, *, check: bool) -> dict[str, Any]:
     return result
 
 
-SPEC = tool(
+SPEC = durable_tool(
     ToolSpec(
         name="workspace",
         description=(
@@ -398,5 +403,6 @@ SPEC = tool(
             ),
             ActionSpec("environment_guide", "Where you are, what is writable, credentials, CLIs."),
         ),
-    )
+    ),
+    mutations={"change_complete"},
 )

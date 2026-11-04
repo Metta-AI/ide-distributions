@@ -14,10 +14,9 @@ import pytest
 from research_core import inference
 from research_core.client import ScriptedClient
 from research_core.serve import SeamServer
-from research_core.watcher import dispatch, wakes
 from research_core.watcher.hermes_api import FakeHermesRuns, RunsUnavailable
 from tests.test_serve import make_ctx as make_seam_ctx
-from tests.watcher._support import HARNESS, make_ctx, make_task
+from tests.watcher._support import HARNESS, coordinator, dispatch_inputs, make_ctx, make_task
 
 NOW = datetime(2026, 11, 2, 20, 0, tzinfo=UTC)
 REFILL = datetime(2026, 11, 3, 0, 0, tzinfo=UTC)
@@ -215,7 +214,9 @@ def test_chat_message_waits_while_blocked_and_starts_after_the_state_clears(tmp_
     block_budget(lease_file)
     ctx = make_seam_ctx(tmp_path)
     hermes = FakeHermesRuns(inference_lease_file=lease_file)
-    server = SeamServer(ws=ctx.workspace, hermes=hermes, inference_lease_file=lease_file)
+    server = SeamServer(
+        ws=ctx.workspace, hermes=hermes, inference_lease_file=lease_file, env=dict(ctx.env)
+    )
     threading.Thread(target=server.serve_forever, daemon=True).start()
     try:
         client = ScriptedClient(server.url)
@@ -240,17 +241,21 @@ def test_wake_defers_without_using_an_attempt_and_starts_after_the_state_clears(
     with ctx.store.tx(HARNESS) as tx:
         seq = tx.event("task.asked", "T-1", {})
 
-    report = wakes.run(ctx)
-    row = ctx.store.one("SELECT * FROM handled_events WHERE seq = ?", (seq,))
-    assert report["busy"] == [f"cow_fake:{seq}"] and report["started"] == []
+    owner = coordinator(ctx)
+    owner.advance_events(ctx)
+    dispatch_inputs(ctx)
+    row = ctx.store.one("SELECT * FROM handled_events WHERE seq=?", (seq,))
     assert row["attempts"] == 1 and ctx.hermes.runs == {}
-    wakes.run(ctx)
-    assert ctx.store.one("SELECT * FROM handled_events WHERE seq = ?", (seq,))["attempts"] == 1
+    owner.advance_events(ctx)
+    dispatch_inputs(ctx)
+    assert ctx.store.one("SELECT * FROM handled_events WHERE seq=?", (seq,))["attempts"] == 1
+    [queued] = ctx.wstore.q("SELECT * FROM client_admissions")
+    assert queued["dispatch_started"] == 0 and queued["failure_counted"] == 0
 
     inference.lease_installed(lease_file, datetime.now(UTC) + timedelta(days=1), "sk-new")
-    report = wakes.run(ctx)
-    assert len(report["started"]) == 1 and len(ctx.hermes.runs) == 1
-    assert ctx.store.one("SELECT * FROM handled_events WHERE seq = ?", (seq,))["attempts"] == 1
+    dispatch_inputs(ctx)
+    assert len(ctx.hermes.runs) == 1
+    assert ctx.store.one("SELECT * FROM handled_events WHERE seq=?", (seq,))["attempts"] == 1
 
 
 def test_researcher_dispatch_defers_without_using_an_attempt_until_the_block_lapses(tmp_path):
@@ -262,11 +267,28 @@ def test_researcher_dispatch_defers_without_using_an_attempt_until_the_block_lap
         ),
     )
     ctx = make_ctx(tmp_path, hermes=FakeHermesRuns(inference_lease_file=lease_file))
-    make_task(ctx)
+    task = make_task(ctx)
+    from research_core.coordinator import Coordinator
+    from research_core.tools.base import ToolContext
 
-    blocked = dispatch.run(ctx)
-    assert blocked["started"] == [] and "provider_unavailable" in blocked["deferred"]
+    command = ToolContext.from_env("orchestrator", {"IDE_WORKSPACE": str(ctx.ws.root)})
+    reserved = Coordinator.reserve(
+        command,
+        task_id=1,
+        task_updated=task["updated"],
+        profile="researcher",
+        assignment_id="blocked-worker",
+        context="Work",
+        rationale="Fit",
+    )
+    dispatch_inputs(ctx)
     assert ctx.hermes.runs == {}
+    [queued] = ctx.wstore.q("SELECT * FROM client_admissions")
+    assert queued["dispatch_started"] == 0 and queued["failure_counted"] == 0
+    from research_core.store import admissions
+
+    [visible] = admissions.work_status(ctx.wstore, lease_file)
+    assert visible["state"] == "waiting" and visible["reason"] == "provider_unavailable"
 
     # The outage block is never cleared; it lapses at until.
     inference.update_state(
@@ -275,6 +297,7 @@ def test_researcher_dispatch_defers_without_using_an_attempt_until_the_block_lap
             "provider_unavailable", datetime.now(UTC) - timedelta(seconds=1), datetime.now(UTC)
         ),
     )
-    later = dispatch.run(ctx)
-    [started] = later["started"]
-    assert ctx.hermes.runs[started["run_id"]].idempotency_key == "task:1:0:1"
+    dispatch_inputs(ctx)
+    [started] = ctx.hermes.runs.values()
+    assert started.session_id == reserved["session_id"]
+    assert started.idempotency_key == queued["native_key"]

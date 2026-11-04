@@ -400,6 +400,10 @@ def test_platform_down_puts_the_held_task_on_wait(call, ctx_factory, workspace_e
         coworld_id=fake.COWORLD_ID, task_id=1,
     )  # fmt: skip
 
+    from research_core.coordinator import Coordinator
+
+    sessions.set_run(ctx.wstore, holder, "s-task", "r1")
+    Coordinator.adopt_existing_workers(ctx.workspace, ctx.wstore)
     workspace_env["IDE_FAKE_FAULTS"] = "platform=down"
     result = call("platform", {"action": "credits"}, role="researcher", session_id="s-task")
     assert result["ok"] is False
@@ -414,3 +418,57 @@ def test_platform_down_puts_the_held_task_on_wait(call, ctx_factory, workspace_e
     # Another Session (not the holder) gets the refusal without a wait.
     other = call("platform", {"action": "credits"}, role="researcher", session_id="s-other")
     assert other["context"]["waiting"] is False
+
+
+@pytest.mark.parametrize("kind", ["transition_pending", "transition_refused"])
+def test_platform_failure_does_not_claim_wait_when_command_is_unapplied(
+    tmp_path, monkeypatch, kind
+):
+    from research_core.platform.errors import PlatformError
+    from research_core.tools import task
+    from research_core.tools.base import ToolContext
+    from tests.test_coordinator_transitions import assigned
+    from tests.watcher._support import make_ctx
+
+    tick = make_ctx(tmp_path)
+    row = assigned(tick)
+    ctx = ToolContext(
+        role="researcher", actor=Actor.session(row["session_id"]), workspace=tick.ws, env=tick.env
+    )
+    ctx.store, ctx.wstore = tick.store, tick.wstore
+    result = {
+        "kind": kind,
+        "command_id": "wait",
+        "ok": False,
+        "error": "Unavailable",
+        "transition_state": kind.removeprefix("transition_"),
+    }
+    monkeypatch.setattr(task, "dispatch", lambda call: result)
+    error = PlatformError("Platform unavailable", status=503)
+    context = wait._wait_on_platform(ctx, "credits", error)
+    assert context == {"waiting": False, "transition": result}
+
+
+def test_refused_wait_preserves_original_platform_error(tmp_path, monkeypatch):
+    from research_core.platform.errors import PlatformError
+    from research_core.tools import task
+    from research_core.tools.base import ToolContext, ToolError
+    from tests.test_coordinator_transitions import assigned
+    from tests.watcher._support import make_ctx
+
+    tick = make_ctx(tmp_path)
+    row = assigned(tick)
+    ctx = ToolContext(
+        role="researcher", actor=Actor.session(row["session_id"]), workspace=tick.ws, env=tick.env
+    )
+    ctx.store, ctx.wstore = tick.store, tick.wstore
+
+    def refuse(call):
+        raise ToolError("Worker authority retired")
+
+    monkeypatch.setattr(task, "dispatch", refuse)
+    error = wait.tool_error(ctx, "credits", PlatformError("Platform unavailable", status=503))
+    assert error.problems == ["Platform unavailable"]
+    assert error.context["status"] == 503 and error.context["route"] == "credits"
+    assert error.context["waiting"] is False
+    assert error.context["wait_skipped"] == "Worker authority retired"

@@ -9,6 +9,7 @@ import pytest
 from research_core.store import migrate
 
 COWORLD_TABLES = {
+    "transition_commands",
     "meta",
     "events",
     "change_log",
@@ -37,6 +38,8 @@ COWORLD_TABLES = {
 }
 
 WORKSPACE_TABLES = {
+    "transition_effects",
+    "task_assignments",
     "client_admissions",
     "meta",
     "events",
@@ -135,7 +138,7 @@ def test_migration_files_are_numbered_and_increasing():
 
 def test_apply_migrations_sets_user_version_and_meta():
     conn = memory_store("coworld")
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 1
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 2
     rows = {r["key"]: r["value"] for r in conn.execute("SELECT key, value FROM meta")}
     assert rows["schema_kind"] == "coworld"
     assert rows["created"].endswith("Z")
@@ -149,15 +152,15 @@ def test_second_apply_is_a_noop():
     conn = memory_store("coworld")
     created = conn.execute("SELECT value FROM meta WHERE key = 'created'").fetchone()[0]
     conn.execute("INSERT INTO settings(key, value) VALUES ('paused', 'false')")
-    assert migrate.apply_migrations(conn, "coworld") == 1
+    assert migrate.apply_migrations(conn, "coworld") == 2
     assert conn.execute("SELECT value FROM meta WHERE key = 'created'").fetchone()[0] == created
     assert conn.execute("SELECT COUNT(*) FROM settings").fetchone()[0] == 1
 
 
 def test_apply_migrations_returns_the_version_it_reached():
     conn = sqlite3.connect(":memory:", isolation_level=None)
-    assert migrate.apply_migrations(conn, "workspace") == 4
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 4
+    assert migrate.apply_migrations(conn, "workspace") == 7
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 7
 
 
 def test_migrations_apply_in_numeric_order_and_only_pending_ones(tmp_path, monkeypatch):
@@ -344,3 +347,70 @@ def test_message_content_migration_preserves_queued_delivery_and_untracked_write
         "content": "hello",
     }
     assert conn.execute("SELECT id FROM change_log WHERE token IS NULL").fetchall() == untracked
+
+
+def test_admission_schema_does_not_activate_legacy_quarantine_before_its_owner_exists():
+    conn = sqlite3.connect(":memory:", isolation_level=None)
+    for number, path in migrate.migration_files("workspace"):
+        if number < 5:
+            migrate._run_migration(conn, number, path)
+    conn.execute(
+        "INSERT INTO client_admissions"
+        "(op_id,kind,request,session_id,message,payload,status,created_at,dispatch_started,error)"
+        " VALUES ('uncertain','message','{}','chat','hello','{}','queued','2026-01-01',1,"
+        "'lost native response')"
+    )
+    untracked = conn.execute("SELECT id FROM change_log WHERE token IS NULL").fetchall()
+    number, path = next(item for item in migrate.migration_files("workspace") if item[0] == 5)
+    migrate._run_migration(conn, number, path)
+    assert conn.execute(
+        "SELECT status,dispatch_started,resolution_required,error FROM client_admissions"
+    ).fetchone() == ("queued", 1, 0, "lost native response")
+    assert conn.execute("SELECT id FROM change_log WHERE token IS NULL").fetchall() == untracked
+
+
+@pytest.mark.parametrize("lost_receipt", [False, True])
+@pytest.mark.parametrize("state", ["running", "failed", "interrupted"])
+def test_attempt_pointer_migration_preserves_live_authority_or_first_queued_successor(
+    lost_receipt, state
+):
+    conn = sqlite3.connect(":memory:", isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    for version, path in migrate.migration_files("workspace"):
+        if version <= 6:
+            conn.executescript(path.read_text())
+    conn.execute(
+        "INSERT INTO sessions(id,profile,kind,started,run_id)"
+        " VALUES ('worker','researcher','task','2026-11-01T00:00:00Z','second-run')"
+    )
+    for op_id, status, mode, run_id in (
+        ("first", "failed", "start", "first-run"),
+        ("second", state, "start", "second-run"),
+        ("guidance", "running", "steer", "second-run"),
+        ("queued-retry", "queued", "start", None),
+        ("queued-guidance", "queued", "start", None),
+    ):
+        conn.execute(
+            "INSERT INTO client_admissions(op_id,kind,request,session_id,message,payload,status,"
+            "created_at,delivery_mode,run_id,dispatch_started)"
+            " VALUES (?,'message','{}','worker','','{}',?,"
+            "'2026-11-01T00:00:00Z',?,?,?)",
+            (op_id, status, mode, run_id, int(status != "queued")),
+        )
+    if state == "interrupted":
+        conn.execute("UPDATE client_admissions SET execution_uncertain=1 WHERE op_id='second'")
+    if lost_receipt:
+        conn.execute(
+            "INSERT INTO client_admissions(op_id,kind,request,session_id,message,payload,status,"
+            "created_at,delivery_mode,dispatch_started)"
+            " VALUES ('lost-receipt','message','{}','worker','','{}','queued',"
+            "'2026-11-01T00:00:00Z','start',1)"
+        )
+    conn.execute(
+        "INSERT INTO task_assignments(coworld_id,task_id,op_id,session_id,profile,task_updated,"
+        "rationale,context) VALUES ('world',1,'first','worker','researcher','','','')"
+    )
+    conn.execute("PRAGMA user_version=6")
+    migrate.apply_migrations(conn, "workspace")
+    expected = "lost-receipt" if lost_receipt else "queued-retry" if state == "failed" else "second"
+    assert conn.execute("SELECT current_attempt_id FROM task_assignments").fetchone()[0] == expected

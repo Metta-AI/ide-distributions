@@ -183,6 +183,7 @@ class ToolContext:
     actor: Actor
     workspace: Workspace
     env: Mapping[str, str]
+    coordinator_instance: str | None = None
 
     @classmethod
     def from_env(cls, role: Role, env: Mapping[str, str] | None = None) -> ToolContext:

@@ -1,5 +1,10 @@
 # Running the research profiles end to end on a Mac
 
+> Admission ownership changed: `research serve` now owns watcher ticks and native starts.
+> The retired observation cron is removed during preparation. The in-process real-gateway harness uses that same service path;
+> its five-second polling loop observes progress. Historical timing and cron-output examples below are not current acceptance evidence.
+
+
 How to run the rebuilt `orchestrator` and `researcher` profiles on your own machine in a setup
 that is as close to Softmax hosting as a laptop gets: a real Hermes gateway multiplexing both
 profiles with one API key, one shared `IDE_WORKSPACE`, a per-profile `.env`, the seam the
@@ -16,7 +21,7 @@ profiles inside the hosted image through `tools/local_stack.py`; it passed on Oc
 |---|---|---|
 | A. One command | The acceptance scenario on a real gateway with the fake platform; exits when done | A quick check that the whole chain works |
 | B. Interactive session | The same setup kept running: seam URL, `curl` lines, the watcher every minute, Ctrl-C to stop; optionally the real platform | Poking at the profiles by hand |
-| C. Inside the hosted image | `tools/local_stack.py`: the same stack inside the Hermes image CI uses, the checkout mounted read-only, the state on a volume, the watcher as a real cron job; stays up until `down` | The closest to production on a laptop |
+| C. Inside the hosted image | `tools/local_stack.py`: the same stack inside the Hermes image CI uses, the checkout mounted read-only, the state on a volume, the coordinator as a lifetime service; stays up until `down` | The closest to production on a laptop |
 
 ## Prerequisites
 
@@ -72,7 +77,7 @@ The harness builds, in a fresh temporary directory, what hosting builds in a san
 | `prepare.py --source <checkout>/<role> --hermes $HERMES_BIN` for each role, which records the core path, creates the stores, applies the protected config keys, installs the watcher job paused and builds the workspace environment (`uv sync`) under `workspace/tools/venv` | The same script, run after every install and update; the environment is prebuilt at image build |
 | `hermes gateway run` with `GATEWAY_MULTIPLEX_PROFILES=true`, ready when `GET /v1/capabilities` answers 200; its output in `gateway.log` | The multiplexing gateway |
 | `SeamServer` (`research serve`'s class) in the pytest process, bound to a free loopback port | Metta's bridge |
-| Watcher ticks run in process: every 5 seconds during the scenario, every 60 seconds in an interactive session; the Hermes cron job stays paused | The `watcher` cron job every minute inside Hermes |
+| `research serve` owns watcher ticks every 60 seconds; the scenario only polls for completion | The same coordinator, without an observation cron |
 
 The gateway enables its API server from the host home's `.env`, not from the process
 environment, and under multiplexing each profile's `.env` reaches the plugin through Hermes's
@@ -286,7 +291,7 @@ CI runs the `hermes`-marked tests inside `nousresearch/hermes-agent@sha256:9774f
 digest in `.github/workflows/ci.yml`), whose Python runs the plugin and `prepare.py` exactly as
 hosting does. `tools/local_stack.py` runs the whole stack in that image on your Mac: the checkout
 mounted read-only at `/src` like the release checkout, the profile homes, the workspace and the
-logs on a Docker volume, the multiplexing gateway with the watcher as a real cron job, and
+logs on a Docker volume, the multiplexing gateway with the coordinator as a lifetime service, and
 `research serve` as the seam, both published on this machine's loopback.
 
 **Verified on October 29, 2026 (Pacific)** with OrbStack (Docker server 29.8.2, linux/arm64; the
@@ -350,9 +355,9 @@ exec`:
 | Install `uv` into `/opt/data/.local/bin` (the image ships none, CI uses `astral-sh/setup-uv`), which is on the Hermes user's login-shell `PATH`; mark `/src` safe for git (it belongs to your Mac user) | The image has `uv` |
 | `hermes profile install /src/<role> --name <role> --yes` into `HERMES_HOME=/opt/data/host` for both roles; skipped when the profile exists | The same, from the release checkout |
 | Write `/opt/data/host/.env` and both profiles' `.env`: one random `API_SERVER_KEY` per volume (kept in `/opt/data/local_stack/api_key`), `API_SERVER_HOST=0.0.0.0` in the host home (the gateway binds from there, so the published port reaches it) and `127.0.0.1` in the profiles (where the watcher and the seam read the gateway's address), `GATEWAY_MULTIPLEX_PROFILES=true`, `IDE_WORKSPACE=/opt/data/workspace`, `IDE_PLATFORM`, `IDE_RESEARCHER_PROFILES=researcher`, `SOFTMAX_PLAYER_ID` (`ply_canary` for the fake), `OPENROUTER_API_KEY`, and for the real platform the Player credential, `COGAMES_API_URL` and `IDE_DEFAULT_COWORLD` | The per-profile `.env` hosting writes |
-| `prepare.py --source /src/<role> --hermes /opt/hermes/.venv/bin/hermes` with the image's Python, `--activate-supervisor` for the Orchestrator, each with `HERMES_HOME=<profile home>` and that profile's `.env` exported (`as-profile.sh`); the first run builds the workspace environment with `uv sync` into `/opt/data/workspace/tools/venv` (uv's cache and the CPython 3.12 it fetches stay on the volume) | The same script; the environment is prebuilt at image build |
+| `prepare.py --source /src/<role> --hermes /opt/hermes/.venv/bin/hermes` with the image's Python, each with `HERMES_HOME=<profile home>` and that profile's `.env` exported (`as-profile.sh`); the first run builds the workspace environment with `uv sync` into `/opt/data/workspace/tools/venv` (uv's cache and the CPython 3.12 it fetches stay on the volume) | The same script; the environment is prebuilt at image build |
 | Fake platform: build the fakegame fixture repository at `/opt/data/upstream/fakegame_repo` and point the fake's manifest at it (`tools/local_stack/configure_fake_platform.py`, as the real-Hermes test does) | n/a |
-| `hermes gateway run` with the host home, in the background, log `/opt/data/gateway.log`; ready when `GET /v1/capabilities` answers 200 with the key. The watcher cron job is on, so the gateway ticks it every minute for real | The multiplexing gateway |
+| `hermes gateway run` with the host home, in the background, log `/opt/data/gateway.log`; ready when `GET /v1/capabilities` answers 200 with the key. The lifetime `research serve` coordinator owns observation and workflow advancement | The multiplexing gateway |
 | `research serve --host 0.0.0.0 --port 8650` from the workspace environment with the Orchestrator's environment, log `/opt/data/serve.log`; ready when `GET /health` answers | Metta's bridge |
 
 Timings on October 29, 2026 (Apple silicon, fast network), fresh volume: `uv` install 1 s,
@@ -366,7 +371,7 @@ re-`up` takes 70 to 90 seconds, almost all of it the two preparations.
 | Path | What |
 |---|---|
 | `host/` | The gateway's `HERMES_HOME`: `.env` and `profiles/orchestrator`, `profiles/researcher` |
-| `host/profiles/<role>/.env`, `config.yaml`, `local/core-path.txt` (`/src/core/src`), `state.db`, the Orchestrator's `cron/jobs.json` | What install, `prepare.py` and the gateway wrote; the watcher job reads `enabled: true, state: scheduled` |
+| `host/profiles/<role>/.env`, `config.yaml`, `local/core-path.txt` (`/src/core/src`), `state.db`, the Orchestrator's `cron/jobs.json` | What install, `prepare.py` and the gateway wrote; the former watcher cron is absent |
 | `workspace/` | `IDE_WORKSPACE`: `tools/venv`, `.state/store.db`, `.state/fake_platform.json`, one folder per Coworld |
 | `upstream/fakegame_repo` | The fake Coworld's source repository (fake platform only) |
 | `local_stack/` | `bootstrap.sh`, `as-profile.sh`, `api_key`, the services' pid files |
@@ -547,8 +552,7 @@ Coworld on the fresh workspace before the first chat.
   environment; both are expected here.
 
 What is as in production here and was not in Options A and B: the image and the Hermes it ships,
-the read-only checkout, and the watcher as a Hermes cron job every minute (enabled by
-`prepare.py --activate-supervisor`; `research watcher status` shows its heartbeat).
+the read-only checkout, and the lifetime coordinator (`research watcher status` shows its heartbeat).
 
 ## What to look at
 

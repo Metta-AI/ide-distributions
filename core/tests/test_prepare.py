@@ -106,11 +106,10 @@ def homes(tmp_path):
     return profile, env
 
 
-def run_prepare(fake, env, role="orchestrator", activate=False):
+def run_prepare(fake, env, role="orchestrator"):
     prepare.prepare(
         source=REPO / role,
         cli=prepare.HermesCli("hermes", Path(env["HERMES_HOME"]), env, fake.run),
-        activate_watcher=activate,
         env=env,
         run=fake.run,
     )
@@ -151,7 +150,6 @@ def test_prepare_rejects_unknown_role(tmp_path, homes):
         prepare.prepare(
             source=source,
             cli=prepare.HermesCli("hermes", profile, env, FakeHermes().run),
-            activate_watcher=False,
             env=env,
         )
 
@@ -161,7 +159,6 @@ def test_prepare_requires_hermes_home():
         prepare.prepare(
             source=REPO / "orchestrator",
             cli=prepare.HermesCli("hermes", Path("/unused"), {}, FakeHermes().run),
-            activate_watcher=False,
             env={},
         )
 
@@ -190,7 +187,7 @@ def test_prepare_prints_one_json_summary_line(homes, capsys):
 def test_prepare_runs_every_hermes_command_in_the_profile_home(homes):
     profile, env = homes
     fake = FakeHermes()
-    run_prepare(fake, env, activate=True)
+    run_prepare(fake, env)
     hermes_calls = [kwargs for argv, kwargs in fake.calls if argv[0] == "hermes"]
     assert hermes_calls
     for kwargs in hermes_calls:
@@ -251,7 +248,7 @@ def test_prepare_only_sets_keys_whose_value_differs(homes):
 def test_prepare_researcher_uses_its_role_and_has_no_cron(homes):
     profile, env = homes
     fake = FakeHermes()
-    run_prepare(fake, env, role="researcher", activate=True)
+    run_prepare(fake, env, role="researcher")
     assert fake.config["plugins.enabled"] == ["researcher"]
     assert fake.config["platform_toolsets.api_server"] == ["hermes-api-server", "ide-researcher"]
     assert "compression.protect_first_n" not in fake.config
@@ -275,7 +272,6 @@ def test_prepare_reports_a_failed_hermes_command_with_its_output(homes):
         prepare.prepare(
             source=REPO / "orchestrator",
             cli=prepare.HermesCli("hermes", profile, env, failing_run),
-            activate_watcher=False,
             env=env,
             run=failing_run,
         )
@@ -287,106 +283,29 @@ def test_prepare_reports_a_failed_hermes_command_with_its_output(homes):
 # --- the watcher job --------------------------------------------------------------------------
 
 
-def shipped_watcher():
-    jobs = json.loads((REPO / "orchestrator" / "cron" / "jobs.json").read_text())["jobs"]
-    return next(job for job in jobs if job["id"] == "watcher")
-
-
-def test_prepare_reconciles_watcher_job_keeps_pause_state(homes):
+@pytest.mark.parametrize("bare", [False, True])
+def test_prepare_retires_watcher_and_preserves_other_jobs(homes, bare):
     profile, env = homes
-    stale = dict(shipped_watcher())
-    stale.update(
-        {
-            "script": "supervisor.py",
-            "no_agent": False,
-            "schedule": {"kind": "interval", "minutes": 5, "display": "every 5m"},
-            "schedule_display": "every 5m",
-            "enabled_toolsets": ["terminal"],
-            "enabled": False,
-            "state": "paused",
-            "paused_at": "2026-10-20T10:00:00-07:00",
-            "paused_reason": "the owner paused it",
-            "last_run_at": "2026-10-19T09:00:00-07:00",
-            "last_status": "ok",
-            "failure_streak": 2,
-        }
-    )
-    foreign = {"id": "nightly", "name": "nightly", "prompt": "hello", "enabled": True}
+    foreign = {"id": "nightly", "enabled": True, "state": "scheduled"}
+    jobs = [foreign, {"id": "watcher", "enabled": True, "state": "scheduled"}]
     (profile / "cron").mkdir()
-    (profile / "cron" / "jobs.json").write_text(
-        json.dumps({"jobs": [foreign, stale], "updated_at": "2026-10-20T10:00:00-07:00"})
-    )
-
-    run_prepare(FakeHermes(), env, activate=False)
-
-    payload = read_jobs(profile)
-    assert [job["id"] for job in payload["jobs"]] == ["nightly", "watcher"]
-    assert payload["jobs"][0] == foreign
-    assert payload["updated_at"] == "2026-10-20T10:00:00-07:00"
-    watcher = payload["jobs"][1]
-    shipped = shipped_watcher()
-    for field in prepare.WATCHER_JOB_FIELDS:
-        assert watcher[field] == shipped[field], field
-    assert watcher["enabled"] is False and watcher["state"] == "paused"
-    assert watcher["paused_at"] == "2026-10-20T10:00:00-07:00"
-    assert watcher["paused_reason"] == "the owner paused it"
-    assert watcher["last_run_at"] == "2026-10-19T09:00:00-07:00"
-    assert watcher["failure_streak"] == 2
+    payload = jobs if bare else {"jobs": jobs, "updated_at": "retained"}
+    (profile / "cron" / "jobs.json").write_text(json.dumps(payload))
+    fake = FakeHermes()
+    run_prepare(fake, env)
+    run_prepare(fake, env)
+    retained = read_jobs(profile)
+    assert retained["jobs"] == [foreign]
+    if not bare:
+        assert retained["updated_at"] == "retained"
+    assert not fake.resumed
     assert not list((profile / "cron").glob("*.pending"))
 
 
-def test_prepare_adds_a_missing_watcher_job_paused(homes):
-    profile, env = homes
-    foreign = {"id": "nightly", "name": "nightly", "prompt": "hello", "enabled": True}
-    (profile / "cron").mkdir()
-    (profile / "cron" / "jobs.json").write_text(json.dumps({"jobs": [foreign]}))
-
-    run_prepare(FakeHermes(), env)
-
-    jobs = read_jobs(profile)["jobs"]
-    assert [job["id"] for job in jobs] == ["nightly", "watcher"]
-    assert jobs[1] == shipped_watcher()
-    assert jobs[1]["enabled"] is False and jobs[1]["state"] == "paused"
-
-
-def test_prepare_creates_the_cron_store_when_missing(homes):
+def test_prepare_does_not_install_observation_cron(homes):
     profile, env = homes
     run_prepare(FakeHermes(), env)
-    assert read_jobs(profile)["jobs"] == [shipped_watcher()]
-
-
-def test_prepare_accepts_a_bare_job_list(homes):
-    profile, env = homes
-    (profile / "cron").mkdir()
-    (profile / "cron" / "jobs.json").write_text(json.dumps([shipped_watcher()]))
-    run_prepare(FakeHermes(), env)
-    assert read_jobs(profile)["jobs"] == [shipped_watcher()]
-
-
-def test_prepare_activates_watcher_once(homes):
-    profile, env = homes
-    fake = FakeHermes()
-    run_prepare(fake, env, activate=False)
-    assert fake.resumed == [], "no activation without the flag"
-    assert (profile / ".softmax-prepared").exists()
-
-    (profile / ".softmax-prepared").unlink()
-    run_prepare(fake, env, activate=True)
-    assert fake.resumed == ["watcher"]
-    assert (profile / ".softmax-prepared").exists()
-
-    run_prepare(fake, env, activate=True)
-    assert fake.resumed == ["watcher"], "the marker stops a second activation"
-
-
-def test_prepare_resumes_after_the_job_exists(homes):
-    profile, env = homes
-    fake = FakeHermes()
-    run_prepare(fake, env, activate=True)
-    hermes_calls = fake.hermes_calls()
-    resume_index = hermes_calls.index(["hermes", "cron", "resume", "watcher"])
-    assert resume_index == len(hermes_calls) - 1
-    assert read_jobs(profile)["jobs"][0]["id"] == "watcher"
+    assert read_jobs(profile)["jobs"] == []
 
 
 # --- the workspace environment ----------------------------------------------------------------
@@ -501,7 +420,6 @@ def _prepared(homes, fake, role="orchestrator", **extra_env):
     prepare.prepare(
         REPO / role,
         prepare.HermesCli("hermes", profile, env, fake.run),
-        False,
         env=env,
         run=fake.run,
     )
@@ -525,7 +443,6 @@ def test_prepare_points_every_profile_at_the_active_coworld(homes):
     prepare.prepare(
         REPO / "orchestrator",
         prepare.HermesCli("hermes", profile, env, fake.run),
-        False,
         env=env,
         run=fake.run,
     )
@@ -672,14 +589,13 @@ def test_prepare_check_mode_plans_without_writing(homes, capsys):
     summary = prepare.prepare(
         REPO / "orchestrator",
         prepare.HermesCli("hermes", profile, env, fake.run),
-        True,
         env=env,
         run=fake.run,
         check=True,
     )
     assert summary["check"] is True
     assert any(a.startswith("config: set approvals.mode") for a in summary["planned"])
-    assert "cron: resume watcher" in summary["planned"]
+    assert not any("cron: resume" in action for action in summary["planned"])
     assert fake.sets() == {} and fake.resumed == []
     assert not (profile / prepare.PREPARED_MARKER).exists()
     assert not (profile / prepare.CORE_PATH_FILE).exists()

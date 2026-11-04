@@ -31,8 +31,7 @@ plugins:
 tools:
   tool_search:
     enabled: "off"
-# A missed watcher tick fires once when the gateway comes back, so the first tick after a wake
-# is a full pass (design H "Sleep and drain").
+# Other authored cron jobs may catch up once after a wake; research serve owns observation.
 cron:
   catch_up_missed: true
 # The User identity token is deliberately NOT passed to terminal commands: User-identity actions

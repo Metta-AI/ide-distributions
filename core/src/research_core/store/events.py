@@ -26,6 +26,14 @@ if TYPE_CHECKING:
 # the kinds the modules emit are listed here, and the watcher's ownership map covers them.
 KINDS: frozenset[str] = frozenset(
     {
+        "transition.requested",
+        "transition.applied",
+        "transition.refused",
+        "transition.retry_waiting",
+        "execution.queued",
+        "execution.admitted",
+        "task.assigned",
+        "task.release_requested",
         "goal.created",
         "goal.updated",
         "goal.status",

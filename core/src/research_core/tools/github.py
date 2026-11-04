@@ -36,6 +36,7 @@ from research_core import gitops
 from research_core.platform.errors import PlatformError
 from research_core.tools import _args as a
 from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolError, ToolSpec, tool
+from research_core.transitions import report_capability
 
 ORCHESTRATOR = frozenset({"orchestrator"})
 CAPABILITY = "github"
@@ -266,11 +267,8 @@ def _redact(text: str, token: str | None) -> str:
 
 def _failure(ctx: ToolContext, problem: str, *, command: str, output: str, **context) -> ToolError:
     """Mark the ``github`` capability broken (opening or joining its repair Task) and refuse."""
-    from research_core.store import capabilities
 
-    report = capabilities.report_failure(
-        ctx.store, ctx.actor, CAPABILITY, output=output, command=command
-    )
+    report = report_capability(ctx, CAPABILITY, output=output, command=command)
     task = report.get("maintenance_task")
     return ToolError(
         [problem],

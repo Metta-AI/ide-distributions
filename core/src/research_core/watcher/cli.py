@@ -1,33 +1,29 @@
-"""``research watcher`` (``tick``, ``status``) and ``research workspace`` (``sleep``, ``wake``,
-``drain``).
+"""``research watcher status`` and ``research workspace`` (``sleep``, ``wake``,
+``drain``, ``recover``).
 
-``tick`` is what the Orchestrator's cron script runs every minute
-(``orchestrator/scripts/watcher.py`` starts it in the workspace environment); ``status``
+``status``
 prints the last heartbeat and the has-work signal from the workspace store for a person or
 ``workspace.doctor``. ``workspace sleep`` and ``workspace wake`` are how the host starts and
 ends a sleep cycle (``watcher/sleep.py``; ``docs/hosting.md`` "Gateway, sleep and drain");
-``workspace drain`` is the raw drain step on its own. Every result is one JSON line.
+``workspace drain`` is the raw drain step on its own. Local owners acknowledge a stopped,
+unmanaged gateway with ``workspace recover --runtime-stopped``. Every result is one JSON line.
 """
 
 from __future__ import annotations
 
 import argparse
-import importlib
 import json
 import os
-import sqlite3
-import subprocess
 from datetime import UTC, datetime
+from pathlib import Path
 
 from research_core import layout
-from research_core.store import settings
+from research_core.store import admissions, coworlds, settings
 from research_core.store._common import parse_iso
 from research_core.store.db import Store
-from research_core.watcher import context
-from research_core.watcher import tick as tick_module
+from research_core.watcher import context, drain
 from research_core.watcher.tick import PAUSED_DRAINED_KEY
 
-DRAIN_MODULE = "research_core.watcher.drain"
 NO_HERMES_HOME = (
     "HERMES_HOME is not set (the Orchestrator profile home; the workspace commands stop and"
     " poll runs through its runs API)"
@@ -35,13 +31,9 @@ NO_HERMES_HOME = (
 
 
 def add_parser(subparsers: argparse._SubParsersAction) -> None:
-    watcher = subparsers.add_parser(
-        "watcher", help="The Orchestrator's model-less cron job: run one tick, or its status"
-    )
+    watcher = subparsers.add_parser("watcher", help="Inspect workspace coordinator status")
     commands = watcher.add_subparsers(dest="watcher_command", metavar="<subcommand>")
     commands.required = True
-    tick = commands.add_parser("tick", help="Run one watcher tick and print its JSON summary")
-    tick.set_defaults(run=run_tick)
     status = commands.add_parser(
         "status", help="Print the last heartbeat, the has-work signal and the pause state"
     )
@@ -56,10 +48,8 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
         "sleep",
         help="Get ready for the host to stop the container: pause, stop every run, flush to disk",
         description=(
-            "Pause the workspace, drain Researcher runs and processes, let the Orchestrator's"
-            " runs finish (stopping them after --wait), then checkpoint and fsync every database"
-            " and sync the volume. Exit 0: nothing runs and every write is on disk. Exit 1:"
-            " 'volatile' lists what is still running or not flushed."
+            "Pause admission, settle recorded runs, drain tracked processes and flush stores."
+            " Exit 0 authorizes the host to stop the workspace under lifecycle v1."
         ),
     )
     sleep.add_argument(
@@ -79,10 +69,16 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Stop running Researcher runs and background processes; they resume after the wake",
     )
     drain.set_defaults(run=run_drain)
-
-
-def run_tick(args: argparse.Namespace) -> int:
-    return tick_module.main([])
+    recover = workspace_commands.add_parser(
+        "recover", help="After stopping an unmanaged local gateway, close uncertain executions"
+    )
+    recover.add_argument(
+        "--runtime-stopped",
+        action="store_true",
+        required=True,
+        help="Attest the local gateway and workers have stopped; inputs are never replayed",
+    )
+    recover.set_defaults(run=run_recover)
 
 
 def run_status(args: argparse.Namespace) -> int:
@@ -104,19 +100,33 @@ def run_status(args: argparse.Namespace) -> int:
             "paused": bool(settings.get(wstore, "paused")),
             "paused_drained": wstore.get_meta(PAUSED_DRAINED_KEY) == "1",
             "sleep_started": wstore.get_meta("sleep_started"),
+            "blocked_executions": admissions.problems(wstore),
+            "coordinator_instance": wstore.get_meta("coordinator_instance"),
+            "work": admissions.work_status(
+                wstore,
+                Path(os.environ["IDE_INFERENCE_LEASE_FILE"])
+                if "IDE_INFERENCE_LEASE_FILE" in os.environ
+                else None,
+            ),
+            "pending_transitions": [],
+            "restart_required": admissions.restart_required(wstore),
+            "runtime_recovery_count": int(wstore.get_meta("runtime_recovery_count") or "0"),
         }
+        active = coworlds.active(wstore)
+        if active is not None:
+            with Store.open(ws.coworld(active["coworld_id"]).store_path, kind="coworld") as store:
+                payload["pending_transitions"] = [
+                    dict(row)
+                    for row in store.q(
+                        "SELECT id,tool,actor,owner_instance,attempts,last_error,retry_at"
+                        " FROM transition_commands WHERE result IS NULL"
+                    )
+                ]
     print(json.dumps(payload))
     return 0
 
 
 def run_drain(args: argparse.Namespace) -> int:
-    try:
-        drain = importlib.import_module(DRAIN_MODULE)
-    except ModuleNotFoundError as error:
-        if error.name != DRAIN_MODULE:
-            raise
-        print(json.dumps({"ok": False, "error": "workspace drain is not built yet"}))
-        return 1
     if not os.environ.get("HERMES_HOME"):
         print(json.dumps({"ok": False, "error": NO_HERMES_HOME}))
         return 1
@@ -125,8 +135,8 @@ def run_drain(args: argparse.Namespace) -> int:
         result = drain.run(ctx)
     finally:
         close_stores(ctx)
-    print(json.dumps({"ok": True, **(result if isinstance(result, dict) else {})}, default=str))
-    return 0
+    print(json.dumps({"ok": result["quiet"] and not result["errors"], **result}))
+    return 0 if result["quiet"] and not result["errors"] else 1
 
 
 def run_sleep(args: argparse.Namespace) -> int:
@@ -143,10 +153,7 @@ def run_sleep(args: argparse.Namespace) -> int:
         report = sleep.go_to_sleep(ctx, wait_s=args.wait)
     finally:
         close_stores(ctx)
-    try:
-        flushed = sleep.flush_everything(ctx.ws, os.environ, ctx.researcher_profiles)
-    except (sqlite3.Error, OSError, subprocess.SubprocessError) as error:
-        flushed = {"error": f"{type(error).__name__}: {error}"}
+    flushed = sleep.flush_everything(ctx.ws, os.environ, ctx.researcher_profiles)
     volatile = sleep.volatile(report["still_running"], flushed)
     payload: dict = {"ok": not volatile, "paused": True, **report, "flushed": flushed}
     payload["volatile"] = volatile
@@ -168,6 +175,49 @@ def run_wake(args: argparse.Namespace) -> int:
     finally:
         close_stores(ctx)
     print(json.dumps({"ok": True, **result}, default=str))
+    return 0
+
+
+def run_recover(args: argparse.Namespace) -> int:
+    """A local owner's explicit stop acknowledgment; hosted recovery uses its supervisor."""
+    if os.environ.get("IDE_RUNTIME_ID"):
+        print(
+            json.dumps({"ok": False, "error": "Managed runtimes recover through their supervisor"})
+        )
+        return 1
+    ws = layout.from_env(os.environ)
+    with Store.open(ws.store_path, kind="workspace") as store:
+        with admissions.dispatch_lock(store), store.tx(context.WATCHER_ACTOR) as tx:
+            rows = store.q(
+                "SELECT op_id,runtime_id FROM client_admissions"
+                " WHERE execution_uncertain=1 OR resolution_required=1 OR"
+                " (dispatch_started=1 AND status IN ('queued','running'))"
+            )
+            if any(row["runtime_id"] is not None for row in rows):
+                print(
+                    json.dumps(
+                        {"ok": False, "error": "Managed runtimes recover through their supervisor"}
+                    )
+                )
+                return 1
+            for row in rows:
+                tx.execute(
+                    "UPDATE client_admissions SET status='interrupted',resolution_required=0,"
+                    "execution_uncertain=0 WHERE op_id=?",
+                    (row["op_id"],),
+                )
+                tx.event(
+                    "client.finished",
+                    row["op_id"],
+                    {
+                        "status": "interrupted",
+                        "local_runtime_stopped": True,
+                        "replayed": False,
+                    },
+                )
+    print(
+        json.dumps({"ok": True, "interrupted": [row["op_id"] for row in rows], "replayed": False})
+    )
     return 0
 
 

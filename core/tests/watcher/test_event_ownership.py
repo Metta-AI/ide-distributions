@@ -2,15 +2,11 @@
 
 from __future__ import annotations
 
-import pytest
-
 from research_core.store import events
 from research_core.watcher.handlers import (
     FUNCTION_KINDS,
-    HANDLER_PACKAGE,
     HANDLERS,
     MODEL_KINDS,
-    STEP_MODULES,
     UNWATCHED_KINDS,
     WAKE_KINDS,
 )
@@ -32,8 +28,6 @@ EXPECTED_WAKES = {
     "repair.failed_twice": None,
     "goal.needs_ideation": "management",
     "goal.park": "management",
-    "session.dead": None,
-    "task.stuck": None,
     "workspace.resumed": None,
     "task.abandoned": None,
     "task.failed": None,
@@ -58,22 +52,11 @@ def test_wake_table_matches_the_design():
     assert {kind: entry.wake for kind, entry in HANDLERS.items()} == EXPECTED_WAKES
 
 
-def test_each_handler_is_a_wake_or_a_watcher_function():
+def test_metadata_cannot_dispatch_code():
     for kind, entry in HANDLERS.items():
         assert entry.kind == kind
-        if entry.model:
-            assert entry.handler is None and entry.wake in WAKE_KINDS, kind
-            continue
-        assert entry.wake is None, kind
-        package, _, module = entry.module_name.rpartition(".")
-        # Checked by name, not imported: the step modules land in parallel with this map.
-        assert package == HANDLER_PACKAGE and module in STEP_MODULES, kind
-        assert entry.function_name.startswith("handle"), kind
-
-
-def test_resolve_refuses_a_model_wake():
-    with pytest.raises(ValueError, match="management wake"):
-        HANDLERS["task.asked"].resolve()
+        assert not hasattr(entry, "resolve")
+        assert entry.wake is None or entry.wake in WAKE_KINDS
 
 
 def test_every_wake_kind_has_a_template_that_keeps_wakes_out_of_conversations():

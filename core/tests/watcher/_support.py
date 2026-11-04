@@ -147,3 +147,32 @@ def working_session(
 
 def events_of(store: Store, kind: str) -> list[dict]:
     return [event.to_dict() for event in store.events_after(0, 10_000) if event.kind == kind]
+
+
+def coordinator(ctx: TickContext):
+    """The real coordinator over this fixture's native gateway and stores."""
+    from research_core.coordinator import Coordinator
+
+    return Coordinator(ctx.ws, ctx.hermes)
+
+
+def dispatch_inputs(ctx: TickContext) -> None:
+    """Exercise the production admission dispatcher, including receipt recovery."""
+    import asyncio
+
+    from research_core.serve import SeamServer
+
+    server = SeamServer(ws=ctx.ws, hermes=ctx.hermes, env=dict(ctx.env))
+    try:
+        asyncio.run(server.dispatch_messages())
+    finally:
+        server._http.server_close()
+
+
+def advance_executions(ctx: TickContext) -> None:
+    owner = coordinator(ctx)
+    owner.adopt_existing_workers(ctx.ws, ctx.wstore)
+    owner.reconcile()
+    owner.advance_attempts(ctx)
+    owner.advance_events(ctx)
+    dispatch_inputs(ctx)

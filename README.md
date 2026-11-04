@@ -23,7 +23,7 @@ under `docs/` carry a banner saying so.
 ## How the pieces fit
 
 - Each profile folder is a thin Hermes distribution: a manifest, a config, a generated `SOUL.md`,
-  a plugin shim, scripts and (Orchestrator) the `watcher` cron job. Hermes copies the folder on
+  a plugin shim, scripts and profile configuration. Hermes copies the folder on
   install; the shim imports `research_core` from the release checkout, whose path `prepare.py`
   records.
 - Two Python environments exist: Hermes's own interpreter runs the plugin (the stdlib-only base
@@ -42,7 +42,7 @@ hermes profile install ~/ide-distributions/researcher --name researcher --yes
 # write each profile's .env (distribution.yaml lists the variables; IDE_WORKSPACE must be the
 # same path for both), then prepare each profile with Hermes's Python:
 <hermes python> ~/.hermes/profiles/orchestrator/scripts/prepare.py \
-  --source ~/ide-distributions/orchestrator --hermes $(command -v hermes) --activate-supervisor
+  --source ~/ide-distributions/orchestrator --hermes $(command -v hermes)
 <hermes python> ~/.hermes/profiles/researcher/scripts/prepare.py \
   --source ~/ide-distributions/researcher --hermes $(command -v hermes)
 ```

@@ -45,6 +45,24 @@ def task_args(**overrides):
 
 
 def claim(call, task="T-1", session_id="r1"):
+    from unittest.mock import patch
+
+    record = call("task", {"action": "read", "task": task})["record"]
+    if record["status"] == "unclaimed":
+        with patch("research_core.coordinator.mint_session_id", return_value=session_id):
+            assigned = call(
+                "task",
+                {
+                    "action": "assign",
+                    "task": task,
+                    "task_updated": record["updated"],
+                    "profile": "researcher",
+                    "assignment_id": task,
+                    "context": "Tool scenario",
+                    "rationale": "Research work",
+                },
+            )
+        assert assigned["ok"], assigned
     return call("task", {"action": "claim", "task": task}, role="researcher", session_id=session_id)
 
 
@@ -182,13 +200,17 @@ def test_claim_from_a_second_session_is_refused(call, goal, code_repo):
     call("task", task_args())
     claim(call)
     refused = claim(call, session_id="r2")
-    assert refused["ok"] is False and "fresh lease" in refused["error"]
+    assert refused["ok"] is False and "recorded assignment" in refused["error"]
 
 
 def test_claim_needs_a_session_and_a_code_repository(call, ctx_factory, goal):
     call("task", task_args())
     no_session = json.loads(
-        run_tool("task", {"action": "claim", "task": "T-1"}, ctx_factory("researcher", ""))
+        run_tool(
+            "task",
+            {"action": "claim", "task": "T-1", "operation_id": "no-session"},
+            ctx_factory("researcher", ""),
+        )
     )
     assert no_session["ok"] is False and "session" in no_session["error"]
     no_repo = claim(call)
@@ -198,7 +220,7 @@ def test_claim_needs_a_session_and_a_code_repository(call, ctx_factory, goal):
 def test_claim_rejects_unapproved_or_blocked_tasks(call, goal, code_repo):
     as_researcher(call, task_args(action="propose"))
     refused = claim(call)
-    assert refused["ok"] is False and "not unclaimed" in refused["error"]
+    assert refused["ok"] is False and "recorded assignment" in refused["error"]
 
 
 def test_orchestrator_cannot_claim_and_researcher_cannot_create(call, goal):
@@ -255,8 +277,9 @@ def test_release(call, goal, code_repo):
     call("task", task_args())
     claim(call)
     released = as_researcher(call, {"action": "release", "task": "T-1", "reason": "out of time"})
-    assert released["record"]["status"] == "unclaimed"
-    assert released["record"]["held_by"] is None
+    assert released["kind"] == "release_pending"
+    assert released["record"]["status"] == "in-progress"
+    assert released["record"]["held_by"] == "r1"
 
 
 # --- completion and review ------------------------------------------------------------------

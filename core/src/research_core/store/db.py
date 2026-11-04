@@ -15,8 +15,9 @@ from __future__ import annotations
 import json
 import secrets
 import sqlite3
+import threading
 from collections.abc import Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -27,6 +28,21 @@ from research_core.store._common import Clock, json_field, now_iso, parse_iso
 from research_core.store.actors import Actor
 from research_core.store.errors import SchemaMismatch, SchemaNewer
 from research_core.store.events import Event
+
+# In-process wakeups are hints. SQLite event cursors remain the durable source of truth.
+_changes = threading.Condition()
+_change_version = 0
+
+
+def change_version() -> int:
+    with _changes:
+        return _change_version
+
+
+def wait_for_change(version: int, timeout: float) -> None:
+    with _changes:
+        _changes.wait_for(lambda: version != _change_version, timeout)
+
 
 STATE_README = """\
 # .state
@@ -122,6 +138,7 @@ class Store:
         self.conn = conn
         self.clock = clock
         self._tx: Tx | None = None
+        self._atomic: Tx | None = None
 
     @classmethod
     def open(
@@ -232,9 +249,23 @@ class Store:
 
     # --- writes --------------------------------------------------------------------------
 
-    def tx(self, actor: Actor) -> Tx:
+    def tx(self, actor: Actor) -> Tx | nullcontext[Tx]:
         """One transaction: ``with store.tx(actor) as tx: ...``. Nested use raises."""
+        if self._atomic is not None:
+            if actor != self._atomic.actor:
+                raise RuntimeError("atomic command cannot change its actor")
+            return nullcontext(self._atomic)
         return Tx(self, actor)
+
+    @contextmanager
+    def atomic(self, actor: Actor) -> Iterator[Tx]:
+        """Commit domain effects and their command receipt together."""
+        with self.tx(actor) as tx:
+            self._atomic = tx
+            try:
+                yield tx
+            finally:
+                self._atomic = None
 
     def close(self) -> None:
         self.conn.close()
@@ -259,6 +290,7 @@ class Tx:
         self.at = store.now()
         self._open = False
         self._start_id = 0
+        self._start_event = 0
 
     def __enter__(self) -> Tx:
         if self.store._tx is not None:
@@ -267,6 +299,7 @@ class Tx:
         conn.execute("BEGIN IMMEDIATE")
         self.store._tx = self
         self._open = True
+        self._start_event = self.store.last_seq()
         # Rows above this id are ours: the write lock is held from here until commit.
         self._start_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM change_log").fetchone()[0]
         return self
@@ -280,6 +313,11 @@ class Tx:
                     (self.token, self._start_id),
                 )
                 conn.execute("COMMIT")
+                if self.store.last_seq() > self._start_event:
+                    global _change_version
+                    with _changes:
+                        _change_version += 1
+                        _changes.notify_all()
             else:
                 conn.execute("ROLLBACK")
         except BaseException:

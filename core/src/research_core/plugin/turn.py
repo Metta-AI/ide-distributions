@@ -247,7 +247,7 @@ def make_pre_llm_call(role: Role) -> Callable[..., dict | None]:
             admission = ctx.wstore.one(
                 "SELECT payload FROM client_admissions WHERE session_id = ?"
                 " AND kind = 'message' AND dispatch_started = 1"
-                " AND status IN ('queued', 'running') ORDER BY rowid LIMIT 1",
+                " AND status IN ('queued', 'running') ORDER BY rowid DESC LIMIT 1",
                 (session_id,),
             )
             block = render_context_block(

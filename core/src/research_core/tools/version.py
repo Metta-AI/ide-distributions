@@ -35,10 +35,11 @@ from research_core import gitops, mixin
 from research_core.platform import submission
 from research_core.platform.errors import PlatformError
 from research_core.platform.protocol import PolicyVersion, with_retries
-from research_core.store import capabilities, sessions, tasks, versions
+from research_core.store import sessions, tasks, versions
 from research_core.store._common import parse_display_id
 from research_core.tools import _args as a
 from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolError, ToolSpec, tool
+from research_core.transitions import report_capability
 
 ORCHESTRATOR = frozenset({"orchestrator"})
 BOTH = frozenset({"orchestrator", "researcher"})
@@ -332,9 +333,8 @@ def background_result(result: mixin.CommandResult) -> dict:
 
 def build_failure(ctx: ToolContext, result: mixin.CommandResult, what: str) -> ToolError:
     """Mark ``build`` broken with its repair Task (A4.1) and explain with the log (B.15)."""
-    report = capabilities.report_failure(
-        ctx.store,
-        ctx.actor,
+    report = report_capability(
+        ctx,
         "build",
         output=log_text(result.log_path),
         command=result.command,

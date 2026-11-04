@@ -381,6 +381,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
             <select id="edit-op">
               <option value="directives.add">Add a Directive</option>
               <option value="goals.update">Rename a Goal</option>
+              <option value="tasks.update">Rename a Task</option>
               <option value="goals.set_status">Set a Goal's status</option>
               <option value="settings.update">Change a setting</option>
               <option value="workspace.pause">Pause the watcher</option>
@@ -590,26 +591,28 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
     setText("composer-status", "Sending…");
     try {
       const context = buildContext();
-      const reply = await api("POST", "/message", {session_id: state.session, message: text, actor: ACTOR, context});
+      const reply = await api("POST", "/message", {session_id: state.session, message: {role: "user", content: text}, actor: ACTOR, context});
       input.value = "";
       addMessage({role: "user", text, run_id: reply.run_id, delivered: reply.delivered, context});
       const problems = (reply.problems || []).length ? ` Problems: ${reply.problems.join("; ")}.` : "";
       setText("composer-status", `Delivered as <strong>${esc(reply.delivered)}</strong> to <span class="mono">${esc(reply.run_id)}</span> (workspace seq ${esc(reply.seq)}).${esc(problems)}`);
-      for (;;) {
-        const snapshot = await api("GET", "/snapshot?store=workspace");
-        const admission = snapshot.records.admissions.find(item => item.op_id === reply.op_id);
-        if (admission.run_id) { trackRun(admission.run_id); break; }
-        if (TERMINAL.has(admission.status)) {
-          setText("composer-status", esc(admission.error || admission.status));
-          break;
-        }
-        await sleep(RUN_POLL_MS);
-      }
+      const admission = await awaitAdmission(reply.op_id);
+      trackRun(admission.run_id);
     } catch (error) {
       setText("composer-status", `<span class="err-text">Not sent: ${esc(error.message)}</span>`);
     } finally {
       button.disabled = false;
       input.focus();
+    }
+  }
+
+  async function awaitAdmission(opId) {
+    for (;;) {
+      const snapshot = await api("GET", "/snapshot?store=workspace");
+      const admission = snapshot.records.admissions.find(item => item.op_id === opId);
+      if (admission.run_id) return admission;
+      if (TERMINAL.has(admission.status)) throw new Error(admission.error || admission.status);
+      await sleep(RUN_POLL_MS);
     }
   }
 
@@ -803,7 +806,8 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
     try {
       const reply = await api("POST", "/ui-action", {session_id: state.session, action: "answer", payload: {ask_id: askId, value}, actor: ACTOR});
       addMessage({role: "user", text: `Answer to ${askId}: ${value}`, run_id: reply.run_id, delivered: reply.delivered, context: {}});
-      trackRun(reply.run_id);
+      const admission = await awaitAdmission(reply.op_id);
+      trackRun(admission.run_id);
     } catch (error) {
       if (status) { status.textContent = `Not accepted: ${error.message}`; status.classList.add("err-text"); }
     }
@@ -922,6 +926,8 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
       args: () => ({text: $("f-text").value.trim(), scope: $("f-scope").value.trim(), source: $("f-source").value.trim()})},
     "goals.update": {note: "goals.update with a new title.", fields: () => FIELD("f-goal", "Goal", 'placeholder="G-1" required') + FIELD("f-title", "New title", "required"),
       args: () => ({goal_id: $("f-goal").value.trim(), title: $("f-title").value.trim()})},
+    "tasks.update": {note: "The edit is saved before the workspace applies it.", fields: () => FIELD("f-task", "Task", 'placeholder="T-1" required') + FIELD("f-title", "New title", "required"),
+      args: () => ({task_id: $("f-task").value.trim(), title: $("f-title").value.trim()})},
     "goals.set_status": {note: "Every status change needs a reason.", fields: () => FIELD("f-goal", "Goal", 'placeholder="G-1" required') + FIELD("f-status", "Status", "", "select") + FIELD("f-reason", "Reason", "required"),
       after: () => { $("f-status").innerHTML = ["active", "parked", "completed", "abandoned"].map((s) => `<option>${s}</option>`).join(""); },
       args: () => ({goal_id: $("f-goal").value.trim(), status: $("f-status").value, status_reason: $("f-reason").value.trim()})},
@@ -955,13 +961,36 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
     const result = $("edit-result");
     result.className = "result";
     result.textContent = `Applying ${op}…`;
+    let acceptedCommand = null;
     try {
-      const reply = await api("POST", "/store/apply", {actor: ACTOR, op, args: form.args()});
+      const args = form.args();
+      if (op.startsWith("tasks.")) args.operation_id = crypto.randomUUID();
+      let reply = await api("POST", "/store/apply", {actor: ACTOR, op, args});
+      if (reply.status === "pending") {
+        let command = reply.command;
+        acceptedCommand = command;
+        result.textContent = `Edit saved; waiting for the workspace to apply ${op}.`;
+        while (command.transition_state === "pending") {
+          await sleep(RUN_POLL_MS);
+          command = await api("GET", `/command?coworld_id=${encodeURIComponent(reply.coworld_id)}&command_id=${encodeURIComponent(command.command_id)}`);
+        }
+        acceptedCommand = null;
+        if (command.transition_state !== "applied") {
+          const error = new Error(command.error);
+          error.body = command;
+          throw error;
+        }
+        reply = {...reply, record: command.record, seq: null};
+      }
       const record = reply.record || {};
       const label = record.id || record.key || "";
       result.className = "result ok-text";
-      result.textContent = `Applied ${op}${label ? ` → ${label}` : ""} in the ${reply.store} store (seq ${reply.seq}).\n${JSON.stringify(record, null, 2)}`;
+      result.textContent = `Applied ${op}${label ? ` → ${label}` : ""} in the ${reply.store} store${reply.seq === null ? "" : ` (seq ${reply.seq})`}.\n${JSON.stringify(record, null, 2)}`;
     } catch (error) {
+      if (acceptedCommand) {
+        result.textContent = "Edit saved. Status is temporarily unavailable; refresh to check the workspace.";
+        return;
+      }
       result.className = "result err-text";
       const problems = (error.body && error.body.problems) || [];
       result.textContent = `Refused: ${error.body && error.body.error ? error.body.error : error.message}${problems.length ? `\n- ${problems.join("\n- ")}` : ""}`;

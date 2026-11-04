@@ -11,7 +11,7 @@ A Version is a policy candidate built on purpose: a commit in the code repositor
 
 - A Researcher works in its Task's worktree (branch `task/<n>`, from `task.claim`).
 - The Orchestrator works in `worktrees/orch-<n>` from `workspace.worktree_open`, or builds what is on `main` from `code/` when the user asks for exactly that (a starter, the current policy).
-- Never commit on `main` directly; merges happen after review.
+- Never commit candidate changes on `main` directly; merges happen after review.
 
 ## Method
 

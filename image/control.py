@@ -42,6 +42,12 @@ class Lifecycle:
         response = await seam.get("/status")
         response.raise_for_status()
         activity = response.json()
+        if activity["restart_required"]:
+            return {
+                "ready": True,
+                "ready_for_sleep": False,
+                "detail": "Recovering native execution",
+            }
         if activity["has_work"]:
             self.last_busy = time.monotonic()
         automatic = time.monotonic() - self.last_busy >= 900

@@ -1,6 +1,7 @@
 """Fixtures for tool tests: a workspace with one active Coworld and contexts per role."""
 
 import json
+from uuid import uuid4
 
 import pytest
 
@@ -24,6 +25,7 @@ def ctx_factory(workspace_env):
     def make(role="orchestrator", session_id="s1", coworld=COWORLD):
         env = dict(workspace_env, IDE_SESSION_ID=session_id)
         ctx = ToolContext.from_env(role, env)
+        ctx.coordinator_instance = "coordinator:unit"
         ctx.workspace.ensure_dirs()
         if coworld and coworld not in created:
             harness = Actor.parse("harness")
@@ -43,6 +45,10 @@ def call(ctx_factory):
     """``call(tool, args, role="orchestrator")`` → the parsed JSON result of a tool call."""
 
     def run(tool, args, role="orchestrator", session_id="s1"):
+        if (
+            tool == "task" and args.get("action") not in {"read", "list", "workers", "command"}
+        ) or (tool == "workspace" and args.get("action") == "change_complete"):
+            args = {"operation_id": str(uuid4()), **args}
         return json.loads(run_tool(tool, args, ctx_factory(role, session_id)))
 
     return run

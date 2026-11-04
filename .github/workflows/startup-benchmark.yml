@@ -33,6 +33,7 @@ jobs:
               > "$RUNNER_TEMP/$variant-bytecode.txt"
           done
       - name: Measure baseline startup
+        working-directory: ${{ runner.temp }}/baseline-source
         env:
           STARTUP_CYCLES: "6"
           STARTUP_ARTIFACTS: ${{ runner.temp }}/baseline-proof

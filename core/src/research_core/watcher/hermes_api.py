@@ -25,8 +25,10 @@ Retries are the caller's; the client only classifies failures (see the exception
 
 from __future__ import annotations
 
+import hashlib
 import json
 import secrets
+import socket
 import time
 import urllib.error
 import urllib.request
@@ -77,7 +79,7 @@ class RunStatus:
 
     @classmethod
     def unknown(cls, run_id: str, detail: str = "", raw: dict | None = None) -> RunStatus:
-        """The gateway no longer knows the run (404): terminal, with status ``unknown``."""
+        """A run absent from this gateway is interrupted, never reported as completed."""
         return cls(run_id, "unknown", None, None, detail or None, True, raw or {})
 
 
@@ -107,6 +109,10 @@ class RunsUnavailable(RunsBusy):
     A special case of :class:`RunsBusy`: ``except RunsBusy`` covers both, and code that cares
     whether the gateway is reachable at all can catch this one first.
     """
+
+
+class RunsNotSent(RunsUnavailable):
+    """Connection setup failed before HTTP request bytes could reach the gateway."""
 
 
 class RunsAuthError(RunsError):
@@ -243,7 +249,7 @@ class HermesRuns:
             else None,
         )
 
-    def _require_inference(self) -> None:
+    def require_inference(self) -> None:
         """Raise :class:`RunsUnavailable` while the lease is missing or the inference state
         blocks model work; callers defer as for a busy gateway."""
         if inference.available(self.inference_lease_file):
@@ -262,6 +268,14 @@ class HermesRuns:
 
     # -- the API ------------------------------------------------------------------------------
 
+    def auth_scope(self, profile: str) -> str:
+        return hashlib.sha256(f"{profile}\0{self.key_for(profile)}".encode()).hexdigest()
+
+    def capabilities(self, profile: str) -> dict:
+        return self._request("GET", profile, "/v1/capabilities").payload["features"][
+            "runs_idempotency"
+        ]
+
     def start(
         self,
         *,
@@ -277,7 +291,7 @@ class HermesRuns:
         inference gate closed: no lease, or a block in the inference state),
         :class:`RunsAuthError` (401/403) and :class:`RunsConflict` (409).
         """
-        self._require_inference()
+        self.require_inference()
         body: dict[str, Any] = {"input": text, "session_id": session_id}
         if instructions is not None:
             body["instructions"] = instructions
@@ -285,11 +299,13 @@ class HermesRuns:
         response = self._request("POST", profile, "/v1/runs", body=body, headers=headers)
         run_id = response.payload.get("run_id") if isinstance(response.payload, dict) else None
         if not run_id:
+            # A successful response may follow acceptance. Recover its receipt with the
+            # original durable key rather than authorizing a replacement execution.
             raise RunsError(
                 f"run started but no run_id in the response: {response.payload!r}"[:DETAIL_LIMIT],
                 route=f"POST /p/{profile}/v1/runs",
                 status=response.status,
-                retryable=False,
+                retryable=True,
             )
         return str(run_id)
 
@@ -388,7 +404,13 @@ class HermesRuns:
             response = _Response(error.code, _parse_body(error.read()))
         except OSError as error:  # URLError (connection refused), timeouts, resets
             detail = f"{type(error).__name__}: {error}".strip(": ")
-            raise RunsUnavailable(f"gateway unreachable: {detail}", route=route) from error
+            cause = error.reason if isinstance(error, urllib.error.URLError) else error
+            error_type = (
+                RunsNotSent
+                if isinstance(cause, (ConnectionRefusedError, socket.gaierror))
+                else RunsUnavailable
+            )
+            raise error_type(f"gateway unreachable: {detail}", route=route) from error
         if response.status in accept:
             return response
         raise self._error_for(route, response)
@@ -474,6 +496,9 @@ class FakeHermesRuns(HermesRuns):
         # Idempotency-Key → (body fingerprint, run id), as the gateway's 24-hour store.
         self._idempotency: dict[str, tuple[tuple, str]] = {}
 
+    def capabilities(self, profile: str) -> dict:
+        return {"supported": True, "durable": True, "retention_seconds": 86400}
+
     # -- test controls ------------------------------------------------------------------------
 
     def set_busy(self, busy: bool) -> None:
@@ -519,7 +544,7 @@ class FakeHermesRuns(HermesRuns):
                 },
             )
         )
-        self._require_inference()
+        self.require_inference()
         if self.busy:
             raise RunsBusy(
                 "HTTP 429 rate_limit_exceeded", route=f"POST /p/{profile}/v1/runs", status=429

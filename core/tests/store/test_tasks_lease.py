@@ -36,7 +36,8 @@ def test_second_claim_gets_lease_error_while_the_lease_is_fresh(coworld_store, h
         with pytest.raises(LeaseError) as info:
             claim(other_connection, SECOND, held["id"], n=2)
         assert info.value.problems == [
-            f"{held['id']} is held by session:{FIRST.id} with a fresh lease"
+            f"{held['id']} is held by session:{FIRST.id}; "
+            "lease age cannot release execution ownership"
         ]
     finally:
         other_connection.close()
@@ -51,6 +52,9 @@ def test_stale_lease_is_taken_over_with_a_higher_epoch(coworld_store, held, cloc
     with pytest.raises(LeaseError):
         claim(coworld_store, SECOND, held["id"], n=2)
     clock.advance(2)
+    with pytest.raises(LeaseError):
+        claim(coworld_store, SECOND, held["id"], n=2)
+    tasks.release(coworld_store, FIRST, held["id"], reason="execution explicitly settled")
     taken = claim(coworld_store, SECOND, held["id"], n=2)
     assert taken["held_by"] == SECOND.id
     assert taken["lease_epoch"] == 2
@@ -63,7 +67,6 @@ def test_stale_lease_is_taken_over_with_a_higher_epoch(coworld_store, held, cloc
     event = coworld_store.events_after(0)[-1]
     assert event.kind == "task.claimed"
     assert event.payload["epoch"] == 2
-    assert event.payload["took_over_from"] == FIRST.id
 
     with pytest.raises(LeaseError) as info:
         tasks.require_holder(coworld_store, held["id"], FIRST)
@@ -143,6 +146,7 @@ def test_every_holder_write_refuses_a_stale_epoch(coworld_store, harness, held, 
     make_version(coworld_store, harness)
     write = HOLDER_WRITES[name]
     clock.advance(301)
+    tasks.release(coworld_store, FIRST, held["id"], reason="execution explicitly settled")
     claim(coworld_store, SECOND, held["id"], n=2)
     with pytest.raises(LeaseError):
         write(coworld_store, FIRST, held["id"])
@@ -160,6 +164,7 @@ def test_stale_holder_cannot_complete_after_takeover_and_the_new_holder_can(
 ):
     """The merge uses the commit the current holder recorded, never the replaced run's."""
     clock.advance(301)
+    tasks.release(coworld_store, FIRST, held["id"], reason="execution explicitly settled")
     claim(coworld_store, SECOND, held["id"], n=2)
     with pytest.raises(LeaseError):
         _complete(coworld_store, FIRST, held["id"])

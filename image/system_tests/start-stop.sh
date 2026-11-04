@@ -17,7 +17,7 @@ git rev-parse HEAD > "$scratch/source-revision.txt"
 cleanup() {
   docker logs "$name" > "$scratch/container.log" 2>&1 || true
   cat "$scratch/container.log"
-  docker rm -f "$name" >/dev/null 2>&1 || true
+  docker rm -f "$name" "$name-recovery" >/dev/null 2>&1 || true
   docker volume rm "$volume" >/dev/null 2>&1 || true
   if [[ -z "${STARTUP_ARTIFACTS:-}" ]]; then rm -rf "$scratch"; fi
 }
@@ -81,3 +81,6 @@ docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --tm
 # Lease acquisition follows the platform retry contract before declaring inference ready.
 docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,size=64m \
   --entrypoint /opt/hermes/.venv/bin/python "$image" /opt/distribution/image/system_tests/check-inference.py
+
+# Rare uncertain starts recover inside the image; no operator or forced platform hold is needed.
+bash image/system_tests/check-recovery.sh "$image" "$name-recovery" "$volume" "$scratch"

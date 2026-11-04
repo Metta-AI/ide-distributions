@@ -19,7 +19,8 @@ def record_native_message(
     try:
         admission = store.one(
             "SELECT op_id FROM client_admissions WHERE session_id=? AND kind='message'"
-            " AND dispatch_started=1 AND status IN ('queued','running') ORDER BY rowid LIMIT 1",
+            " AND native_message_id IS NULL AND dispatch_started=1"
+            " AND status IN ('queued','running') ORDER BY rowid LIMIT 1",
             (session_id,),
         )
         if admission is None:

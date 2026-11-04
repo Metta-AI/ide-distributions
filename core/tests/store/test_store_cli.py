@@ -69,7 +69,19 @@ def run(capsys, *argv: str) -> tuple[int, dict]:
 
 
 def apply(capsys, op: str, args: dict, *extra: str, actor: str = USER) -> tuple[int, dict]:
-    return run(capsys, "apply", "--actor", actor, *extra, op, json.dumps(args))
+    if not op.startswith("tasks."):
+        return run(capsys, "apply", "--actor", actor, *extra, op, json.dumps(args))
+    from research_core.serve import SeamServer
+    from research_core.watcher.hermes_api import FakeHermesRuns
+
+    server = SeamServer(ws=layout.from_env(), hermes=FakeHermesRuns(), env={})
+    thread = threading.Thread(target=server.serve_forever)
+    thread.start()
+    try:
+        return run(capsys, "apply", "--actor", actor, *extra, op, json.dumps(args))
+    finally:
+        server.shutdown()
+        thread.join(timeout=5)
 
 
 # --- apply ----------------------------------------------------------------------------------
@@ -893,3 +905,30 @@ def test_events_without_an_active_coworld_names_the_fix(tmp_path, monkeypatch, c
     code, out = run(capsys, "events", "--after", "0")
     assert code == 1
     assert "no active Coworld" in out["error"] and "--store workspace" in out["error"]
+
+
+def test_pending_user_edit_is_not_reported_as_applied(workspace, capsys, monkeypatch):
+    from types import SimpleNamespace
+
+    from research_core import transitions
+
+    record = tasks.create(
+        workspace.store, HARNESS, type="maintenance", title="Before", description="Fix"
+    )
+    monkeypatch.setattr(transitions, "REQUEST_WAIT_SECONDS", 0)
+    args = {"task_id": record["id"], "title": "After", "operation_id": "user-edit"}
+    code, result = run(capsys, "apply", "--actor", USER, "tasks.update", json.dumps(args))
+    assert code == 2 and result["status"] == "pending"
+    assert "ok" not in result and "record" not in result
+    assert tasks.read(workspace.store, record["id"])["title"] == "Before"
+    tick = SimpleNamespace(
+        store=workspace.store,
+        wstore=workspace.wstore,
+        ws=workspace.ws,
+        env={},
+        coworld=workspace.ws.coworld(COWORLD_ID),
+    )
+    transitions.apply(tick, "coordinator:replacement")
+    code, result = run(capsys, "apply", "--actor", USER, "tasks.update", json.dumps(args))
+    assert code == 0 and result["ok"] and result["record"]["title"] == "After"
+    assert workspace.store.one("SELECT count(*) FROM transition_commands")[0] == 1
