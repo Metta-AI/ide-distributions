@@ -358,6 +358,13 @@ def test_apply_coworld_switch_failure_carries_the_output(workspace, capsys, monk
     assert code == 1 and "unknown arguments: source" in out["problems"]
 
 
+def test_a_contradicting_store_is_refused_before_it_is_opened(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("IDE_WORKSPACE", str(tmp_path))
+    code, out = apply(capsys, "directives.retire", {"directive_id": "W-1"}, "--store", "coworld")
+    assert code == 1
+    assert "W-1 is in the workspace store" in out["error"]
+
+
 def test_apply_without_an_active_coworld_says_so(tmp_path, monkeypatch, capsys):
     monkeypatch.setenv("IDE_WORKSPACE", str(tmp_path))
     code, out = apply(capsys, "goals.update", {"goal_id": 1, "title": "x"})

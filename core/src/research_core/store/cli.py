@@ -263,6 +263,8 @@ def _call(
     *,
     coordinator_instance: str | None = None,
 ) -> Any:
+    if "directive_id" in op_args:
+        op_args = _with_directive_number(op_args, kind)
     store = stores.by_kind(kind)
     if op.startswith("tasks.") and coordinator_instance is None:
         from uuid import uuid4
@@ -298,8 +300,6 @@ def _call(
         paused = op == "workspace.pause"
         return settings.update(store, actor, "paused", paused, cites=op_args.get("cites"))
     module, name = op.split(".", 1)
-    if "directive_id" in op_args:
-        op_args = _with_directive_number(op_args, kind)
     function = getattr(LIBRARY_MODULES[module], name)
     bound = _bind(op, function, (store, actor), op_args)
     return function(*bound.args, **bound.kwargs)
