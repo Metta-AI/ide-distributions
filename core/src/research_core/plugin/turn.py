@@ -131,8 +131,12 @@ def render_turn(ctx: Any, session_id: str, *, is_first_turn: bool, now: datetime
         " ORDER BY seq DESC LIMIT 1",
         (session_id,),
     )
+    coworld = ctx.coworld_or_none()
+    coworld_id = coworld.coworld_id if coworld else None
     last_any = wstore.one(
-        "SELECT at FROM events WHERE kind = 'turn.rendered' ORDER BY seq DESC LIMIT 1"
+        "SELECT at FROM events WHERE kind = 'turn.rendered'"
+        " AND json_extract(payload, '$.coworld_id') IS ? ORDER BY seq DESC LIMIT 1",
+        (coworld_id,),
     )
     import json
 
@@ -140,7 +144,6 @@ def render_turn(ctx: Any, session_id: str, *, is_first_turn: bool, now: datetime
     since_w = int(last_payload.get("wseq") or 0)
     since_c = int(last_payload.get("cseq") or 0)
 
-    coworld = ctx.coworld_or_none()
     coworld_store = ctx.store if coworld is not None else None
 
     unread = notices.unread(
@@ -164,7 +167,8 @@ def render_turn(ctx: Any, session_id: str, *, is_first_turn: bool, now: datetime
             if event.kind == "ui.patch":
                 reactions.extend(_reaction_lines(event, session_id))
                 continue
-            if event.kind in ("turn.rendered", "watcher.heartbeat", "notice"):
+            # Workspace bookkeeping spans games. Only this Coworld's events describe its work.
+            if store is wstore:
                 continue
             changed[event.kind] += 1
     if last is not None and changed:
@@ -186,7 +190,11 @@ def render_turn(ctx: Any, session_id: str, *, is_first_turn: bool, now: datetime
 
     wseq, cseq = wstore.last_seq(), (coworld_store.last_seq() if coworld_store else 0)
     with wstore.tx(ctx.actor) as tx:
-        tx.event("turn.rendered", session_id, {"wseq": wseq, "cseq": cseq, "first": is_first_turn})
+        tx.event(
+            "turn.rendered",
+            session_id,
+            {"wseq": wseq, "cseq": cseq, "first": is_first_turn, "coworld_id": coworld_id},
+        )
     return "\n\n".join(parts)
 
 

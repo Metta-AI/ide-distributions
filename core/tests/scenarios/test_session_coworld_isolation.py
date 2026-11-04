@@ -70,6 +70,12 @@ def test_interleaved_clients_keep_their_coworld_after_global_selection_changes(t
                 assert f"secret {game}" in prompt
                 other = "cow_arena" if game == "cow_diplomacy" else "cow_diplomacy"
                 assert f"secret {other}" not in prompt
+                with ctx.wstore.tx(ACTOR) as tx:
+                    tx.event("task.assigned", "T-999", {"coworld_id": other})
+                next_prompt = render_turn(
+                    ctx, client.session_id, is_first_turn=False, now=datetime.now(UTC)
+                )
+                assert "task.assigned" not in next_prompt
             finally:
                 ctx.wstore.close()
                 ctx.store.close()
