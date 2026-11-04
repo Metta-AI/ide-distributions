@@ -134,11 +134,10 @@ Container timing ends at application health. Platform control readiness and brow
 remain separate gates; the smoke's deliberately unavailable platform does not prove either.
 
 The startup comparison workflow builds the PR base and candidate from their own source and
-lockfile on one Linux runner.
-Each image runs one fresh boot and five retained boots with the same smoke command and
-the hosted workspace limit of two CPU cores and 2 GiB memory. This
-isolates packaging changes; it does not compare different application revisions. Both build
-identities, the baseline Dockerfile, and all per-boot timing reports are retained as artifacts.
+lockfile on one Linux runner. Each image runs one fresh boot and five retained boots with the same smoke command and
+the hosted workspace limit of two CPU cores and 2 GiB memory. This compares the complete
+proposed runtime change. Both image identities, import profiles, bytecode counts, and all per-boot
+timing reports are retained as artifacts.
 
 On container stop, the supervisor cancels ongoing startup/control work, terminates its owned
 application and gateway processes, and waits for them to exit. A child that ignores termination
@@ -158,6 +157,11 @@ do not duplicate these first-readiness events.
 
 These milestones do not claim a completed model turn. Use Metta's packaged chat harness
 for container-to-completed-chat measurements and retained-session verification.
+
+The container starts the gateway through Hermes's supported `python -m gateway.run` entrypoint.
+The general CLI remains installed for tools and profile operations; its full dispatcher is not
+needed to run the container-owned gateway. Packaged restart and transport checks exercise this
+entrypoint, including gateway interruption and recovery.
 
 Hermes's base image disables runtime bytecode writes, and hosting mounts its root filesystem
 read-only. The image compiles Hermes's application modules and installed dependencies at build

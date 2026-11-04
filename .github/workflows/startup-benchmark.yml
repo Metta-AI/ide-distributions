@@ -23,9 +23,11 @@ jobs:
       - name: Profile gateway imports in both packaged interpreters
         run: |
           for variant in baseline candidate; do
-            docker run --rm --read-only --tmpfs /workspace:uid=10000,gid=10000,mode=0700 --tmpfs /tmp:mode=1777 \
-              --entrypoint /opt/hermes/.venv/bin/python "startup-$variant" \
-              -X importtime -c 'import hermes_cli.main; import gateway.run' > "$RUNNER_TEMP/$variant-imports.log" 2>&1
+            for module in hermes_cli.main gateway.run; do
+              docker run --rm --read-only --tmpfs /workspace:uid=10000,gid=10000,mode=0700 --tmpfs /tmp:mode=1777 \
+                --entrypoint /opt/hermes/.venv/bin/python "startup-$variant" \
+                -X importtime -c "import $module" > "$RUNNER_TEMP/$variant-$module-imports.log" 2>&1
+            done
             docker run --rm --entrypoint /opt/hermes/.venv/bin/python "startup-$variant" \
               -c 'import pathlib,sysconfig; root=pathlib.Path("/opt/hermes"); site=pathlib.Path(sysconfig.get_path("purelib")); print("gateway pyc",len(list((root/"gateway").rglob("*.pyc"))),"CLI pyc",len(list((root/"hermes_cli").rglob("*.pyc"))),"dependency pyc",len(list(site.rglob("*.pyc"))))' \
               > "$RUNNER_TEMP/$variant-bytecode.txt"
