@@ -5,8 +5,8 @@ import threading
 
 import pytest
 
-from research_core.client import ScriptedClient, SeamError
 from research_core import layout
+from research_core.client import ScriptedClient, SeamError
 from research_core.plugin.turn import render_turn
 from research_core.serve import SeamServer
 from research_core.store import coworlds, notices, sessions, tasks
