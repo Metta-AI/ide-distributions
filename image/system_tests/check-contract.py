@@ -60,6 +60,21 @@ async def main():
         async with response(transcript, seam, gateway, inference) as result:
             assert result.status_code == 200, await result.aread()
             assert result.json()["data"] == []
+        # A browser can lose its session binding after acknowledgement. The original message
+        # identity still reopens exactly the same native session, even with a new open envelope.
+        initial = operation.model_copy(
+            update={
+                "op_id": uuid4(),
+                "args": {**operation.args, "message_op_id": "00000000-0000-4000-8000-000000000125"},
+            }
+        )
+        async with response(initial, seam, gateway, inference) as result:
+            assert result.status_code == 200, await result.aread()
+            original_session = result.json()["session_id"]
+        initial = initial.model_copy(update={"op_id": uuid4()})
+        async with response(initial, seam, gateway, inference) as result:
+            assert result.status_code == 200, await result.aread()
+            assert result.json()["session_id"] == original_session
         # Recover the native receipt, including the second retained-volume cycle.
         async with response(operation, seam, gateway, inference) as result:
             assert result.status_code == 200 and result.json()["session_id"] == session

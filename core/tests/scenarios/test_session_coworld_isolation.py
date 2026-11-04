@@ -117,14 +117,13 @@ def test_unbound_session_cannot_inherit_retained_coworld(tmp_path):
         ctx.wstore.close()
 
 
-def test_scope_capability_and_canonical_binding_are_required_before_delivery(tmp_path):
+def test_canonical_session_binding_is_immutable(tmp_path):
     from research_core.serve import Refused
 
     ws = layout.from_env({"IDE_WORKSPACE": str(tmp_path)})
     ws.ensure_dirs()
     server = SeamServer(ws=ws, hermes=FakeHermesRuns(), env={"IDE_WORKSPACE": str(tmp_path)})
     try:
-        assert server.snapshot("workspace")["session_scope_version"] == 1
         request = {
             "op_id": "00000000-0000-4000-8000-000000000001",
             "session_id": "bound",
@@ -204,3 +203,60 @@ def test_game_panels_and_workspace_activity_remain_scoped_across_idle_games(tmp_
             panel = ui_state.get(wstore, "coworld:" + game)["doc"]["panels"]["agent-context"]
             assert panel["content"]["computed"] == {"game": game}
         assert "panels" not in ui_state.get(wstore, "workspace")["doc"]
+
+
+def test_runtime_filters_chat_history_and_rejects_wrong_game_reads(tmp_path):
+    from uuid import uuid4
+
+    from research_core.serve import Refused
+
+    ws = layout.from_env({"IDE_WORKSPACE": str(tmp_path)})
+    ws.ensure_dirs()
+    server = SeamServer(ws=ws, hermes=FakeHermesRuns(), env={})
+    try:
+        for sid, coworld, league in (
+            ("arena", "cow_arena", "league_arena"),
+            ("diplomacy", "cow_diplomacy", "league_diplomacy"),
+            ("other_league", "cow_arena", "league_other"),
+        ):
+            server.session_open(
+                {
+                    "op_id": str(uuid4()),
+                    "session_id": sid,
+                    "client": {"id": "web", "kind": "test"},
+                    "session_context": {
+                        "contract_version": 1,
+                        "coworld": coworld,
+                        "league": league,
+                    },
+                }
+            )
+            server.message(
+                {
+                    "op_id": str(uuid4()),
+                    "session_id": sid,
+                    "message": {"role": "user", "content": f"private {sid}"},
+                    "context": {"contract_version": 1, "coworld": coworld, "league": league},
+                }
+            )
+        # The runtime returns only the requested game's chats, even with mixed retained state.
+        listed = server.snapshot("workspace", "cow_arena", league="league_arena")
+        assert [row["id"] for row in listed["records"]["sessions"]] == ["arena"]
+        assert listed["records"]["admissions"] == []
+        assert server.snapshot("workspace", league="league_arena")["records"]["sessions"] == []
+        selected = server.snapshot(
+            "workspace", "cow_arena", session_id="arena", league="league_arena"
+        )
+        assert [row["id"] for row in selected["records"]["sessions"]] == ["arena"]
+        assert [row["session_id"] for row in selected["records"]["admissions"]] == ["arena"]
+        for coworld, league in (
+            ("cow_diplomacy", "league_diplomacy"),
+            ("cow_arena", "league_other"),
+            (None, None),
+        ):
+            with pytest.raises(Refused) as refused:
+                server.snapshot("workspace", coworld, session_id="arena", league=league)
+            assert refused.value.status == 409
+            assert refused.value.body["kind"] == "scope_mismatch"
+    finally:
+        server._http.server_close()

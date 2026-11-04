@@ -5,7 +5,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from uuid import uuid4
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
 from dotenv import dotenv_values
@@ -52,11 +52,12 @@ async def main():
                 }
                 operation = Operation(
                     id=uuid4(),
-                    op_id=uuid4(),
+                    op_id=uuid5(NAMESPACE_URL, f"packaged-session-scope:{game}"),
                     name="session.open",
                     args={
                         "client": {"id": "scope-proof", "kind": "test"},
-                        "session_context": context,
+                        "coworld": game,
+                        "league": context["league"],
                     },
                 )
                 async with response(operation, seam, gateway, Availability()) as reply:
@@ -191,6 +192,31 @@ async def main():
                         ), titles
                     finally:
                         ctx.wstore.close()
+            for game, session_id, _ in bound:
+                listing = Operation(
+                    id=uuid4(),
+                    op_id=uuid4(),
+                    name="workspace.snapshot",
+                    args={"store": "workspace", "coworld": game, "league": "league_" + game},
+                )
+                async with response(listing, seam, gateway, Availability()) as reply:
+                    assert reply.status_code == 200, await reply.aread()
+                    assert [row["id"] for row in reply.json()["records"]["sessions"]] == [
+                        session_id
+                    ]
+            foreign_read = Operation(
+                id=uuid4(),
+                op_id=uuid4(),
+                name="session.messages",
+                args={
+                    "session_id": bound[1][1],
+                    "coworld": bound[0][0],
+                    "league": "league_" + bound[0][0],
+                },
+            )
+            async with response(foreign_read, seam, gateway, Availability()) as reply:
+                assert reply.status_code == 409, await reply.aread()
+                assert reply.json()["kind"] == "scope_mismatch"
             mismatch = await seam.post(
                 "/message",
                 json={

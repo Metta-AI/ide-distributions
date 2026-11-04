@@ -849,7 +849,7 @@ def snapshot(store: Store, coworld_id: str | None = None) -> dict[str, Any]:
         conversations = [
             row[0] for row in store.q("SELECT conversation FROM ui_state ORDER BY conversation")
         ]
-        result: dict[str, Any] = {"store": store.kind, "session_scope_version": 1}
+        result: dict[str, Any] = {"store": store.kind}
         if store.kind == "coworld":
             result["coworld_id"] = coworld_id
         result["seq"] = store.last_seq()

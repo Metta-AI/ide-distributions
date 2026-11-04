@@ -35,6 +35,9 @@ A workspace-only assistant declares `scope: "workspace"` with null Coworld and l
 The reply's `session_scope` is the canonical binding. Conflicting messages return HTTP 409
 with `kind: "scope_mismatch"` and create no admission. Existing sessions are never reassigned.
 
-`workspace.snapshot` guarantees `session_scope_version: 1`; clients require it before sending game work.
+`workspace.snapshot` accepts Coworld and league IDs to return only that game's root chat sessions.
+With `session_id`, it returns only that session and its admissions. Expected scope mismatches
+return `scope_mismatch`. `session.messages` validates the same selection before reading Hermes.
+Clients pass IDs; runtime owns filtering and validation. Deploy this runtime before the frontend.
 Coworld snapshots and store streams require an explicit `coworld` selector. Retained images without the
 sentinel must upgrade before a client may send a game request. No platform-owned active-game table is involved.

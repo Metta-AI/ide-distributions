@@ -882,17 +882,56 @@ class SeamServer:
             with Store.open(self.ws.coworld(coworld_id).store_path, kind="coworld") as store:
                 return receipt(store, command_id)
 
-    def snapshot(self, kind: str, coworld_id: str | None = None) -> dict:
-        started = time.monotonic()
-        log.info("Snapshot started: store=%s", kind)
+    def snapshot(
+        self,
+        kind: str,
+        coworld_id: str | None = None,
+        *,
+        session_id: str | None = None,
+        league: str | None = None,
+    ) -> dict:
         if kind == "coworld" and coworld_id is None:
             raise Refused(HTTPStatus.BAD_REQUEST, "coworld is required for a Coworld snapshot")
         with self.stores(coworld_id) as stores:
+            if kind == "workspace" and (session_id or coworld_id or league):
+                with stores.wstore.read_tx():
+                    if session_id:
+                        session = self._require_session(stores, session_id)
+                        if (
+                            session["coworld_id"],
+                            (session["session_context"] or {}).get("league"),
+                        ) != (coworld_id, league):
+                            raise Refused(
+                                HTTPStatus.CONFLICT,
+                                "this session belongs to a different Coworld or league",
+                                kind="scope_mismatch",
+                            )
+                        selected = [session]
+                    else:
+                        selected = [
+                            sessions.read(stores.wstore, row["id"])
+                            for row in stores.wstore.q(
+                                "SELECT id FROM sessions WHERE kind='chat' AND parent IS NULL"
+                                " AND coworld_id IS ?"
+                                " AND json_extract(session_context, '$.league') IS ?"
+                                " ORDER BY rowid",
+                                (coworld_id, league),
+                            )
+                        ]
+                    return {
+                        "store": "workspace",
+                        "seq": stores.wstore.last_seq(),
+                        "records": {
+                            "sessions": selected,
+                            "admissions": admissions.snapshot(stores.wstore, session_id)
+                            if session_id
+                            else [],
+                        },
+                        "ui_state": [],
+                    }
             if coworld_id is not None:
                 coworlds.read(stores.wstore, coworld_id)
-            result = store_cli.snapshot(self.store_for(stores, kind), stores.coworld_id)
-        log.info("Snapshot completed: store=%s seconds=%.3f", kind, time.monotonic() - started)
-        return result
+            return store_cli.snapshot(self.store_for(stores, kind), stores.coworld_id)
 
     def run_status(self, run_id: str) -> dict:
         return dataclasses.asdict(self.hermes.status(run_id, profile=self.profile))
@@ -1135,7 +1174,12 @@ class _Handler(BaseHTTPRequestHandler):
             elif url.path == "/snapshot":
                 self._json(
                     HTTPStatus.OK,
-                    seam.snapshot(query.get("store", "workspace"), query.get("coworld")),
+                    seam.snapshot(
+                        query.get("store", "workspace"),
+                        query.get("coworld"),
+                        session_id=query.get("session_id"),
+                        league=query.get("league"),
+                    ),
                 )
             elif url.path == "/session-pending":
                 self._json(HTTPStatus.OK, seam.session_pending(query["session_id"]))
