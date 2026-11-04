@@ -447,6 +447,7 @@ class FakeRun:
     output: str | None = None
     error: str | None = None
     idempotency_key: str | None = None
+    turn_exit_reason: str | None = None
 
     def to_status(self) -> RunStatus:
         raw = {
@@ -459,6 +460,8 @@ class FakeRun:
             raw["output"] = self.output
         if self.error is not None:
             raw["error"] = self.error
+        if self.turn_exit_reason is not None:
+            raw["turn_exit_reason"] = self.turn_exit_reason
         return RunStatus.from_payload(raw)
 
 
@@ -512,9 +515,10 @@ class FakeHermesRuns(HermesRuns):
             {"role": "assistant", "content": output}
         )
 
-    def fail(self, run_id: str, error: str) -> None:
+    def fail(self, run_id: str, error: str, *, turn_exit_reason: str | None = None) -> None:
+        """The run failed; ``turn_exit_reason`` rides on its status as Hermes's does."""
         run = self.runs[run_id]
-        run.status, run.error = "failed", error
+        run.status, run.error, run.turn_exit_reason = "failed", error, turn_exit_reason
 
     def crash(self, run_id: str) -> None:
         """The gateway died under the run: Hermes reports such runs as ``interrupted``."""

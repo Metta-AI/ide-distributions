@@ -2,7 +2,9 @@
 
 Hermes calls the hook after it classifies each failed model call, with the class as ``reason``
 (a ``FailoverReason`` value from ``agent/error_classifier.py``: ``billing``, ``rate_limit``,
-``overloaded``, ``server_error``, ``timeout``, ...), plus ``session_id`` and ``status_code``.
+``overloaded``, ``server_error``, ``timeout``, ...), plus ``session_id``, ``task_id`` and
+``status_code``. ``session_id`` is the agent's live id, which compression rotates; ``task_id``
+is the session id the run started with, so it is what ties an error to a run.
 The hook always records the call as ``last_error``, then:
 
 * on ``billing`` (402 credits, or a 403 "Key limit exceeded") it blocks model work as
@@ -52,6 +54,7 @@ def record_api_error(
     reason: str,
     status_code: int | None,
     message: str = "",
+    task_id: str | None = None,
     now: datetime | None = None,
 ) -> inference.InferenceState:
     """Record one failed model call in the inference state and set the block it implies."""
@@ -68,6 +71,7 @@ def record_api_error(
                 reason="billing" if billing else reason,
                 status_code=status_code,
                 at=now,
+                task_id=task_id,
             ),
         )
         if billing:
@@ -101,6 +105,7 @@ def make_api_request_error() -> Callable[..., None]:
         reason: str | None = None,
         status_code: int | None = None,
         error: Any = None,
+        task_id: str | None = None,
         **_: Any,
     ) -> None:
         try:
@@ -114,6 +119,7 @@ def make_api_request_error() -> Callable[..., None]:
                 reason=reason or "unknown",
                 status_code=status_code if isinstance(status_code, int) else None,
                 message=message,
+                task_id=task_id or None,
             )
         except Exception as failure:  # never take a model call down
             log.debug("inference-state hook failed: %s", failure)

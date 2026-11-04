@@ -38,7 +38,8 @@ when you call the script). With `IDE_WORKSPACE` unset the workspace defaults to
 2. creates or migrates the workspace store and every registered Coworld store;
 3. re-applies the config keys the machinery relies on (`approvals.mode: off`, no deny list,
    memory off, `tools.tool_search.enabled: off`, the plugin and toolset, `cron.catch_up_missed`,
-   the Orchestrator's compaction settings), removes retired keys, points every profile at the
+   the Orchestrator's compaction settings, the tool-result prune trigger, the disabled Hermes
+   toolsets), removes retired keys, points every profile at the
    active Coworld (`skills.external_dirs`, `skills.trusted_project_dirs`, `terminal.cwd`), and
    applies shipped values only where the owner kept an earlier default; it never changes the
    model, but adds the OpenRouter host pins for the Kimi models (`provider_routing.models`,
@@ -69,7 +70,7 @@ minutes and should happen at image build (then set `IDE_WORKSPACE_ENV`).
 | `COGAMES_API_URL` | hosting | Softmax API server. |
 | `API_SERVER_KEY`, `API_SERVER_HOST`, `API_SERVER_PORT` | hosting | The Hermes API server. The watcher reads them from the Orchestrator profile's `.env` (Hermes strips the key from cron environments). **Every profile must carry the same `API_SERVER_KEY`**: Hermes authenticates `/p/<profile>/v1/runs` with that profile's key. |
 | `OPENROUTER_API_KEY` | the image (`image/inference.py`) | The OpenRouter key both profiles use. The image leases a spend-capped key from the platform (`PUT /v2/workspaces/{id}/inference`) and writes it into each profile's `.env`; outside the image, whoever runs the profiles supplies it. The model itself is not the host's concern: each profile's `config.yaml` names it, and the user changes it through `research serve` (`contract/CONTRACT.md`, "Profile models"). |
-| `IDE_INFERENCE_LEASE_FILE` | the image (`image/runtime.py`) | The lease file: the installed key's expiry, fingerprint and when it changed. Beside it, `.inference-state` records why model work is blocked and until when (`budget_exhausted` until the lease file names a new key after the daily refill, or `provider_unavailable` for a few minutes after repeated outages), plus the last failed model call. Every run start (chat, wakes, Researchers) waits while the lease is missing or the state blocks; see `core/src/research_core/inference.py`. Unset outside the image: always available. |
+| `IDE_INFERENCE_LEASE_FILE` | the image (`image/runtime.py`) | The lease file: the installed key's expiry, fingerprint and when it changed. Beside it, `.inference-state` records why model work is blocked and until when (`budget_exhausted` until the lease file names a new key after the daily refill, or `provider_unavailable` for a few minutes after repeated outages), plus the last failed model call. Every run start (chat, wakes, Researchers) waits while the lease is missing or the state blocks; see `core/src/research_core/inference.py`. A chat message whose run fails mid-way on the budget, a rate limit or a provider outage waits (admission status `waiting`) and resumes with a continuation prompt when the gate opens (`core/src/research_core/run_failures.py`, `contract/CONTRACT.md` "Message admissions"). Unset outside the image: always available. |
 | `IDE_PLATFORM`, `IDE_FAKE_FAULTS` | tests only | `fake` selects the platform test double. |
 
 ## Gateway, sleep and drain
@@ -163,6 +164,11 @@ process). Nothing on the volume survives losing the volume, so backups are part 
   covers the files; the records refer to them by path).
 - Monitor the age of the latest restorable backup (the newest folder whose `restore-check`
   passed) and alert when it exceeds the loss window.
+
+Live transcript rows are not always what a model first received. Once a request reaches
+`compression.proactive_prune_tokens`, Hermes rewrites old large tool results to one-line summaries
+under the same row id, so `session.messages` returns the summary. The original stays in `state.db`
+as an archived row (`active = 0`, `compacted = 1`).
 
 A snapshot taken after `research workspace sleep` exited 0 needs nothing more. For a snapshot
 of a workspace that stays awake, run `research store quiesce --then <snapshot command>`, or

@@ -601,8 +601,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
       addMessage({role: "user", text, run_id: reply.run_id, delivered: reply.delivered, context});
       const problems = (reply.problems || []).length ? ` Problems: ${reply.problems.join("; ")}.` : "";
       setText("composer-status", `Delivered as <strong>${esc(reply.delivered)}</strong> to <span class="mono">${esc(reply.run_id)}</span> (workspace seq ${esc(reply.seq)}).${esc(problems)}`);
-      const admission = await awaitAdmission(reply.op_id);
-      trackRun(admission.run_id);
+      followAdmission(reply.op_id);
     } catch (error) {
       setText("composer-status", `<span class="err-text">Not sent: ${esc(error.message)}</span>`);
     } finally {
@@ -611,13 +610,39 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
     }
   }
 
-  async function awaitAdmission(opId) {
-    for (;;) {
-      const snapshot = await api("GET", "/snapshot?store=workspace");
-      const admission = snapshot.records.admissions.find(item => item.op_id === opId);
-      if (admission.run_id) return admission;
-      if (TERMINAL.has(admission.status)) throw new Error(admission.error || admission.status);
-      await sleep(RUN_POLL_MS);
+  // Follow a message until its admission ends: a resume gives it a new run_id, so every run it
+  // names is tracked, and a waiting admission shows why and until when (CONTRACT.md). Only the
+  // most recently sent message's follower writes the composer status, and only on a change.
+  let latestOpId = null;
+  const WAITING_POLL_MS = 15000;
+  async function followAdmission(opId) {
+    latestOpId = opId;
+    const show = html => { if (latestOpId === opId) setText("composer-status", html); };
+    let shown = null;
+    try {
+      for (;;) {
+        const snapshot = await api("GET", "/snapshot?store=workspace");
+        const admission = snapshot.records.admissions.find(item => item.op_id === opId);
+        if (admission.run_id) trackRun(admission.run_id);
+        if (admission.status !== shown) {
+          if (admission.status === "waiting") {
+            show(`Waiting (${esc(admission.error_class)}); resumes after ${esc(admission.resume_after)}.`);
+          } else if (TERMINAL.has(admission.status)) {
+            show(esc(admission.error || admission.status));
+          } else if (shown !== null) {
+            show(`Message ${esc(admission.status)}.`);  // e.g. queued again after a wait
+          }
+          shown = admission.status;
+        }
+        if (TERMINAL.has(admission.status)) return;
+        // A wait can last hours: look again at its resume time or in 15 s, whichever is sooner.
+        const delay = admission.status === "waiting"
+          ? Math.min(Math.max(Date.parse(admission.resume_after) - Date.now(), RUN_POLL_MS), WAITING_POLL_MS)
+          : RUN_POLL_MS;
+        await sleep(delay);
+      }
+    } catch (error) {
+      show(`<span class="err-text">Lost track of the message: ${esc(error.message)}</span>`);
     }
   }
 

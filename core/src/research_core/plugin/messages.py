@@ -19,12 +19,15 @@ def record_native_message(
     try:
         admission = store.one(
             "SELECT op_id FROM client_admissions WHERE session_id=? AND kind='message'"
-            " AND native_message_id IS NULL AND dispatch_started=1"
+            " AND native_message_id IS NULL AND dispatch_started=1 AND resumes=0"
             " AND status IN ('queued','running') ORDER BY rowid LIMIT 1",
             (session_id,),
         )
         if admission is None:
-            return  # Background turns have no client admission.
+            # Background turns have no client admission. A resume's user message is the
+            # continuation prompt, never the user's text: binding the context to it would show
+            # the continuation in the chat (contract "Message admissions").
+            return
         with store.tx(Actor.harness()) as tx:
             tx.execute(
                 "UPDATE client_admissions SET native_message_id=? WHERE op_id=?"

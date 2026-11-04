@@ -20,6 +20,15 @@ compression:
   protect_last_n: 30
   threshold: 0.6
   target_ratio: 0.3
+  # Old tool output otherwise stays in every request until compaction, near 629,000 tokens. From
+  # this request size, Hermes replaces results over 8,000 characters that are older than
+  # protect_last_n messages with a one-line summary.
+  proactive_prune_tokens: 64000
+# Hermes tools these agents never called, each sent on every model call. Hermes disables whole
+# toolsets: `browser` also takes browser_vault, browser_cdp and browser_dialog. prepare.py keeps
+# this key (PROTECTED_KEYS).
+agent:
+  disabled_toolsets: [browser, connections, cronjob]
 platform_toolsets:
   api_server: [hermes-api-server, ide-orchestrator]
   cron: []

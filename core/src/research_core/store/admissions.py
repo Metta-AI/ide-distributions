@@ -1,4 +1,14 @@
-"""Durable client receipts and queued chat inputs, owned by the workspace."""
+"""Durable client receipts and queued chat inputs, owned by the workspace.
+
+A message admission is ``queued`` until ``research serve``'s dispatcher starts its run, then
+``running``, and ends ``completed``, ``cancelled``, ``failed`` or ``interrupted``. A run that
+failed for a budget, rate-limit or provider reason leaves it ``waiting`` instead: it resumes on
+its own (``research_core.run_failures``). ``error_class`` names the reason for a ``waiting``
+or ``failed`` admission when it is known, and ``resume_after`` is the earliest time a
+``waiting`` one resumes. The table stores a waiting admission as ``queued`` with
+``resume_after`` set (no run, ``dispatch_started`` 0); :func:`snapshot` reports it as
+``waiting``, and ``resumes`` counts its resumes.
+"""
 
 import fcntl
 import json
@@ -9,6 +19,7 @@ from pathlib import Path
 from typing import Literal, get_args
 from uuid import NAMESPACE_URL, uuid5
 
+from research_core.run_failures import ErrorClass
 from research_core.store import settings
 from research_core.store.actors import Actor
 from research_core.store.db import Store, Tx
@@ -45,9 +56,13 @@ class Admission:
     session_id: str
     message: str
     input: dict
-    status: Literal["queued", "running", "completed", "cancelled", "failed", "interrupted"]
+    status: Literal[
+        "queued", "running", "waiting", "completed", "cancelled", "failed", "interrupted"
+    ]
     run_id: str | None
     error: str | None
+    error_class: ErrorClass | None
+    resume_after: str | None
     created_at: str
     client_id: str | None
 
@@ -68,7 +83,8 @@ def snapshot(store: Store) -> list[dict]:
             "SELECT op_id,session_id,message,"
             " CASE WHEN origin='answer' THEN json_object('role','user','content',message)"
             " ELSE json_extract(request, '$.message') END AS input,"
-            " status,run_id,error,created_at,"
+            " CASE WHEN status='queued' AND resume_after IS NOT NULL THEN 'waiting'"
+            " ELSE status END AS status,run_id,error,error_class,resume_after,created_at,"
             " json_extract(payload, '$.context.client.id') AS client_id"
             " FROM client_admissions WHERE kind = 'message'"
             " AND origin IN ('client','answer') ORDER BY rowid"
@@ -206,7 +222,10 @@ def work_status(store: Store, lease_file: Path | None = None) -> list[dict]:
             trigger = "private runtime namespace replaced; coordinator reconciles evidence"
         elif phase == "queued":
             responsible = owner
-            if row["retry_at"]:
+            if row["resume_after"]:
+                phase, reason = "waiting", row["error_class"]
+                trigger = f"coordinator resumes this message after {row['resume_after']}"
+            elif row["retry_at"]:
                 phase, reason = "waiting", "transient steering rejection"
                 trigger = f"coordinator retries this delivery at {row['retry_at']}"
             elif paused and not row["dispatch_started"]:

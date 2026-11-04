@@ -96,6 +96,14 @@ def test_prepare_orchestrator_end_to_end(hermes_bin, host):
         "ide-orchestrator"
     ]
     assert config_get(hermes_bin, host, "orchestrator", "compression.protect_first_n") == 6
+    assert (
+        config_get(hermes_bin, host, "orchestrator", "compression.proactive_prune_tokens") == 64000
+    )
+    assert config_get(hermes_bin, host, "orchestrator", "agent.disabled_toolsets") == [
+        "browser",
+        "connections",
+        "cronjob",
+    ]
     assert config_get(hermes_bin, host, "orchestrator", "skills.external_dirs") == [
         str(CORE_SRC / "research_core" / "skills" / "common"),
         str(CORE_SRC / "research_core" / "skills" / "orchestrator"),
@@ -130,6 +138,12 @@ def test_prepare_researcher_shares_the_environment(hermes_bin, host):
         "ide-researcher",
     ]
     assert config_get(hermes_bin, host, "researcher", "compression.protect_first_n") != 6
+    assert config_get(hermes_bin, host, "researcher", "compression.proactive_prune_tokens") == 64000
+    assert config_get(hermes_bin, host, "researcher", "agent.disabled_toolsets") == [
+        "browser",
+        "connections",
+        "cronjob",
+    ]
     assert not (host.profile("researcher") / "cron" / "jobs.json").exists()
     assert (host.profile("researcher") / "local" / "core-path.txt").is_file()
 
@@ -330,3 +344,119 @@ finally:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "PASS native file read before and after agent resume" in result.stdout
+
+
+def test_disabled_toolsets_remove_the_named_tools_and_keep_the_working_ones(hermes_bin, host):
+    """Hermes ignores an unknown toolset name, so a rename would silently restore its tools."""
+    prepare(hermes_bin, host, "researcher")
+    script = r"""
+import json, sys
+import model_tools
+from toolsets import resolve_toolset
+disabled = json.loads(sys.argv[1])
+removed = {tool for name in disabled for tool in resolve_toolset(name)}
+assert {"browser_exec", "manage_connections", "cronjob_manage"} <= removed, removed
+kept = {"terminal", "read_file", "write_file", "patch", "search_files", "skill_view",
+    "skill_manage", "skills_list", "execute_code", "delegate_task", "process_manage",
+    "session_search", "web_extract", "web_search", "todo_list", "vision_analyze"}
+assert not kept & removed, kept & removed
+names = {tool["function"]["name"] for tool in model_tools.get_tool_definitions(
+    enabled_toolsets=["hermes-api-server"], disabled_toolsets=disabled, quiet_mode=True)}
+assert not names & removed, names & removed
+print("PASS")
+"""
+    disabled = config_get(hermes_bin, host, "researcher", "agent.disabled_toolsets")
+    result = run(
+        [hermes_python(hermes_bin), "-c", script, json.dumps(disabled)], host.env("researcher")
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "PASS" in result.stdout
+
+
+def test_prepared_config_prunes_an_old_tool_result_during_one_turn(hermes_bin, host, tmp_path):
+    """A real agent on the prepared config, reporting 70,000 prompt tokens: an old large result
+    leaves later requests within the same turn, its row stays in place, and the original survives
+    in an archived row. A small result stays as it was."""
+    prepare(hermes_bin, host, "orchestrator")
+    large = tmp_path / "large.txt"
+    large.write_text("".join(f"large-file-line {line}\n" for line in range(3000)))
+    for index in range(22):
+        (tmp_path / f"small-{index}.txt").write_text(f"small-file-{index}\n")
+    script = r"""
+import json, sys, threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from hermes_state_registry import acquire, release
+from run_agent import AIAgent
+folder = sys.argv[1]
+requests = []
+paths = [f"{folder}/large.txt"] + [f"{folder}/small-{i}.txt" for i in range(22)]
+class Provider(BaseHTTPRequestHandler):
+    def do_POST(self):
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        # Hermes also sends tool-less requests of its own, such as for a Session title.
+        if request.get("tools"):
+            requests.append(request)
+        index = sum(m["role"] == "tool" for m in request.get("messages", []))
+        if request.get("tools") and index < len(paths):
+            message = {"role": "assistant", "content": None, "tool_calls": [{"id": f"read_{index}",
+                "type": "function", "function": {"name": "read_file",
+                "arguments": json.dumps({"path": paths[index]})}}]}
+            reason = "tool_calls"
+        else:
+            message, reason = {"role": "assistant", "content": "Finished"}, "stop"
+        reply = {"id": "prune-proof", "object": "chat.completion", "created": 1, "model": "proof",
+            "choices": [{"index": 0, "finish_reason": reason, "message": message}],
+            "usage": {"prompt_tokens": 70000, "completion_tokens": 2, "total_tokens": 70002}}
+        if request.get("stream"):
+            if "tool_calls" in message:
+                message["tool_calls"][0]["index"] = 0
+            reply["object"] = "chat.completion.chunk"
+            reply["choices"] = [{"index": 0, "finish_reason": reason, "delta": message}]
+            body = ("data: " + json.dumps(reply) + "\n\ndata: [DONE]\n\n").encode()
+        else:
+            body = json.dumps(reply).encode()
+        self.send_response(200)
+        self.send_header("Content-Type",
+            "text/event-stream" if request.get("stream") else "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self, *args):
+        pass
+server = ThreadingHTTPServer(("127.0.0.1", 0), Provider)
+threading.Thread(target=server.serve_forever, daemon=True).start()
+db = acquire()
+session = "prune-proof"
+try:
+    agent = AIAgent(model="proof", provider="custom", api_mode="chat_completions",
+        base_url=f"http://127.0.0.1:{server.server_port}/v1", api_key="fixture",
+        enabled_toolsets=["file"], quiet_mode=True, skip_context_files=True, skip_memory=True,
+        skip_background_review=True, session_id=session, session_db=db, max_iterations=30)
+    assert agent.context_compressor.proactive_prune_tokens == 64000
+    result = agent.run_conversation("Read the files.", conversation_history=[])
+    assert result["final_response"] == "Finished", result
+    def tool_texts(request):
+        return [m["content"] for m in request["messages"] if m["role"] == "tool"]
+    assert "large-file-line 1999" in tool_texts(requests[1])[0], requests[1]["messages"]
+    final = tool_texts(requests[-1])
+    assert "large-file-line 1999" not in final[0] and len(final[0]) < 500, final[0]
+    assert "small-file-0" in final[1], final[1]
+    live = [m for m in db.get_messages(session) if m["role"] == "tool"]
+    assert "large-file-line 1999" not in live[0]["content"], live[0]
+    archived = db._conn.execute(
+        "SELECT content FROM messages WHERE session_id = ? AND role = 'tool' AND active = 0",
+        (session,)).fetchall()
+    assert any("large-file-line 1999" in row[0] for row in archived), archived
+    print("PASS")
+finally:
+    server.shutdown()
+    server.server_close()
+    release(db)
+"""
+    result = run(
+        [hermes_python(hermes_bin), "-c", script, str(tmp_path)],
+        host.env("orchestrator"),
+        timeout=300,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "PASS" in result.stdout

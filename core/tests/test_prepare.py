@@ -133,12 +133,17 @@ def test_protected_keys_for_role_substitutes_the_role():
     assert orchestrator["memory.memory_enabled"] is False
     assert orchestrator["tools.tool_search.enabled"] == "off"
     assert orchestrator["cron.catch_up_missed"] is True
+    for keys in (orchestrator, researcher):
+        assert keys["agent.disabled_toolsets"] == ["browser", "connections", "cronjob"]
+        assert keys["compression.proactive_prune_tokens"] == 64000
     # Compression protection is Orchestrator only (design F.5).
     assert orchestrator["compression.protect_first_n"] == 6
     assert orchestrator["compression.protect_last_n"] == 30
     assert orchestrator["compression.threshold"] == 0.6
     assert orchestrator["compression.target_ratio"] == 0.3
-    assert not any(key.startswith("compression.") for key in researcher)
+    assert {key for key in researcher if key.startswith("compression.")} == {
+        "compression.proactive_prune_tokens"
+    }
     assert "<role>" not in json.dumps(orchestrator) + json.dumps(researcher)
 
 
