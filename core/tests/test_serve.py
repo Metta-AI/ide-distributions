@@ -1223,7 +1223,9 @@ with ownership(ws):
     assert "dispatcher error propagated; owner released" in result.stdout
 
 
-def test_pending_edit_has_accepted_http_status_and_readable_terminal_receipt(tmp_path, monkeypatch):
+def test_pending_edit_has_accepted_http_status_and_readable_terminal_receipt(
+    tmp_path, monkeypatch, capsys
+):
     from research_core import transitions
 
     ctx = make_ctx(tmp_path)
@@ -1251,6 +1253,25 @@ def test_pending_edit_has_accepted_http_status_and_readable_terminal_receipt(tmp
             assert response.status == 202
             pending = json.load(response)
         assert pending["status"] == "pending" and "ok" not in pending and "record" not in pending
+        with ctx.store.tx(HARNESS) as tx:
+            tx.execute(
+                "UPDATE transition_commands SET last_error=?,retry_at=? WHERE id=?",
+                (
+                    "RuntimeError: coordinator fault",
+                    "2000-01-01T00:00:00Z",
+                    pending["command"]["command_id"],
+                ),
+            )
+        from research_core.watcher import cli as watcher_cli
+
+        monkeypatch.setenv("IDE_WORKSPACE", str(ctx.workspace.root))
+        assert watcher_cli.run_status(None) == 0
+        printed = json.loads(capsys.readouterr().out)
+        status = ScriptedClient(server.url)._get("/status")
+        assert printed["pending_transitions"] == status["pending_transitions"]
+        [waiting] = status["pending_transitions"]
+        assert waiting["last_error"] == "RuntimeError: coordinator fault"
+        assert waiting["retry_at"] == "2000-01-01T00:00:00Z"
         apply_commands()
         url = (
             f"{server.url}/command?coworld_id={COWORLD_ID}"
