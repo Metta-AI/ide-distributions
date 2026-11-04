@@ -33,7 +33,7 @@ hosted bridge:
 | `POST /session-open` `{client: {id, kind, guide?}, session_context?, capabilities?, actor?}` | 1 | Registers a chat Session; returns `{session_id, client, coworld, contract_version}`. |
 | `POST /message` `{session_id, message, context?, actor?}` | 1 | Validates and stamps the block; steers the live run or starts one; returns `{run_id, delivered: start\|steer, problems, seq}`. |
 | `POST /ui-action` `{session_id, action, payload, actor?}` | 3 | `answer {ask_id, value}` patches the ask and goes into the run; `reaction {message_id, value}` writes UI state and starts no run. |
-| `POST /store/apply` `{actor, op, args, store?}` | 3 | One op of the `store apply` allow-list as `user:<id>`; returns `{record, seq}`. |
+| `POST /store/apply` `{actor, op, args, store?}` | 3 | One op of the `store apply` allow-list as `user:<id>`; returns `{record, seq}`. A `directive_id` is `W-<n>` (workspace) or `D-<n>` (Goal); a bare number or a contradicting `store` is refused. |
 | `GET /snapshot?store=workspace\|coworld` | 2 | The store's records, settings, UI state documents and `seq`. |
 | `GET /stream?store=…&after=<seq>` | 2 | SSE of the store's events after `seq`. |
 | `GET /runs/<run_id>` | 1 | The run's status from the Hermes runs API. |

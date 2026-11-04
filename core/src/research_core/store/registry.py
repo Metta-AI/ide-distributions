@@ -526,22 +526,39 @@ EXPERIMENT = _spec(
     },
 )
 
-DIRECTIVE = _spec(
-    "directive",
-    "directives",
-    "A standing user instruction, on the workspace or on a Goal.",
-    [
-        _f("id", "id", "The directive's id, shown as D-<n>."),
+
+def _directive_fields(shown_as: str, scope: str) -> list[FieldSpec]:
+    return [
+        _f("id", "id", f"The directive's id, shown as {shown_as}."),
         _f("text", "text", "The user's instruction, word for word.", required=True),
-        _f("scope", "text", "workspace, or goal:<n>.", required=True),
+        _f("scope", "text", scope, required=True),
         _f("source", "text", "The message reference the instruction came from.", required=True),
         _f("status", "enum", "active or retired.", enum=("active", "retired")),
         _created,
         _created_by,
         _f("retired", "timestamp", "When it was retired."),
-    ],
+    ]
+
+
+# Each store numbers its own ``directives`` table, so the two kinds have separate prefixes: an id
+# names one directive and says which store holds it.
+DIRECTIVE = _spec(
+    "directive",
+    "directives",
+    "A standing instruction on a Goal.",
+    _directive_fields("D-<n>", "goal:<n>."),
     statuses=("active", "retired"),
     transitions={"active": ("retired",)},
+)
+
+WORKSPACE_DIRECTIVE = _spec(
+    "workspace_directive",
+    "directives",
+    "A standing instruction on the workspace.",
+    _directive_fields("W-<n>", "workspace."),
+    statuses=("active", "retired"),
+    transitions={"active": ("retired",)},
+    store="workspace",
 )
 
 CHAMPION = _spec(
@@ -697,6 +714,7 @@ RECORDS: dict[str, RecordSpec] = {
         CLAIM,
         EXPERIMENT,
         DIRECTIVE,
+        WORKSPACE_DIRECTIVE,
         CHAMPION,
         CAPABILITY,
         INTENT,

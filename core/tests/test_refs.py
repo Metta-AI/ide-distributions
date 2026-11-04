@@ -9,6 +9,7 @@ CASES = [
     ("C-120", "record", "C-120", "claim", 120, None),
     ("V-7", "record", "V-7", "version", 7, None),
     ("D-2", "record", "D-2", "directive", 2, None),
+    ("W-2", "record", "W-2", "workspace_directive", 2, None),
     ("I-9", "record", "I-9", "intent", 9, None),
     ("ply_f39295d0-ac38-4a62-ac4f-e1d62d7dc9d1", "player", None, None, None, None),
     ("league_3c60897b-25cf-4b37-9d1a-8554c1198f28", "league", None, None, None, None),
