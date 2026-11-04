@@ -52,6 +52,7 @@ WRITERS: dict[str, tuple[tuple[str, str], ...]] = {
     "claim": (("claim.write", "claim"),),
     "experiment": (("experiment.create", "experiment"), ("xp", "xp")),
     "directive": (("directive.add", "directive"),),
+    "workspace_directive": (("directive.add", "directive"),),
     "champion": (("submit", "submit"),),
     "capability": (("workspace.capabilities", "workspace.capabilities"),),
     "intent": (
@@ -174,7 +175,8 @@ def render_records(role: Role) -> str:
 
 def _record_paragraph(spec: RecordSpec, role: Role) -> str:
     key = f"{spec.prefix}-n" if spec.prefix else KEYED[spec.name]
-    sentences = [f"**{spec.name.capitalize()}** ({key}). {spec.description}"]
+    title = spec.name.replace("_", " ").capitalize()
+    sentences = [f"**{title}** ({key}). {spec.description}"]
     status = spec.status_field
     if status is not None and spec.statuses:
         label = "States" if status.name == "state" else "Statuses"

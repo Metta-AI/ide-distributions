@@ -8,7 +8,7 @@ from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolErro
 
 ORCHESTRATOR = frozenset({"orchestrator"})
 BOTH = frozenset({"orchestrator", "researcher"})
-DIRECTIVE = a.string("The directive, such as D-2.")
+DIRECTIVE = a.string("The directive: W-2 on the workspace, or D-2 on a Goal.")
 TEXT = a.string("The instruction, in the user's words.")
 SCOPE = a.string(
     "'workspace' or a Goal such as G-3; add defaults to workspace, list without it shows all."
@@ -27,18 +27,6 @@ def normalise_scope(ctx: ToolContext, scope: str | None) -> str:
 
 def store_for(ctx: ToolContext, scope: str):
     return ctx.wstore if scope == "workspace" else ctx.store
-
-
-def find(ctx: ToolContext, directive_id: int) -> tuple[dict, object]:
-    """A directive by id, looking in the workspace store first, then the active Coworld's."""
-    for store in (ctx.wstore, ctx.coworld_or_none() and ctx.store):
-        if store is None:
-            continue
-        try:
-            return directives.read(store, directive_id), store
-        except Exception:
-            continue
-    raise ToolError(f"D-{directive_id} does not exist in the workspace or the active Coworld")
 
 
 def handle(call: ToolCall) -> dict:
@@ -66,8 +54,8 @@ def handle(call: ToolCall) -> dict:
                 ctx.store, scope=goal_scope, status=call.get("status") or "active"
             )
         return {"records": records}
-    directive_id = a.record_number(call.get("directive"), "directive", "directive")
-    _, store = find(ctx, directive_id)
+    home, directive_id = directives.parse_reference(call.get("directive"))
+    store = ctx.wstore if home == "workspace" else ctx.store
     if call.action == "update":
         new_scope = normalise_scope(ctx, call.get("scope")) if call.get("scope") else None
         record = directives.update(

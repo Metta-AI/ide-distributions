@@ -99,7 +99,9 @@ A standing instruction becomes a directive (`directive.add`) so it survives summ
 
 **Experiment** (X-n). A comparison of Versions whose hypothesis and methods lock at start and end in a verdict. Statuses: proposed, running, confirmed, refuted, inconclusive, abandoned. Written by `experiment` and `xp`.
 
-**Directive** (D-n). A standing user instruction, on the workspace or on a Goal. Statuses: active, retired. Written by `directive`.
+**Directive** (D-n). A standing instruction on a Goal. Statuses: active, retired. Written by `directive`.
+
+**Workspace directive** (W-n). A standing instruction on the workspace. Statuses: active, retired. Written by `directive`.
 
 **Champion** (one per League). The policy version that represents the Player in a league (never the league's winner). States: pending, processing, placed, rejected, champion, none. Written by `submit` and the watcher's champion sync.
 

@@ -130,6 +130,7 @@ def test_prefixes_are_unique_and_match_the_locked_identifiers():
         "C": "claim",
         "X": "experiment",
         "D": "directive",
+        "W": "workspace_directive",
         "I": "intent",
         "N": "notice",
     }

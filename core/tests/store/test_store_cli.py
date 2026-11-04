@@ -265,40 +265,44 @@ def test_apply_directives_add_routes_by_scope_and_update_retire_by_home(workspac
         capsys, "directives.add", {"text": "No Fridays", "scope": "workspace", "source": "m1"}
     )
     assert code == 0, out
-    assert out["store"] == "workspace" and out["record"]["id"] == "D-1"
+    assert out["store"] == "workspace" and out["record"]["id"] == "W-1"
     code, out = apply(
         capsys, "directives.add", {"text": "Prefer small diffs", "scope": "goal:1", "source": "m2"}
     )
     assert code == 0, out
     assert out["store"] == "coworld" and out["record"]["id"] == "D-1"
 
-    # D-1 exists in both stores: the op cannot tell where the edit belongs without --store.
-    code, out = apply(capsys, "directives.update", {"directive_id": "D-1", "text": "Never Fridays"})
-    assert code == 1
-    assert "D-1 exists in both" in out["problems"][0] and "--store" in out["problems"][0]
-    code, out = apply(
-        capsys,
-        "directives.update",
-        {"directive_id": "D-1", "text": "Never Fridays"},
-        "--store",
-        "workspace",
-    )
+    # The id alone says which directive is meant, so no --store is needed.
+    code, out = apply(capsys, "directives.update", {"directive_id": "W-1", "text": "Never Fridays"})
     assert code == 0, out
+    assert out["store"] == "workspace"
     assert directives.read(workspace.wstore, 1)["text"] == "Never Fridays"
     assert directives.read(workspace.store, 1)["text"] == "Prefer small diffs"
 
-    # Once the Goal directive is retired through the coworld store, D-1 has one home again.
-    code, out = apply(capsys, "directives.retire", {"directive_id": 1}, "--store", "coworld")
+    code, out = apply(capsys, "directives.retire", {"directive_id": "D-1"})
     assert code == 0, out
-    assert out["record"]["status"] == "retired"
-    code, out = apply(capsys, "directives.update", {"directive_id": 1, "text": "No Fridays"})
-    assert code == 0, out
-    assert out["store"] == "workspace"
+    assert out["store"] == "coworld" and out["record"]["status"] == "retired"
+    assert directives.read(workspace.wstore, 1)["status"] == "active"
 
-    code, out = apply(capsys, "directives.retire", {"directive_id": 9})
+    code, out = apply(capsys, "directives.retire", {"directive_id": "D-9"})
     assert code == 1 and out["problems"] == ["D-9 does not exist"]
-    code, out = apply(capsys, "directives.retire", {})
-    assert code == 1 and "directive_id is required" in out["problems"][0]
+    code, out = apply(capsys, "directives.retire", {"directive_id": "W-9"})
+    assert code == 1 and out["problems"] == ["W-9 does not exist"]
+    for bad in ({}, {"directive_id": 1}, {"directive_id": "G-1"}):
+        code, out = apply(capsys, "directives.retire", bad)
+        assert code == 1 and "W-<n>" in out["problems"][0], out
+
+
+def test_apply_refuses_a_store_that_contradicts_the_directive_id(workspace, capsys):
+    make_goal(workspace.store)
+    apply(capsys, "directives.add", {"text": "No Fridays", "scope": "workspace", "source": "m1"})
+    apply(capsys, "directives.add", {"text": "Small diffs", "scope": "goal:1", "source": "m2"})
+
+    code, out = apply(capsys, "directives.retire", {"directive_id": "W-1"}, "--store", "coworld")
+
+    assert code == 1 and "W-1" in out["error"] and "workspace" in out["error"]
+    assert directives.read(workspace.store, 1)["status"] == "active"
+    assert directives.read(workspace.wstore, 1)["status"] == "active"
 
 
 def test_apply_coworld_switch_delegates_to_the_coworld_command(workspace, capsys, monkeypatch):
@@ -352,6 +356,13 @@ def test_apply_coworld_switch_failure_carries_the_output(workspace, capsys, monk
     assert code == 1 and out["problems"] == ["coworld is required: the Coworld id to switch to"]
     code, out = apply(capsys, "workspace.coworld_switch", {"coworld": "cow-y", "source": "x"})
     assert code == 1 and "unknown arguments: source" in out["problems"]
+
+
+def test_a_contradicting_store_is_refused_before_it_is_opened(tmp_path, monkeypatch, capsys):
+    monkeypatch.setenv("IDE_WORKSPACE", str(tmp_path))
+    code, out = apply(capsys, "directives.retire", {"directive_id": "W-1"}, "--store", "coworld")
+    assert code == 1
+    assert "W-1 is in the workspace store" in out["error"]
 
 
 def test_apply_without_an_active_coworld_says_so(tmp_path, monkeypatch, capsys):
@@ -758,6 +769,20 @@ def test_a_stale_or_unreadable_quiesce_marker_is_ignored(workspace):
 
 
 # --- snapshot -------------------------------------------------------------------------------
+
+
+def test_snapshot_shows_each_directive_with_the_id_of_its_store(workspace, capsys):
+    make_goal(workspace.store)
+    directives.add(workspace.wstore, HARNESS, text="No Fridays", scope="workspace", source="m1")
+    directives.add(workspace.store, HARNESS, text="Small diffs", scope="goal:1", source="m2")
+
+    code, coworld = run(capsys, "snapshot")
+    assert code == 0, coworld
+    assert [d["id"] for d in coworld["records"]["directives"]] == ["D-1"]
+
+    code, workspace_snapshot = run(capsys, "snapshot", "--store", "workspace")
+    assert code == 0, workspace_snapshot
+    assert [d["id"] for d in workspace_snapshot["records"]["directives"]] == ["W-1"]
 
 
 def test_snapshot_has_records_settings_ui_state_and_seq(workspace, capsys):

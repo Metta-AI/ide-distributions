@@ -77,8 +77,9 @@ ALLOWED: frozenset[str] = frozenset(
 LIBRARY_MODULES = {"goals": goals, "tasks": tasks, "settings": settings, "directives": directives}
 STORE_KINDS = ("workspace", "coworld")
 # Which record kind each id argument names, so ``G-3`` becomes 3 for ``goal_id`` and a Task id
-# given as ``goal_id`` is refused instead of silently reading the wrong table.
-ID_ARGUMENTS = {"goal_id": "goal", "task_id": "task", "directive_id": "directive"}
+# given as ``goal_id`` is refused instead of silently reading the wrong table. ``directive_id``
+# stays in display form until ``_call``, because its prefix names the store.
+ID_ARGUMENTS = {"goal_id": "goal", "task_id": "task"}
 NO_ACTIVE_COWORLD = (
     "no active Coworld; pass --store workspace, or switch to a Coworld first"
     " (workspace.coworld_switch)"
@@ -158,7 +159,7 @@ def run_apply(args: argparse.Namespace) -> int:
             )
         op_args = parse_op_args(args.args)
         with Stores.open() as stores:
-            kind = args.store or store_kind_for(op, op_args, stores)
+            kind = args.store or store_kind_for(op, op_args)
             record = _call(op, kind, stores, actor, op_args)
             seq = stores.by_kind(kind).last_seq()
     except Refusal as error:
@@ -226,9 +227,9 @@ def _record_number(value: str, name: str, kind: str, problems: list[str]) -> Any
     return number
 
 
-def store_kind_for(op: str, op_args: dict[str, Any], stores: Stores) -> str:
+def store_kind_for(op: str, op_args: dict[str, Any]) -> str:
     """Which store the op writes: settings by the key's scope, directives by their scope or
-    home, Goals and Tasks in the active Coworld, the ``workspace.*`` ops in the workspace."""
+    id, Goals and Tasks in the active Coworld, the ``workspace.*`` ops in the workspace."""
     module = op.split(".", 1)[0]
     if module in ("goals", "tasks"):
         return "coworld"
@@ -241,35 +242,16 @@ def store_kind_for(op: str, op_args: dict[str, Any], stores: Stores) -> str:
         return settings.spec(key).scope
     if op == "directives.add":
         return "workspace" if op_args.get("scope") == directives.WORKSPACE_SCOPE else "coworld"
-    return _directive_home(stores, op_args.get("directive_id"))
+    return directives.parse_reference(op_args.get("directive_id"))[0]
 
 
-def _directive_home(stores: Stores, directive_id: Any) -> str:
-    """The store holding an active ``D-<n>`` (else any holding it, so the library's own
-    "retired" refusal shows). Both stores number directives independently, so when both have
-    an active one the caller must say which with ``--store``."""
-    if not isinstance(directive_id, int) or isinstance(directive_id, bool):
-        raise StoreError(["directive_id is required: an integer or D-<n>"])
-    kinds = ["workspace", "coworld"] if stores.coworld_id else ["workspace"]
-    statuses = {
-        kind: stores.by_kind(kind).one(
-            "SELECT status FROM directives WHERE id = ?", (directive_id,)
-        )
-        for kind in kinds
-    }
-    homes = [kind for kind, row in statuses.items() if row and row["status"] == "active"]
-    if not homes:
-        homes = [kind for kind, row in statuses.items() if row]
-    if len(homes) > 1:
-        raise StoreError(
-            [
-                f"D-{directive_id} exists in both the workspace and the Coworld store;"
-                " pass --store workspace or --store coworld"
-            ]
-        )
-    if not homes:
-        raise StoreError([f"D-{directive_id} does not exist"])
-    return homes[0]
+def _with_directive_number(op_args: dict[str, Any], kind: str) -> dict[str, Any]:
+    """Replace ``directive_id`` with its number, refusing a store that contradicts its prefix."""
+    reference = op_args["directive_id"]
+    home, number = directives.parse_reference(reference)
+    if home != kind:
+        raise Refusal(f"{reference} is in the {home} store, not the {kind} store")
+    return {**op_args, "directive_id": number}
 
 
 def _call(
@@ -281,6 +263,8 @@ def _call(
     *,
     coordinator_instance: str | None = None,
 ) -> Any:
+    if "directive_id" in op_args:
+        op_args = _with_directive_number(op_args, kind)
     store = stores.by_kind(kind)
     if op.startswith("tasks.") and coordinator_instance is None:
         from uuid import uuid4
@@ -834,7 +818,8 @@ def snapshot(store: Store, coworld_id: str | None = None) -> dict[str, Any]:
         existing = set(_copyable_tables(store.conn, "main"))
         records: dict[str, Any] = {}
         for spec in RECORDS.values():
-            if spec.table in existing:
+            # Both directive kinds share a table name, so match the spec to this store too.
+            if spec.store == store.kind and spec.table in existing:
                 rows = store.q(f"SELECT * FROM {spec.table} ORDER BY rowid")
                 records[spec.table] = [_record(spec, row) for row in rows]
         records["settings"] = settings.all(store)
@@ -909,7 +894,8 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
         help="Run one allowed library function as a user or harness actor",
         description=(
             "Ops: " + ", ".join(sorted(ALLOWED)) + ". The arguments are a JSON object of the"
-            " function's keyword arguments; record ids may be given as G-3, T-42 or D-2."
+            " function's keyword arguments; record ids may be given as G-3 or T-42, and a"
+            " directive_id must be W-2 (workspace) or D-2 (Goal)."
         ),
     )
     apply_parser.add_argument("--actor", required=True, help="user:<id> or harness")
@@ -917,7 +903,7 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
         "--store",
         choices=STORE_KINDS,
         default=None,
-        help="Where the record lives, when the op cannot tell (a directive id in both stores)",
+        help="Which store the op writes; by default the op works it out",
     )
     apply_parser.add_argument("op", metavar="<op>")
     apply_parser.add_argument("args", metavar="<json-args>", nargs="?", default="{}")

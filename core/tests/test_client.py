@@ -116,9 +116,9 @@ def test_apply_passes_store_through(seam):
         "directives.add",
         {"text": "Prefer short experiments", "scope": "workspace", "source": "ui"},
     )
-    assert result["store"] == "workspace" and result["record"]["id"] == "D-1"
+    assert result["store"] == "workspace" and result["record"]["id"] == "W-1"
     retired = seam.client.apply(
-        "user:james", "directives.retire", {"directive_id": "D-1"}, store="workspace"
+        "user:james", "directives.retire", {"directive_id": "W-1"}, store="workspace"
     )
     assert retired["record"]["status"] == "retired"
     assert directives.read(seam.wstore, 1)["status"] == "retired"

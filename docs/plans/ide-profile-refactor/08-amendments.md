@@ -67,6 +67,12 @@ and task it changes. Implementers read this file with their entry.
   `failure {what_failed: "rejected by the user", next_step}`), `workspace.coworld_switch`
   (delegates to the workspace environment: `research coworld switch <id> --cites <ref>`), and
   defines `workspace.pause`/`resume` as `settings.update("paused", true|false, cites=<ui action>)`.
+- A2.11 **Directive ids name their store** (added 2026-11-04; replaces `D-<n>` for all directives
+  in design B.14): workspace directives are `W-<n>` and Goal directives stay `D-<n>`. Each store
+  numbers its own `directives` table, so one prefix let `D-1` mean two directives. The directive
+  tool and `store apply` require the prefixed form and refuse a bare number. Stored rows did not
+  change, so a workspace directive once called `D-1` is now `W-1`, and older events and chat text
+  that say `D-1` about it are out of date.
 
 ## Tools and plugin (entry 3)
 

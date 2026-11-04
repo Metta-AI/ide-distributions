@@ -666,6 +666,8 @@ def test_client_page_is_served_at_root_and_ui(seam):
         assert "<title>Orchestrator desk</title>" in page
         # The page opens a Session on load and reads the two routes added for it.
         assert "/session-open" in page and "/status" in page and "/stream?store=" in page
+        # Both directive id forms link to the Directives tab.
+        assert 'D: "directives", W: "directives"' in page and "[GTVCXDWN]" in page
 
 
 def test_status_reports_the_watcher_fields_from_the_workspace_store(seam, monkeypatch, capsys):
