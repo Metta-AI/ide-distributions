@@ -6,7 +6,7 @@ constraints=$(mktemp)
 trap 'rm -f "$constraints"' EXIT
 uv pip list --python "$native_python" --format json |
   "$native_python" -c 'import json,sys;print("\n".join(p["name"]+"=="+p["version"] for p in json.load(sys.stdin)))' > "$constraints"
-uv pip install --python "$native_python" --constraint "$constraints" \
+uv pip install --python "$native_python" --compile-bytecode --constraint "$constraints" \
   --requirement "$(dirname "$0")/native-requirements.txt"
 "$native_python" - <<'PY'
 from faster_whisper import WhisperModel

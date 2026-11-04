@@ -1,7 +1,7 @@
-name: Workspace packaging comparison
+name: Workspace startup comparison
 on:
   pull_request:
-    paths: ['image/Dockerfile', '.github/workflows/startup-benchmark.yml']
+    paths: ['image/Dockerfile', 'image/runtime.py', 'core/src/research_core/prepare.py', '.github/workflows/startup-benchmark.yml']
 permissions:
   contents: read
 jobs:
@@ -12,26 +12,32 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - name: Build both packaging variants from the same source and lockfile
+      - name: Build baseline and candidate from their own source and lockfile
         env:
           BASE_REF: ${{ github.event.pull_request.base.sha }}
         run: |
-          git show "$BASE_REF:image/Dockerfile" > "$RUNNER_TEMP/baseline.Dockerfile"
-          # The baseline image must satisfy its own contracts, before candidate fixes.
-          mkdir "$RUNNER_TEMP/baseline-check"
-          git show "$BASE_REF:image/system_tests/check-terminal.py" > "$RUNNER_TEMP/baseline-check/check-terminal.py"
-          git show "$BASE_REF:image/system_tests/check-contract.py" > "$RUNNER_TEMP/baseline-check/check-contract.py"
-          printf '\nCOPY --from=baseline-check /check-terminal.py /opt/distribution/image/system_tests/check-terminal.py\n' >> "$RUNNER_TEMP/baseline.Dockerfile"
-          printf '\nCOPY --from=baseline-check /check-contract.py /opt/distribution/image/system_tests/check-contract.py\n' >> "$RUNNER_TEMP/baseline.Dockerfile"
-          docker build --platform linux/amd64 --build-context baseline-check="$RUNNER_TEMP/baseline-check" -f "$RUNNER_TEMP/baseline.Dockerfile" -t startup-baseline .
+          git worktree add --detach "$RUNNER_TEMP/baseline-source" "$BASE_REF"
+          docker build --platform linux/amd64 -f "$RUNNER_TEMP/baseline-source/image/Dockerfile" -t startup-baseline "$RUNNER_TEMP/baseline-source"
           docker build --platform linux/amd64 -f image/Dockerfile -t startup-candidate .
           docker image inspect startup-baseline startup-candidate --format '{{.RepoTags}} {{.Id}} {{.Size}}'
-      - name: Measure baseline packaging
+      - name: Profile gateway imports in both packaged interpreters
+        run: |
+          for variant in baseline candidate; do
+            for module in hermes_cli.main gateway.run; do
+              docker run --rm --read-only --tmpfs /workspace:uid=10000,gid=10000,mode=0700 --tmpfs /tmp:mode=1777 \
+                --entrypoint /opt/hermes/.venv/bin/python "startup-$variant" \
+                -X importtime -c "import $module" > "$RUNNER_TEMP/$variant-$module-imports.log" 2>&1
+            done
+            docker run --rm --entrypoint /opt/hermes/.venv/bin/python "startup-$variant" \
+              -c 'import pathlib,sysconfig; root=pathlib.Path("/opt/hermes"); site=pathlib.Path(sysconfig.get_path("purelib")); print("gateway pyc",len(list((root/"gateway").rglob("*.pyc"))),"CLI pyc",len(list((root/"hermes_cli").rglob("*.pyc"))),"dependency pyc",len(list(site.rglob("*.pyc"))))' \
+              > "$RUNNER_TEMP/$variant-bytecode.txt"
+          done
+      - name: Measure baseline startup
         env:
           STARTUP_CYCLES: "6"
           STARTUP_ARTIFACTS: ${{ runner.temp }}/baseline-proof
         run: bash image/system_tests/start-stop.sh startup-baseline
-      - name: Measure candidate packaging
+      - name: Measure candidate startup
         env:
           STARTUP_CYCLES: "6"
           STARTUP_ARTIFACTS: ${{ runner.temp }}/candidate-proof
@@ -42,6 +48,7 @@ jobs:
         with:
           name: workspace-packaging-comparison
           path: |
-            ${{ runner.temp }}/baseline.Dockerfile
+            ${{ runner.temp }}/*-imports.log
+            ${{ runner.temp }}/*-bytecode.txt
             ${{ runner.temp }}/baseline-proof
             ${{ runner.temp }}/candidate-proof
