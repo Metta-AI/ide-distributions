@@ -125,6 +125,19 @@ frozen list with the deployed validator, on a copy of a profile's `state.db`:
 uv run python tools/schema_drift.py /path/to/state.db --role orchestrator [--session <id>]
 ```
 
+`test_usability.py` measures how easy the research tools and skills are to find, read and use for
+Kimi K3.1 Pro, with a session's real system prompt and tool list. It compares a run with
+`core/tests/model/usability_baseline.json` to show what a tools or skills change did;
+[`docs/reports/tool-usability-baseline-2026-11-04.md`](docs/reports/tool-usability-baseline-2026-11-04.md)
+is the first run, how to read it, what it cost and what it took. That baseline predates the test's
+realistic read results, so rerun it before comparing. The offline tests of its judging and read
+results run in the default `pytest`:
+
+```bash
+OPENROUTER_API_KEY=... IDE_HERMES_SRC=/path/to/hermes-agent \
+  uv run pytest -m model core/tests/model/test_usability.py -k measure
+```
+
 To run the profiles end to end on your Mac against a real Hermes gateway (one command, an
 interactive session, or inside the hosted image), see [`docs/local-end-to-end.md`](docs/local-end-to-end.md).
 
