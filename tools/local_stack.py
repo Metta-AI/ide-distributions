@@ -2,9 +2,10 @@
 ``docs/local-end-to-end.md``): the image CI uses, the checkout mounted read-only at ``/src``,
 the state on a Docker volume, a multiplexing gateway and ``research serve`` as the seam.
 
-    uv run python tools/local_stack.py up [--platform fake|real] [--seam-port 8650]
-                                          [--gateway-port 8642] [--name ide-local]
-                                          [--no-scenario] [--reset] [--timeout 600]
+    uv run python tools/local_stack.py [--name ide-local] up [--platform real|fake]
+                                          [--player ply_...] [--seam-port 8650]
+                                          [--gateway-port 8642] [--no-scenario] [--reset]
+                                          [--timeout 600]
     uv run python tools/local_stack.py status
     uv run python tools/local_stack.py logs [--follow]
     uv run python tools/local_stack.py shell
@@ -14,14 +15,15 @@ the state on a Docker volume, a multiplexing gateway and ``research serve`` as t
 ``up`` creates (or reuses) one container and one volume, writes two scripts into the volume
 (``bootstrap.sh`` and ``as-profile.sh``, below) and runs the bootstrap inside the container:
 install ``uv``, install and prepare both profiles, write the ``.env`` files, start the gateway
-and the seam server. On a fresh volume it then runs the acceptance scenario unless
-``--no-scenario`` is given. ``up`` on an existing container updates the profiles and restarts the
-services; ``--reset`` removes the container and the volume first.
+and the seam server. With ``--platform fake`` on a fresh volume it then runs the acceptance
+scenario unless ``--no-scenario`` is given. ``up`` on an existing container updates the profiles
+and restarts the services; ``--reset`` removes the container and the volume first.
 
 Secrets come from the caller's environment and go into the container only: ``OPENROUTER_API_KEY``
 (required on a fresh volume; later ``up`` runs keep the key already in the ``.env`` files) and,
 with ``--platform real``, ``SOFTMAX_PLAYER_ID``, ``SOFTMAX_PLAYER_CREDENTIAL`` and optionally
-``COGAMES_API_URL``. Hermes reads the ``.env`` files inside the
+``COGAMES_API_URL``; without those two, the Player comes from this machine's ``softmax`` login (the
+active Player, or ``--player``). Hermes reads the ``.env`` files inside the
 volume, so that is where the keys end up; nothing is written on this machine and nothing is
 printed. Stdlib only; ``docker`` runs through subprocess.
 """
@@ -346,13 +348,18 @@ def print_summary(settings: Settings) -> None:
     seam, name = settings.seam_url, settings.name
     header = "-H 'Content-Type: application/json'"
     open_body = json.dumps(
-        {"op_id": str(uuid4()), "client": {"id": "curl", "kind": "web-ide"}, "actor": "user:local"}
+        {
+            "op_id": str(uuid4()),
+            "client": {"id": "curl", "kind": "web-ide"},
+            "actor": "user:local",
+            "session_context": {"contract_version": 1, "scope": "workspace"},
+        }
     )
     message = json.dumps(
         {
             "session_id": "<session_id>",
             "op_id": str(uuid4()),
-            "message": "What is the state of the workspace?",
+            "message": {"role": "user", "content": "What is the state of the workspace?"},
             "actor": "user:local",
             "context": {"contract_version": 1, "on_screen": []},
         }
@@ -677,7 +684,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--platform",
         choices=("fake", "real"),
         default="real",
-        help="real (the default: softmax.com as your Player) or fake (no credentials, no network)",
+        help="real (the default: softmax.com as your Player) or fake (no Softmax login)",
     )
     up.add_argument(
         "--player",

@@ -280,7 +280,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
   </div>
   <dl class="health" id="health" aria-live="polite">
     <div><dt>Profile</dt><dd id="h-profile">…</dd></div>
-    <div><dt>Active Coworld</dt><dd id="h-coworld">…</dd></div>
+    <div><dt>Session scope</dt><dd id="h-coworld">…</dd></div>
     <div><dt>Contract</dt><dd id="h-contract">…</dd></div>
     <div><dt>Watcher heartbeat</dt><dd id="h-heartbeat">…</dd></div>
     <div><dt>Has work</dt><dd id="h-work">…</dd></div>
@@ -330,10 +330,10 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
       <details>
         <summary>Try these against the scripted Orchestrator (tools/ui_dev.py)</summary>
         <ul>
-          <li><strong>Submit the starter as my champion.</strong> Switches to the fake Coworld; the setup wake uploads and submits the starter within a few watcher ticks and sends a notice.</li>
+          <li><strong>Submit the starter as my champion.</strong> On the session of a Coworld (<code>?coworld=cow_fake</code>), the setup wake uploads and submits the starter within a few watcher ticks and sends a notice.</li>
           <li>A message containing <strong>ask me</strong> opens a question with two options; answer it under Asks.</li>
           <li>A message containing <strong>notify</strong> sends a notice.</li>
-          <li>A message containing <strong>goal</strong> creates a Goal (once a Coworld is active), brings it into view under Now showing and sets a markdown panel about it.</li>
+          <li>A message containing <strong>goal</strong> creates a Goal (on the session of a Coworld), brings it into view under Now showing and sets a markdown panel about it.</li>
           <li>Anything else is answered with <strong>Noted: …</strong>. A real Orchestrator (Options A to C in docs/local-end-to-end.md) answers as the model sees fit.</li>
         </ul>
       </details>
