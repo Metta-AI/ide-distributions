@@ -808,8 +808,8 @@ BUILD_BACKGROUND = ok(
     },
     output_tail="building...",
     next="the build is still running: task.wait {task, kind: process, ref: 4242, detail: 'the "
-    "build'} and end this run now; do not call version.create yet. When the watcher resumes you, "
-    "call version.create with the same arguments plus resume: <background.resume>",
+    "build'} and end this run. Only after the watcher resumes you, call version.create with the "
+    "same arguments plus resume: <background.resume>",
 )
 # ``_credits_refused`` in tools/xp.py, as a Researcher gets it; an Orchestrator's ``next`` differs.
 CREDITS_REFUSAL = json.dumps(

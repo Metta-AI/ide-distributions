@@ -314,7 +314,6 @@ def bootstrap_values(settings: Settings) -> dict[str, str]:
             "PLATFORM": "fake",
             "PLAYER_ID": FAKE_PLAYER_ID,
             "COGAMES_API_URL": "",
-            "DEFAULT_COWORLD": "",
         }
     return {
         "GATEWAY_PORT": str(settings.gateway_port),
@@ -761,7 +760,6 @@ SEAM_PORT=@@SEAM_PORT@@
 PLATFORM=@@PLATFORM@@
 PLAYER_ID=@@PLAYER_ID@@
 COGAMES_API_URL=@@COGAMES_API_URL@@
-DEFAULT_COWORLD=@@DEFAULT_COWORLD@@
 
 DATA={DATA}
 STACK_DIR={STACK_DIR}

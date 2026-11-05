@@ -13,8 +13,7 @@ The prompts, skills, task types and wake prompts show calls in this short form, 
 
 The rules: the tool and action must exist, and for the role that reads the file; every named field
 and key must exist on that action; and a complete signature names every field and key the action
-requires. A field the caller generates rather than decides (see ``is_generated``) never has to be
-named.
+requires.
 
 A dotted name in backticks before a brace is always read as a call, so a misspelt tool is found. A
 bare name is read only when it is a tool, because skills also write ``methods {a, b}`` for a field.
@@ -124,12 +123,6 @@ def top_level_items(body: str) -> list[str]:
     return [item for item in items if item]
 
 
-def is_generated(schema: dict) -> bool:
-    """A field the caller generates rather than decides: a fresh id that makes a retry safe. The
-    tool descriptions explain it, so a signature showing what to decide leaves it out."""
-    return "intent ID" in schema.get("description", "")
-
-
 def listed_objects(value: str) -> list[str]:
     """The text inside each object of a value written ``{...}`` or ``[{...}, {...}]``."""
     value = value.strip()
@@ -178,7 +171,7 @@ def _field_problems(label: str, body: str, properties: dict, required) -> tuple[
                 inner_omitted += [f"{name}.{key}" for key in inner[1]]
     if items and items[-1] == FRAGMENT:
         return unknown, inner_omitted
-    omitted = [f for f in required if f not in named and not is_generated(properties[f])]
+    omitted = [f for f in required if f not in named]
     return unknown, [*inner_omitted, *omitted]
 
 

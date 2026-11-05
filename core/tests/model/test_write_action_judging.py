@@ -325,7 +325,7 @@ def test_a_settings_update_the_store_refuses_is_invalid(args, problem):
 
 def test_a_task_without_a_goal_is_invalid_unless_it_is_maintenance():
     case = Case("orchestrator", "task", "create", "Create a Task.")
-    args = {"action": "create", "title": "T", "description": "D", "operation_id": "o"}
+    args = {"action": "create", "title": "T", "description": "D"}
     outcome, detail = judged({**args, "type": "research"}, case)
     assert outcome == "invalid" and "goal is required" in detail
     assert judged({**args, "type": "maintenance"}, case)[0] == "valid"
@@ -334,7 +334,7 @@ def test_a_task_without_a_goal_is_invalid_unless_it_is_maintenance():
 def test_an_end_condition_without_its_detail_is_invalid():
     case = Case("orchestrator", "task", "create", "Create a Task.")
     args = {"action": "create", "type": "research", "title": "T", "description": "D"}
-    args |= {"goal": "G-1", "operation_id": "o", "end_condition": "steps"}
+    args |= {"goal": "G-1", "end_condition": "steps"}
     outcome, detail = judged(args, case)
     assert outcome == "invalid" and "end_detail is required" in detail
 
