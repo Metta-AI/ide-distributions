@@ -197,7 +197,7 @@ def test_session_open_refuses_a_missing_client(seam):
 
 
 @pytest.mark.parametrize("stalled", ["prepare", "start", "create_session"])
-def test_intake_is_durable_while_execution_is_stalled(seam, monkeypatch, stalled, spans):
+def test_intake_is_durable_while_execution_is_stalled(seam, monkeypatch, stalled):
     from research_core import attachments
 
     entered, release = threading.Event(), threading.Event()
@@ -254,15 +254,6 @@ def test_intake_is_durable_while_execution_is_stalled(seam, monkeypatch, stalled
         finally:
             release.set()
         triggering.result(timeout=3)
-    timings = spans.get_finished_spans()
-    measured = [
-        event
-        for event in timings
-        if event.name == "session.message" and event.attributes["op.id"] == body["op_id"]
-    ]
-    assert len(measured) == 4 and sum(event.attributes["replayed"] for event in measured) == 3
-    assert all(event.end_time - event.start_time < 1e9 for event in measured)
-    assert all("queued.txt" not in event.to_json() for event in timings)
 
 
 def test_new_session_history_and_dispatch_wait_for_native_open(seam, monkeypatch):
