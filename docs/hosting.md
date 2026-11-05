@@ -16,10 +16,10 @@ metta changes); the build decisions are in `docs/plans/ide-profile-refactor/00-o
   folder it was given with `--source`. A writable checkout would let an agent change the store
   library or the watcher (design Q24); `workspace.doctor` reports whether the core path is
   writable.
-- Hermes v0.22.6, the version `image/Dockerfile` and CI pin, with its interpreter at a fixed path.
-  The manifests accept `>=0.21.6`, but v0.21.6 has no `hermes sessions refresh-prompts`, so there
-  a release does not reach open chats ("Open chats after a release"). The plugin, `prepare.py` and the
-  watcher launcher are stdlib-only Python and run under that interpreter.
+- Hermes v0.22.6 or later, the version `image/Dockerfile` and CI pin, with its interpreter at a
+  fixed path. Older versions have no `hermes sessions refresh-prompts`, so a release would not reach
+  open chats ("Open chats after a release"). The plugin, `prepare.py` and the watcher launcher are
+  stdlib-only Python and run under that interpreter.
 - `uv`, `git`, and the toolchains Coworld mixins declare (today: none shipped; a mixin may ask
   for another Python or Nim, which `prepare.py`/setup install under `$IDE_WORKSPACE/tools/`).
 
