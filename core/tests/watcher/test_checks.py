@@ -234,7 +234,29 @@ def test_task_failed_for_an_ordinary_task_is_not_counted(tmp_path):
         failure=FAILURE,
     )
     result = checks.handle_task_failed(ctx, last_event(ctx.store, "task.failed"), ctx.store)
-    assert result["skipped"].endswith("is not a repair Task")
+    assert result == {"review": task["id"]}
+    review = last_event(ctx.store, "task.failure_review")
+    assert review.payload["what_failed"] == FAILURE["what_failed"]
+    assert review.payload["next_step"] == FAILURE["next_step"]
+
+
+def test_a_task_the_watcher_gave_up_on_wakes_the_orchestrator_once(tmp_path):
+    ctx = fake_ctx(tmp_path)
+    task = make_task(ctx)
+    register_session(ctx, "api_1761690000_eeee0002", task)
+    claim(ctx, "api_1761690000_eeee0002", task)
+    tasks.complete(
+        ctx.store,
+        Actor.session("api_1761690000_eeee0002"),
+        task_number(task),
+        outcome="failed",
+        failure=FAILURE,
+    )
+    with ctx.wstore.tx(ctx.actor) as tx:
+        tx.event("recovery.failed", task["id"], {"coworld_id": ctx.coworld.coworld_id})
+    result = checks.handle_task_failed(ctx, last_event(ctx.store, "task.failed"), ctx.store)
+    assert "skipped" in result
+    assert events_of(ctx.store, "task.failure_review") == []
 
 
 def test_the_login_check_keeps_the_player_id_for_the_briefing(tmp_path):

@@ -99,6 +99,7 @@ KINDS: frozenset[str] = frozenset(
         "turn.rendered",
         "watcher.heartbeat",
         "merge.failed",
+        "task.failure_review",
         "goal.needs_ideation",
         "recovery.failed",
         "wake.failed",

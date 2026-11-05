@@ -477,11 +477,31 @@ def link_dependents(store: Store, ctx: TickContext, name: str, repair: int) -> l
 
 def handle_task_failed(ctx: TickContext, event: Event, store: Store) -> dict[str, Any]:
     """``task.failed``: count failed repairs per capability; the second raises
-    ``repair.failed_twice``."""
+    ``repair.failed_twice``. Any other failed Task raises ``task.failure_review``, so someone reads
+    what its Researcher wrote, unless the watcher's own give-up already woke the Orchestrator."""
     task = tasks.read(store, event.subject)
     name = task["capability"]
     if not name:
-        return {"skipped": f"{task['id']} is not a repair Task"}
+        gave_up = ctx.wstore.one(
+            "SELECT 1 FROM events WHERE kind = 'recovery.failed' AND subject = ?"
+            " AND json_extract(payload, '$.coworld_id') = ?",
+            (task["id"], ctx.coworld.coworld_id),
+        )
+        if gave_up:
+            return {"skipped": f"recovery.failed covers {task['id']}"}
+        failure = task["failure"] or {}
+        emit_event(
+            store,
+            ctx.actor,
+            "task.failure_review",
+            task["id"],
+            {
+                "task": task["id"],
+                "what_failed": failure.get("what_failed"),
+                "next_step": failure.get("next_step"),
+            },
+        )
+        return {"review": task["id"]}
     key = f"{REPAIR_FAILURES}{name}"
     count = int(store.get_meta(key) or 0) + 1
     store.set_meta(key, str(count))
