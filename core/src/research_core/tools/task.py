@@ -66,8 +66,11 @@ CREATE_PARAMS = {
     "description": a.string("What to do and deliver, in Markdown."),
     "reasoning": a.string("Why, with references to the Goal, claims and Experiments."),
     "for_human": a.string("One plain sentence that clients show."),
-    "end_condition": a.string("How the Task ends.", enum=["deliverable", "steps", "effort"]),
-    "end_detail": a.string("The detail of the end condition."),
+    "end_condition": a.string(
+        "How the Task ends. Sending it requires end_detail too.",
+        enum=["deliverable", "steps", "effort"],
+    ),
+    "end_detail": a.string("What done means under end_condition. Required with end_condition."),
     "experiment": EXPERIMENT,
     "priority": a.string("Default normal.", enum=["normal", "high"]),
     "depends_on": a.strings('Tasks that must complete first, such as ["T-1"].'),

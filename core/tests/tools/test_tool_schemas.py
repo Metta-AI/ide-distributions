@@ -232,3 +232,10 @@ def test_a_field_is_advertised_for_an_action_only_if_the_validator_accepts_it():
             if refused and action.name in named_actions(schema.get("description", "")):
                 problems.append(f"{role} {spec.name}.{action.name}: {name}: advertised, refused")
     assert problems == []
+
+
+def test_end_condition_says_it_needs_end_detail():
+    """A store check, not the validator, requires the pair, so only this text can warn a model."""
+    properties = catalog.TOOLS["task"].schema("orchestrator")["parameters"]["properties"]
+    assert "requires end_detail" in properties["end_condition"]["description"]
+    assert "Required with end_condition" in properties["end_detail"]["description"]
