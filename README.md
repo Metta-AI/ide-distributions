@@ -63,29 +63,67 @@ CI runs the same inside the hosted Hermes image, and `play/` separately. A daily
 refreshes the `coworld` and `softmax-cli` pins in `uv.lock`.
 
 The model tool-call tests in `core/tests/model` call models through OpenRouter and spend real
-money (the full write-action measurement costs about $1.60 and takes about 25 minutes), so they
-run only on request and never in CI. `IDE_HERMES_SRC` names a Hermes source tree, whose schema
-sanitizers shape the tool list as Hermes sends it:
+money, so they run only on request and never in CI. An explicit `-m` replaces the default
+`-m 'not hermes and not model'` rather than adding to it, so `uv run pytest -m "not hermes"` with
+`OPENROUTER_API_KEY` exported runs these tests too and spends money.
+
+**Direct calls** (`test_write_actions.py`). `IDE_HERMES_SRC` names the pinned Hermes's source
+(`/opt/hermes` in the image), whose schema sanitizers shape the tool list as Hermes sends it. Narrow a run to one model and host: the
+default is four models on two hosts each, and one such column costs about $2 on Kimi K3.1 Pro.
 
 ```bash
 OPENROUTER_API_KEY=... IDE_HERMES_SRC=/path/to/hermes-agent \
+  IDE_TOOL_CALL_MODELS=moonshotai/kimi-k3.1-pro IDE_TOOL_CALL_HOSTS=shipped \
   uv run pytest -m model core/tests/model/test_write_actions.py
 ```
 
-An explicit `-m` replaces the default `-m 'not hermes and not model'` rather than adding to it,
-so `uv run pytest -m "not hermes"` with `OPENROUTER_API_KEY` exported runs these tests too and
-spends money.
-
 It sends one write action with required fields per case (claims, Goals, Tasks, experiments,
 directives, settings, notices), for both roles, offering the role's whole tool list as a Hermes
-session does, plus cases that start after a refused call. It runs Kimi K3.1 Pro, Kimi K3,
-GLM 5.3 and MiniMax M3 on two OpenRouter hosts each, and ends with a table of valid rates,
-prompt tokens and cost per model and host. `core/tests/model/write_actions.py` says which
-write actions are covered and how a call is judged. `IDE_TOOL_CALL_MODELS`,
-`IDE_TOOL_CALL_HOSTS`, `IDE_TOOL_CALL_CASES`, `IDE_TOOL_CALL_REPEATS` and
-`IDE_TOOL_CALL_SCHEMAS` narrow or change a run (see `test_write_actions.py`).
-`test_tool_call_format.py` sends one instruction per tool, on the shipped models and pins. The
-judging rules have offline tests that the default `pytest` runs.
+session does, plus cases that start after one and after three refused calls. Each case runs 5
+times by default, and the closing table gives every rate its sample size and 95% Wilson interval:
+intervals that do not overlap show a real difference, and overlapping ones decide nothing either
+way. It also lists calls whose reasoning names
+a field the arguments omit. `core/tests/model/write_actions.py` says which write actions are
+covered and how a call is judged. `IDE_TOOL_CALL_MODELS`, `IDE_TOOL_CALL_HOSTS`,
+`IDE_TOOL_CALL_CASES`, `IDE_TOOL_CALL_REPEATS`, `IDE_TOOL_CALL_PARALLEL`, `IDE_TOOL_CALL_SCHEMAS`
+and `IDE_TOOL_CALL_CONTEXT` narrow or change a run (see `test_write_actions.py`).
+
+**Through a real Session** (`test_real_session.py`). A real Hermes gateway serves both profiles
+with the fake platform, so the system prompt, tool list, hooks and tools are the real ones. It ends
+with `test_the_agreed_rate`: at least 95% of calls valid on the first try, after one refusal and
+after three. This is the check to pass before calling the tools reliable. Run it in the pinned
+image, from the repository root (about $4 and 10 minutes at the default 10 repeats):
+
+```bash
+out=$(mktemp -d) && chmod 777 "$out"  # the container's user writes here
+OPENROUTER_API_KEY=... docker run --rm --user 10000:10000 -e OPENROUTER_API_KEY \
+  -e IDE_TOOL_CALL_CONTEXT=/out/context.json -v "$PWD:/src:ro" -v "$out:/out" \
+  --entrypoint bash <the digest in image/Dockerfile> \
+  /src/core/tests/model/in_image.sh -m model core/tests/model/test_real_session.py
+```
+
+`IDE_TOOL_CALL_CONTEXT` is optional and writes the real system prompt and Hermes tool list to that
+path. Give the same variable to the direct calls, pointing at `$out/context.json`, to send
+them in place of the short stand-in prompt. That is also the only way to measure a refusal inside
+one turn: the runs API can only continue a stored history with a new user message, and a model
+recovers far more often after one (40/40 after three refusals, against 22/60 inside a turn,
+November 4, 2026).
+
+**The other two.** `test_undeclared_fields.py` checks that a model on a closed schema sends a field
+only if it is declared, so a provider change is noticed. `test_tool_call_format.py` sends one
+instruction per tool, on the shipped models and pins.
+
+The default `pytest` needs no network and covers the judging rules, every `tool.action {fields}`
+signature in the prompts, skills, task types and wakes against the specs
+(`core/tests/test_tool_signatures.py`), and every field a validator requires against the schemas
+(`core/tests/tools/test_tool_schemas.py`).
+
+Hermes freezes a Session's tool list, and our deploys do not refresh it. To compare a Session's
+frozen list with the deployed validator, on a copy of a profile's `state.db`:
+
+```bash
+uv run python tools/schema_drift.py /path/to/state.db --role orchestrator [--session <id>]
+```
 
 To run the profiles end to end on your Mac against a real Hermes gateway (one command, an
 interactive session, or inside the hosted image), see [`docs/local-end-to-end.md`](docs/local-end-to-end.md).

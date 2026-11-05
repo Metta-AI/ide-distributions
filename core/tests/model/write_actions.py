@@ -8,20 +8,23 @@ tools' argument check) and, for the actions whose store checks need no records, 
 too (``RECORD_CHECKS``). Calls before it get the answer production would give: the tool's own
 refusal when the argument check refuses them, otherwise a plausible result (``RESULT``, or the
 case's ``read_result``). A model that has not called the tool within ``MAX_REQUESTS`` requests
-fails the case. A recovery case starts from a history holding one refused call and the refusal
-the tool returns today.
+(``MAX_REQUESTS_REAL_CONTEXT`` with a captured context) fails the case. A recovery case starts from a history holding one or three
+refused calls: the first answered with the refusal the tool returns today, a repeat with the
+shorter one the repeat hook puts in its place. Measured on 2026-11-04 with a real context, the
+rate was 60/60 after one refusal and 22/60 after three, so both depths are measured.
 
 Which write actions are covered. One case per write action, of the record tools (claim, goal,
 task, experiment, directive, settings, ui), that has at least two required fields, so the model
-has to compose arguments rather than pass one reference; plus ``ui.notify``, the incident wake's
-other write. Left out, to keep a full run near $1.60 (2026-11-02):
+has to compose arguments rather than pass one reference; plus ``ui.notify``, the incident wake's other write. Left out, to keep a run small:
   - actions with the same shape as a covered one: task.propose and task.reject for the
     Orchestrator (task.create, task.answer), task.link (two references), and the
     Researcher's claim.retire and experiment.abandon (covered for the Orchestrator);
   - workspace.change_complete, which needs a worktree the instruction cannot make plausible;
-  - the flat tools (submit, upload, wiki_edit, forum_post, softmax_api, github): their schemas
-    mark required fields as required at the top level, so a provider can enforce them, which
-    the action tools cannot;
+  - the tools without actions (submit, upload, wiki_edit, softmax_api): their schemas mark required
+    fields as required at the top level, so a provider can enforce them, which the action tools
+    cannot;
+  - the other tools (version, xp, platform, forum_post, github): ``test_tool_call_format.py``
+    sends each one instruction;
   - actions whose only required field is one reference (task.approve, experiment.start, ...).
 """
 
@@ -31,9 +34,10 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from research_core.store import claims, experiments, tasks
+from research_core.plugin.repeats import firmer_refusal
+from research_core.store import claims, experiments, goals, settings, tasks
 from research_core.tools import catalog
-from research_core.tools.base import validate_args
+from research_core.tools.base import coerce_args, validate_args
 from tests.model import harness
 
 # Models and hosts of the standard measurement: two hosts each, every column a distinct host.
@@ -48,6 +52,8 @@ MEASUREMENT: dict[str, list[str]] = {
     "minimax/minimax-m3": ["minimax", "deepinfra"],
 }
 MAX_REQUESTS = 3
+# The real prompt tells a model to read the relevant skill first, which the stand-in does not.
+MAX_REQUESTS_REAL_CONTEXT = 8
 # Actions that only read: a call to the expected tool with one of these is a look before the
 # write, answered and not judged.
 READ_ACTIONS = frozenset(
@@ -70,20 +76,21 @@ class Case:
     tool: str
     action: str
     instruction: str
-    # Recovery: the arguments of an earlier call that the tool refused. The history holds that
-    # call and the tool's refusal, and the model's next call is judged.
+    # Recovery: the arguments of an earlier call that the tool refused, ``refusals`` times. The
+    # history holds those calls and their refusals, and the model's next call is judged.
     refused: dict | None = None
     # The answer to reads before the judged call, for a case whose write needs what they return.
     read_result: str = RESULT
+    refusals: int = 1
 
     @property
     def id(self) -> str:
-        suffix = "-recovery" if self.refused is not None else ""
+        suffix = f"-recovery{self.refusals}" if self.refused is not None else ""
         return f"{self.role}-{self.tool}.{self.action}{suffix}"
 
     @property
     def label(self) -> str:
-        suffix = " (recovery)" if self.refused is not None else ""
+        suffix = f" (after {self.refusals} refused)" if self.refused is not None else ""
         return f"{self.role} {self.tool}.{self.action}{suffix}"
 
 
@@ -112,6 +119,9 @@ ASSIGN_READS = json.dumps(
         "workers": [{"profile": "researcher", "capabilities": ["replays", "xp"], "slots": 1}],
     }
 )
+# "Send a notice", not "tell the user": in a chat, answering in text is a correct way to tell them,
+# which measured 3/5 on correct behaviour.
+UI_NOTIFY = "Send the user a notice that pv-42 is the new champion of league L-7."
 ORCHESTRATOR = [
     Case("orchestrator", "claim", "write", CHAMPION_CLAIM),
     Case(
@@ -193,7 +203,7 @@ ORCHESTRATOR = [
         "orchestrator",
         "ui",
         "notify",
-        "Tell the user that pv-42 is the new champion of league L-7.",
+        UI_NOTIFY,
     ),
     Case(
         "orchestrator",
@@ -259,16 +269,24 @@ INCIDENT_CLAIM_ARGS = {
     "status": "superseded",
     "superseded_by": "pv-42",
 }
+TASK_MESSAGE = "Tell the Researcher on Task T-6: use league L-7's practice division."
+RECOVERY_DEPTHS = (1, 3)
 RECOVERY = [
-    Case("orchestrator", "claim", "write", CHAMPION_CLAIM, refused=INCIDENT_CLAIM_ARGS),
-    Case("researcher", "claim", "write", CHAMPION_CLAIM, refused=INCIDENT_CLAIM_ARGS),
-    Case(
-        "orchestrator",
-        "task",
-        "create",
-        TASK_CREATE,
-        refused={"action": "create", "title": "Why do we lose early fights?", "goal": "G-1"},
-    ),
+    Case(role, tool, action, instruction, refused=refused, refusals=refusals)
+    for role, tool, action, instruction, refused in (
+        ("orchestrator", "claim", "write", CHAMPION_CLAIM, INCIDENT_CLAIM_ARGS),
+        ("researcher", "claim", "write", CHAMPION_CLAIM, INCIDENT_CLAIM_ARGS),
+        (
+            "orchestrator",
+            "task",
+            "create",
+            TASK_CREATE,
+            {"action": "create", "title": "Why do we lose early fights?", "goal": "G-1"},
+        ),
+        # The Nov 4 chat's call: refused for a field it left out, again and again.
+        ("orchestrator", "task", "message", TASK_MESSAGE, {"action": "message", "task": "T-6"}),
+    )
+    for refusals in RECOVERY_DEPTHS
 ]
 CASES = [*ORCHESTRATOR, *RESEARCHER, *RECOVERY]
 
@@ -313,50 +331,103 @@ def _task_abandon(args: dict, problems: list[str]) -> None:
     problems.extend(tasks._failure_problems(args.get("failure")))
 
 
-# The store's own checks for actions whose arguments carry structure (lists of objects, objects,
-# word limits), run with records assumed to exist. Production runs them after validate_args.
+def _task_create(args: dict, problems: list[str]) -> None:
+    if args.get("goal") is None and args.get("type") != "maintenance":
+        problems.append("goal is required unless type is maintenance")
+    problems.extend(
+        tasks._end_condition_problems(args.get("end_condition"), args.get("end_detail"))
+    )
+
+
+def _goal_create(args: dict, problems: list[str]) -> None:
+    fields = {name: args.get(name) for name in ("title", "end_state", "reason")}
+    goals._check_fields(problems, {**fields, "tags": args.get("tags") or []})
+
+
+def _settings_update(args: dict, problems: list[str]) -> None:
+    found = settings.SETTINGS.get(args.get("key"))
+    if found is None:
+        problems.append(f"unknown setting {args.get('key')!r}")
+    else:
+        problems.extend(settings.validate_value(found, args.get("value")))
+
+
+# The checks past validate_args that depend only on the arguments (lists of objects, objects, word
+# limits, a field required in some cases), run with records assumed to exist. This is the actions
+# that have such checks and that a model gets wrong; it is not every check a store makes.
 RECORD_CHECKS = {
     ("claim", "write"): _claim_write,
     ("claim", "add_evidence"): _claim_add_evidence,
     ("experiment", "create"): _experiment_create,
     ("task", "abandon"): _task_abandon,
+    ("task", "create"): _task_create,
+    ("goal", "create"): _goal_create,
+    ("settings", "update"): _settings_update,
 }
 
 
 # --- running and judging one case -------------------------------------------------------------
 
 
-def messages(case: Case, schemas: harness.SchemaSet) -> list[dict]:
-    history = [
-        {"role": "system", "content": SYSTEM.format(role=case.role)},
-        {"role": "user", "content": case.instruction},
-    ]
-    if case.refused is None:
-        return history
+def system_prompt(role: str) -> str:
+    captured = harness.session_context(role)
+    return captured.system if captured is not None else SYSTEM.format(role=role)
+
+
+def refused_history(case: Case, schemas: harness.SchemaSet) -> list[dict]:
+    """The assistant calls and tool results of a recovery case's refused calls."""
     name, args = schemas.outgoing(case.role, case.tool, case.refused)
     refusal = schemas.refusal(case.role, case.tool, case.refused)
-    assert json.loads(refusal)["ok"] is False, refusal
-    call_id = "call_refused_1"
-    return [
-        *history,
-        {
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [
-                {
-                    "id": call_id,
-                    "type": "function",
-                    "function": {"name": name, "arguments": json.dumps(args)},
-                }
-            ],
-        },
-        {"role": "tool", "tool_call_id": call_id, "content": refusal},
+    parsed = json.loads(refusal)
+    assert parsed["ok"] is False, refusal
+    history: list[dict] = []
+    for count in range(1, case.refusals + 1):
+        call_id = f"call_refused_{count}"
+        history += [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": call_id,
+                        "type": "function",
+                        "function": {"name": name, "arguments": json.dumps(args)},
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": (
+                    refusal if count == 1 else firmer_refusal(case.role, name, parsed, count)
+                ),
+            },
+        ]
+    return history
+
+
+def messages(case: Case, schemas: harness.SchemaSet) -> list[dict]:
+    history = [
+        {"role": "system", "content": system_prompt(case.role)},
+        {"role": "user", "content": case.instruction},
     ]
+    return history if case.refused is None else [*history, *refused_history(case, schemas)]
+
+
+def _role_has_action(case: Case, action: str) -> bool:
+    spec = next(s for s in catalog.tools_for(case.role) if s.name == case.tool)
+    return any(known.name == action for known in spec.actions_for(case.role))
 
 
 def is_judged(case: Case, tool: str, args: dict) -> bool:
-    """A call to the expected tool counts unless it is a read: no action, or a write action."""
-    return tool == case.tool and args.get("action") not in READ_ACTIONS
+    """A call to the expected tool counts unless it is a read that tool has, or a Researcher's
+    first step of taking the Task: no action, an action it does not have, or a write action."""
+    if tool != case.tool:
+        return False
+    action = args.get("action")
+    if case.role == "researcher" and (tool, action) == ("task", "claim"):
+        return False
+    return not (action in READ_ACTIONS and _role_has_action(case, action))
 
 
 def judge(case: Case, call: harness.Call, args: dict) -> tuple[str, str]:
@@ -371,12 +442,22 @@ def judge(case: Case, call: harness.Call, args: dict) -> tuple[str, str]:
         return "invalid", f"{'; '.join(problems)}; sent {sorted(args)}"
     check = RECORD_CHECKS.get((case.tool, case.action))
     if check is not None:
-        check(args, problems)
+        check(coerce_args(spec, case.role, args), problems)  # production checks the coerced values
         if problems:
             # The structured fields show what went wrong; the prose ones only take up room.
             shown = {k: v for k, v in args.items() if k not in ("summary", "body", "description")}
             return "invalid", f"record check: {'; '.join(problems)}; sent {json.dumps(shown)[:250]}"
     return "valid", ""
+
+
+def gaps_in_reasoning(case: Case, args: dict, reasoning: str) -> list[str]:
+    """Fields of the case's action that the judged call's reasoning names and its arguments omit."""
+    spec = next(s for s in catalog.tools_for(case.role) if s.name == case.tool)
+    action = spec.action(case.action)
+    accepted = spec.accepted(action)
+    required = [*action.required, *spec.required]
+    optional = [name for name in accepted if name not in required]
+    return harness.reasoning_gaps(required, optional, args, reasoning)
 
 
 def answer(case: Case, schemas: harness.SchemaSet, tool: str, args: dict | None) -> str:
@@ -398,7 +479,8 @@ def run_case(model: str, host: str, case: Case, schemas: harness.SchemaSet) -> h
     result = harness.Result(model, host, case.label, "wrong_tool")
     history = messages(case, schemas)
     tools = harness.full_toolset(case.role, schemas, model)
-    for _ in range(MAX_REQUESTS):
+    real_context = harness.session_context(case.role) is not None
+    for _ in range(MAX_REQUESTS_REAL_CONTEXT if real_context else MAX_REQUESTS):
         try:
             reply = harness.complete(
                 model,
@@ -421,6 +503,7 @@ def run_case(model: str, host: str, case: Case, schemas: harness.SchemaSet) -> h
             tool, args = schemas.canonical(case.role, call.name, call.arguments or {})
             if is_judged(case, tool, args):
                 result.outcome, result.detail = judge(case, call, args)
+                result.reasoning_gaps = gaps_in_reasoning(case, args, reply.reasoning)
                 return result
             result.detours.append(f"{call.name} {call.raw[:120]}")
             content = answer(case, schemas, tool, None if call.arguments is None else args)

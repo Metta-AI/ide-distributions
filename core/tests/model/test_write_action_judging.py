@@ -8,10 +8,14 @@ before it are answered, and how host failures count.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
+from research_core.watcher.hermes_api import RunStatus, RunsUnavailable
+from tests.hermes.test_spike_s1 import Host
 from tests.model import harness, write_actions
+from tests.model.real_session import MAX_DETOURS, RealGateway
 from tests.model.write_actions import Case, run_case
 
 CLAIM_WRITE = Case("orchestrator", "claim", "write", "Record a claim.")
@@ -73,6 +77,11 @@ def run(case: Case = CLAIM_WRITE) -> harness.Result:
     return run_case("m/model", "host", case, harness.ShippedSchemas())
 
 
+def run_case_of(script, case: Case, args: dict) -> harness.Result:
+    script(reply((case.tool, args)))
+    return run(case)
+
+
 # --- which call is judged (finding A) ---------------------------------------------------------
 
 
@@ -106,6 +115,16 @@ def test_a_read_of_the_tool_comes_first_and_the_write_is_judged(script):
     assert (result.outcome, len(result.detours)) == ("valid", 1)
     answered = fake.requests[1][-1]
     assert answered["role"] == "tool" and answered["content"] == write_actions.RESULT
+
+
+def test_taking_the_task_first_is_not_judged_as_the_write(script):
+    case = Case("researcher", "task", "ask", "Ask about T-5.")
+    fake = script(
+        reply(("task", {"action": "claim", "task": "T-5"})),
+        reply(("task", {"action": "ask", "task": "T-5", "question": "Which division?"})),
+    )
+    assert len(run(case).detours) == 1
+    assert len(fake.requests) == 2
 
 
 def test_a_call_production_refuses_is_answered_with_the_tools_refusal(script):
@@ -144,6 +163,231 @@ def test_a_recovery_history_holds_the_refused_call_and_the_tools_refusal(script)
     sent = json.loads(assistant["tool_calls"][0]["function"]["arguments"])
     assert sent == write_actions.INCIDENT_CLAIM_ARGS
     assert "summary is required for write" in json.loads(tool_result["content"])["error"]
+
+
+def test_a_deeper_recovery_history_repeats_the_call_with_the_short_refusal(script):
+    fake = script(reply(("claim", GOOD_CLAIM)))
+    case = next(c for c in write_actions.RECOVERY if c.refusals == 3 and c.tool == "claim")
+    assert case.label.endswith("(after 3 refused)")
+    assert run(case).outcome == "valid"
+    history = fake.requests[0][2:]
+    assert [m["role"] for m in history] == ["assistant", "tool"] * 3
+    results = [json.loads(m["content"]) for m in history if m["role"] == "tool"]
+    assert "usage" in results[0]
+    assert all(
+        "This exact call was refused" in r["error"] and r["ok"] is False for r in results[1:]
+    )
+    assert "refused 3 times" in results[2]["error"]
+
+
+def test_every_recovery_case_starts_from_a_call_the_tool_refuses():
+    for case in write_actions.RECOVERY:
+        history = write_actions.refused_history(case, harness.ShippedSchemas())
+        assert json.loads(history[1]["content"])["ok"] is False, case.id
+
+
+def test_a_captured_context_replaces_the_stand_ins(script, monkeypatch, tmp_path):
+    capture = tmp_path / "context.json"
+    hermes_tool = {"type": "function", "function": {"name": "hermes_only", "parameters": {}}}
+    capture.write_text(
+        json.dumps(
+            {
+                "orchestrator": {"system": "The real prompt.", "hermes_tools": [hermes_tool]},
+                "researcher": {"system": "The other prompt.", "hermes_tools": []},
+            }
+        )
+    )
+    monkeypatch.setenv("IDE_TOOL_CALL_CONTEXT", str(capture))
+    fake = script(reply(("claim", GOOD_CLAIM)))
+    assert run().outcome == "valid"
+    assert fake.requests[0][0] == {"role": "system", "content": "The real prompt."}
+
+
+# --- what the summary reports --------------------------------------------------------------------
+
+
+def test_reasoning_naming_an_omitted_field_is_reported(script):
+    good = reply(("claim", {**GOOD_CLAIM}))
+    good.reasoning = "I must add the summary, the tags and see_also, and a body."
+    script(good)
+    assert run().reasoning_gaps == ["see_also"]
+    without_tags = {k: v for k, v in GOOD_CLAIM.items() if k != "tags"}
+    bad = reply(("claim", without_tags))
+    bad.reasoning = "The write needs tags."
+    script(bad)
+    result = run()
+    assert result.outcome == "invalid" and result.reasoning_gaps == ["tags (required)"]
+
+
+def test_a_field_name_inside_another_word_is_not_a_gap():
+    assert harness.reasoning_gaps(["tag"], [], {}, "I will add tags later") == []
+
+
+def test_reasoning_field_is_read_from_either_key():
+    assert harness.reasoning_of({"reasoning": "a"}) == "a"
+    assert harness.reasoning_of({"reasoning_content": "b"}) == "b"
+    assert harness.reasoning_of({}) == ""
+
+
+@pytest.mark.parametrize(
+    ("successes", "total", "low", "high"),
+    [(5, 10, 0.24, 0.76), (10, 10, 0.72, 1.0), (0, 12, 0.0, 0.24), (45, 50, 0.79, 0.96)],
+)
+def test_wilson_interval_matches_known_values(successes, total, low, high):
+    found = harness.wilson_interval(successes, total)
+    assert found == pytest.approx((low, high), abs=0.01)
+
+
+def test_the_summary_shows_sample_size_and_interval(script, monkeypatch):
+    monkeypatch.setattr(harness, "RESULTS", harness.Results(schemas="shipped"))
+    for valid in (True, True, False):
+        script(reply(("claim", GOOD_CLAIM if valid else {})))
+        harness.RESULTS.items.append(run())
+    table = "\n".join(harness.summary())
+    rows = {line.split("  ")[0]: line for line in table.splitlines()}
+    assert "2/3 67% [21-94]" in rows["first-try valid"]
+    assert "2/3" in rows[CLAIM_WRITE.label]
+
+
+def test_the_gateway_host_and_child_environments_keep_the_key_out_of_their_repr():
+    key = "sk-or-secret"
+    host = Host(Path("h"), Path("/"), Path("/"), 1, "api-secret", key, Path("l"))
+    gateway = RealGateway(Path("/"), Path("h"), key, "m", host=host)
+    for shown in (gateway, host, host.base_env(), host.profile_env("researcher"), gateway.env()):
+        assert key not in repr(shown) and "api-secret" not in repr(shown)
+    assert host.base_env()["OPENROUTER_API_KEY"] == key
+
+
+def test_stopping_the_gateway_removes_the_key_files(tmp_path):
+    host = Host(Path("h"), tmp_path, tmp_path, 1, "a", "k", tmp_path / "log")
+    gateway = RealGateway(tmp_path, Path("h"), "k", "m", host=host)
+    profile = host.profile("researcher")
+    profile.mkdir(parents=True)
+    host.write_host_dotenv()
+    host.write_dotenv("researcher")
+    gateway.stop()
+    assert not (tmp_path / ".env").exists() and not (profile / ".env").exists()
+
+
+def raise_unavailable(*_, **__):
+    raise RunsUnavailable("connection refused")
+
+
+class FinishedRun:
+    """The runs API of a run that has already ended, holding one call to ``claim``."""
+
+    def __init__(self, status: str, args: dict):
+        self.ended = RunStatus("r", status, "s", None, None, terminal=True)
+        self.stored = [
+            {
+                "role": "assistant",
+                "tool_calls": [{"id": "c", "function": {"name": "claim", "arguments": ""}}],
+            }
+        ]
+        self.stored[0]["tool_calls"][0]["function"]["arguments"] = json.dumps(args)
+
+    def start(self, **_) -> str:
+        return "r"
+
+    def status(self, run_id, profile):
+        return self.ended
+
+    def session_messages(self, session_id, profile):
+        return self.stored
+
+
+@pytest.mark.parametrize("status", ["completed", "failed"])
+def test_a_valid_call_stays_valid_when_the_run_has_already_ended(status, monkeypatch):
+    gateway = RealGateway(Path("/"), Path("h"), "k", "m", runs=FinishedRun(status, GOOD_CLAIM))
+    monkeypatch.setattr(gateway, "open_session", lambda role: "s")
+    monkeypatch.setattr(gateway, "_billed_replies", lambda *_: [])
+    assert gateway.run_case("m", CLAIM_WRITE).outcome == "valid"
+
+
+def test_a_read_action_the_tool_does_not_have_is_judged(script):
+    result = run_case_of(script, CLAIM_WRITE, {"action": "workers"})
+    assert result.outcome == "invalid" and "'workers' instead of write" in result.detail
+
+
+@pytest.mark.parametrize(
+    ("args", "problem"),
+    [
+        ({"key": "max_researchers", "cites": "m-40"}, "cannot be null"),
+        ({"key": "max_researchers", "value": "two", "cites": "m-40"}, "must be an int"),
+        ({"key": "no_such_setting", "value": 2, "cites": "m-40"}, "unknown setting"),
+    ],
+)
+def test_a_settings_update_the_store_refuses_is_invalid(args, problem):
+    case = Case("orchestrator", "settings", "update", "Set it.")
+    outcome, detail = judged({"action": "update", **args}, case)
+    assert outcome == "invalid" and problem in detail
+
+
+def test_a_task_without_a_goal_is_invalid_unless_it_is_maintenance():
+    case = Case("orchestrator", "task", "create", "Create a Task.")
+    args = {"action": "create", "title": "T", "description": "D"}
+    outcome, detail = judged({**args, "type": "research"}, case)
+    assert outcome == "invalid" and "goal is required" in detail
+    assert judged({**args, "type": "maintenance"}, case)[0] == "valid"
+
+
+def test_an_end_condition_without_its_detail_is_invalid():
+    case = Case("orchestrator", "task", "create", "Create a Task.")
+    args = {"action": "create", "type": "research", "title": "T", "description": "D"}
+    args |= {"goal": "G-1", "end_condition": "steps"}
+    outcome, detail = judged(args, case)
+    assert outcome == "invalid" and "end_detail is required" in detail
+
+
+@pytest.mark.parametrize("change", [{"title": "x" * 201}, {"tags": [17]}])
+def test_a_goal_the_store_refuses_is_invalid(change):
+    case = Case("orchestrator", "goal", "create", "Create a Goal.")
+    args = {"action": "create", "title": "T", "end_state": "E", "reason": "R"}
+    assert judged({**args, **change}, case)[0] == "invalid"
+    assert judged(args, case) == ("valid", "")
+
+
+def test_a_goal_with_null_tags_is_valid_as_production_takes_it():
+    case = Case("orchestrator", "goal", "create", "Create a Goal.")
+    args = {"action": "create", "title": "T", "end_state": "E", "reason": "R", "tags": None}
+    assert judged(args, case) == ("valid", "")
+
+
+def test_a_gateway_that_stops_answering_leaves_a_host_error_result(monkeypatch):
+    runs = FinishedRun("completed", GOOD_CLAIM)
+    monkeypatch.setattr(runs, "session_messages", raise_unavailable)
+    monkeypatch.setattr(runs, "status", raise_unavailable)  # the stop finds it gone too
+    gateway = RealGateway(Path("/"), Path("h"), "k", "m", runs=runs)
+    monkeypatch.setattr(gateway, "open_session", lambda role: "s")
+    monkeypatch.setattr(gateway, "_billed_replies", lambda *_: [])
+    assert gateway.run_case("m", CLAIM_WRITE).outcome == "host_error"
+
+
+def test_the_detour_limit_applies_before_a_later_judged_call():
+    gateway = RealGateway(Path("/"), Path("h"), "k", "m")
+    other = {"id": "c", "function": {"name": "todo_list", "arguments": "{}"}}
+    good = {"id": "g", "function": {"name": "claim", "arguments": json.dumps(GOOD_CLAIM)}}
+    stored = [{"tool_calls": [other] * (MAX_DETOURS + 1) + [good]}]
+    result = harness.Result("m", "h", "c", "wrong_tool")
+    assert gateway._judge_new_calls(CLAIM_WRITE, stored, result) is True
+    assert result.outcome == "wrong_tool"
+
+
+def test_a_real_run_refused_by_the_host_counts_and_an_outage_does_not():
+    gateway = RealGateway(Path("/"), Path("h"), "k", "m")
+    for error, outcome in (
+        ("Error code: 400 - bad schema", "rejected"),
+        ("HTTP 503", "host_error"),
+    ):
+        result = harness.Result("m", "h", "c", "wrong_tool")
+        ended = RunStatus("r", "failed", "s", None, error, terminal=True)
+        gateway._judge_end(ended, [], result)
+        assert result.outcome == outcome
+
+
+def test_an_orchestrators_task_claim_is_judged_not_excused(script):
+    case = Case("orchestrator", "task", "create", "Create a Task.")
+    assert run_case_of(script, case, {"action": "claim", "task": "T-5"}).outcome == "invalid"
 
 
 # --- what production refuses (finding B) ------------------------------------------------------
@@ -229,7 +473,7 @@ def test_a_rejected_request_counts_and_a_host_error_does_not(script, monkeypatch
     assert "REJ" in table and "ERR" in table
     rows = {line.split("  ")[0]: line for line in table.splitlines()}
     assert "1/2 50%" in rows["valid, all cases"]  # the rejection counts, the 503 does not
-    assert "0/0" not in rows["recovery valid"] and "-" in rows["recovery valid"]
+    assert "0/0" not in rows["after 1 refusal"] and "-" in rows["after 1 refusal"]
 
 
 # --- the request (finding C) ------------------------------------------------------------------

@@ -41,9 +41,9 @@ when you call the script). With `IDE_WORKSPACE` unset the workspace defaults to
 3. re-applies the config keys the machinery relies on (`approvals.mode: off`, no deny list,
    memory off, `tools.tool_search.enabled: off`, the plugin and toolset, `cron.catch_up_missed`,
    the Orchestrator's compaction settings, the tool-result prune trigger, the disabled Hermes
-   toolsets), removes retired keys, points every profile at the
-   active Coworld (`skills.external_dirs`, `skills.trusted_project_dirs`, `terminal.cwd`), and
-   applies shipped values only where the owner kept an earlier default; it does not change the
+   toolsets), removes retired keys, sets every profile's `skills.external_dirs`,
+   `skills.trusted_project_dirs` (every registered Coworld's code) and `terminal.cwd` (the
+   workspace root), and applies shipped values only where the owner kept an earlier default; it does not change the
    model (the one exception: an Orchestrator on `moonshotai/kimi-k3` with no recorded model
    change moves once to `moonshotai/kimi-k3.1-pro`, see `contract/CONTRACT.md`, "Profile
    models"), but adds the OpenRouter host pins for the Kimi models (`provider_routing.models`,
@@ -55,7 +55,9 @@ when you call the script). With `IDE_WORKSPACE` unset the workspace defaults to
    chats after a release");
 6. builds the workspace environment with `uv sync --frozen --no-dev --project <checkout>` into
    `$IDE_WORKSPACE/tools/venv`, or verifies a prebuilt one named by `IDE_WORKSPACE_ENV` against
-   the lock's sha256;
+   the lock's sha256.
+
+`prepare.py` activates no Coworld: a Session that works on one names it when it opens.
 
 `--check` prints what it would change and writes nothing. A first `uv sync` takes minutes, so
 it belongs at image build: `image/Dockerfile` does that and sets `IDE_WORKSPACE_ENV`.
@@ -166,7 +168,7 @@ hosted workspaces continue to recover automatically through their supervisor.
 The bridge does transport only. For each user message it POSTs `{"input": <message + "\n\nContext
 v1:\n" + json>, "session_id"}` to the Orchestrator's runs route, where the JSON block is the
 client's typed context validated against `research context-schema` and stamped with the client's
-identity, the active Coworld and `contract_version: 1`. If the Session has a live run, new inputs wait in the durable inbox. It streams each store's `events` table to clients as Server-Sent Events
+identity, the Session's Coworld and `contract_version: 1`. If the Session has a live run, new inputs wait in the durable inbox. It streams each store's `events` table to clients as Server-Sent Events
 (`research store events --after <seq>` and `--follow` show the rows; one cursor per store), and
 applies user edits through `research store apply --actor user:<id> <op> <json>`. Notices
 (`events` rows of kind `notice`) must reach every client. `research serve` is the reference

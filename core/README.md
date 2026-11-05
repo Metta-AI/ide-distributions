@@ -42,7 +42,7 @@ decisions is `docs/plans/ide-profile-refactor/`.
 | `prompts/` | The SOUL parts per role, `vocabulary.md` (from metta) and `build.py`; `tools/build_prompts.py` renders `orchestrator/SOUL.md` and `researcher/SOUL.md` and syncs the plugin manifests. |
 | `skills/` | The shipped skills: `common/<category>/<skill>/`, `orchestrator/<skill>/`, `researcher/<skill>/`; `prepare.py` points `skills.external_dirs` at them. |
 | `task_types/` | The four Task types with their completion checklists and Researcher instructions. |
-| `prepare.py` | Profile preparation after install or update: core path marker, protected and retired config keys, the active Coworld's skill directories for every profile, shipped values over earlier defaults (not the model settings, but for one Orchestrator migration off `kimi-k3`), stores, the watcher job, the workspace environment, the default Coworld. |
+| `prepare.py` | Profile preparation after install or update: core path marker, protected and retired config keys, every profile's skill and trusted-project directories, shipped values over earlier defaults (not the model settings, but for one Orchestrator migration off `kimi-k3`), stores, retiring the watcher job, the workspace environment. |
 | `frozen_sessions.py` | Called by `prepare.py`: when a release changes the tool schemas or the instructions, open chats drop their stored copies and take the new ones on their next turn (`docs/hosting.md`, "Open chats after a release"). |
 | `cli.py` | The `research` command; each subcommand module registers itself. |
 
@@ -115,3 +115,7 @@ nowhere.
   `RecordSpec` in `store/registry.py`, its event kinds in `store/events.py`, and a tool action.
 - **Skill:** `skills/<root>/<category>/<name>/SKILL.md` with `name` equal to the directory and a
   one-sentence `description` of at most 60 characters; `tools/check_prompts.py` checks it.
+- **A call shown in a prompt, skill, task type or wake:** write it as
+  `tool.action {a, b: value, c?, d | e, f {g, h}}`, in backticks. Every name must exist on that action,
+  and the signature must name every required field and key; end it with `...` when it shows only
+  part of the call on purpose. `core/tests/test_tool_signatures.py` checks this and says the rules in full.

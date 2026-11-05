@@ -67,7 +67,8 @@ def make_fakegame_repo(tmp_path: Path, *, coworld_id: str = COWORLD_ID) -> tuple
 
 
 def _git(repo: Path, *args: str) -> str:
-    env = {**os.environ, **_GIT_ENV}
+    # No model key: pytest prints a failing frame's arguments, and git has no use for it.
+    env = {k: v for k, v in os.environ.items() if k != "OPENROUTER_API_KEY"} | _GIT_ENV
     result = subprocess.run(
         ["git", *args], cwd=repo, env=env, check=True, capture_output=True, text=True
     )

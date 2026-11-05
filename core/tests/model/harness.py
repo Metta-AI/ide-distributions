@@ -24,20 +24,17 @@ built-in tools, sorted by name as Hermes's registry does, through Hermes's own s
 ``IDE_HERMES_SRC`` names; without it the full-toolset tests fail rather than send schemas Hermes
 would rewrite.
 
-``hermes_builtin_tools.json`` is Hermes v0.21.6's ``hermes-api-server`` toolset as one
-credential-free local install resolves it (memory off, tool search off): 21 tools. It is not
-read from the hosted image, whose credentials and installed browser can add or remove tools
-(``web_search`` backends, the browser tools). It was generated on 2026-11-02 with Python 3.14
-and Hermes's pinned dependencies, and is regenerated the same way::
+``hermes_builtin_tools.json`` is the Hermes tools of a real Session on the pinned image: the 16
+tools Hermes froze for it, the same for both roles, captured with ``IDE_TOOL_CALL_CONTEXT``
+(README, "Develop and test"). ``test_real_session.py`` fails when a real Session's list no longer
+matches. To regenerate after an image change, run ``-k test_a_real_session`` with that variable,
+then copy ``orchestrator.hermes_tools`` from the capture into this file.
 
-    uv pip compile --python-version 3.14 <hermes>/pyproject.toml -o /tmp/hermes-reqs.txt
-    HERMES_HOME=$(mktemp -d) PYTHONPATH=<hermes> uv run --no-project --python 3.14 \\
-      --with-requirements /tmp/hermes-reqs.txt python -c "import json, model_tools; \\
-      json.dump(model_tools.get_tool_definitions(enabled_toolsets=['hermes-api-server'], \\
-      quiet_mode=True), open('hermes_builtin_tools.json', 'w'), indent=1, ensure_ascii=False)"
-
-with a ``config.yaml`` in that ``HERMES_HOME`` that sets ``memory.memory_enabled: false`` and
-``tools.tool_search.enabled: "off"``, as the profiles do.
+Real context. ``IDE_TOOL_CALL_CONTEXT`` names a file ``test_real_session.py`` captured from real
+Sessions: per role, the system prompt Hermes stored (SOUL, briefing, skill index, sections) and
+the Hermes tools it froze. A direct call then sends those in place of the stand-in prompt and
+the snapshot above; the IDE tools still come from the ``SchemaSet``, so a capture stays good for
+measuring a candidate schema.
 """
 
 from __future__ import annotations
@@ -46,10 +43,16 @@ import functools
 import importlib
 import importlib.util
 import json
+import math
 import os
+import re
+import sys
 import time
 import urllib.error
 import urllib.request
+from collections.abc import Callable, Iterable, Iterator
+from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
@@ -121,6 +124,12 @@ class Reply:
     completion_tokens: int
     cost: float
     seconds: float
+    reasoning: str = ""
+
+
+def reasoning_of(message: dict) -> str:
+    """The model's reasoning text in an assistant message (the field name varies by host)."""
+    return message.get("reasoning") or message.get("reasoning_content") or ""
 
 
 @functools.cache
@@ -188,6 +197,7 @@ def complete(
         completion_tokens=usage.get("completion_tokens", 0),
         cost=float(usage.get("cost") or 0.0),
         seconds=time.monotonic() - started,
+        reasoning=reasoning_of(message),
     )
 
 
@@ -260,6 +270,7 @@ def _load(source: Path, relative: str, name: str) -> ModuleType:
     if spec is None or spec.loader is None:
         raise RuntimeError(f"cannot load {path}")
     module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module  # dataclasses look their module up here
     spec.loader.exec_module(module)
     return module
 
@@ -281,16 +292,37 @@ def hermes_sanitizers() -> tuple[ModuleType, ModuleType]:
     )
 
 
+@dataclass(frozen=True)
+class SessionContext:
+    """What a real Session of a role is given before its first message."""
+
+    system: str  # the system prompt Hermes stored for it
+    hermes_tools: list[dict]  # its frozen tool list without the IDE tools
+
+
+@functools.cache
+def _captured_contexts(path: str) -> dict[str, SessionContext]:
+    return {
+        role: SessionContext(**context)
+        for role, context in json.loads(Path(path).read_text()).items()
+    }
+
+
+def session_context(role: Role) -> SessionContext | None:
+    """The role's captured real context, when ``IDE_TOOL_CALL_CONTEXT`` names a capture."""
+    path = os.environ.get("IDE_TOOL_CALL_CONTEXT")
+    return _captured_contexts(path)[role] if path else None
+
+
 def full_toolset(role: Role, schemas: SchemaSet, model: str) -> list[dict]:
     """Every tool a session of the role offers ``model``, as Hermes sends them: sorted by name,
     sanitized, and for a Kimi model rewritten for Moonshot's schema flavour."""
     sanitizer, moonshot = hermes_sanitizers()
-    # The profiles disable Hermes's browser toolset (prepare.PROTECTED_KEYS); the snapshot has it.
-    builtins = [
-        tool
-        for tool in json.loads(HERMES_BUILTIN_TOOLS.read_text())
-        if not tool["function"]["name"].startswith("browser_")
-    ]
+    captured = session_context(role)
+    if captured is not None:
+        builtins = captured.hermes_tools
+    else:
+        builtins = json.loads(HERMES_BUILTIN_TOOLS.read_text())
     ide = [{"type": "function", "function": s} for s in schemas.tools(role)]
     tools = sanitizer.sanitize_tool_schemas(
         sorted([*builtins, *ide], key=lambda tool: tool["function"]["name"])
@@ -305,11 +337,33 @@ def full_toolset(role: Role, schemas: SchemaSet, model: str) -> list[dict]:
 class Result:
     model: str
     host: str
-    case: str  # "<role> <tool>.<action>", with " (recovery)" for a recovery case
+    case: str  # "<role> <tool>.<action>", with " (after N refused)" for a recovery case
     outcome: str  # one of OUTCOME_CELL
     detail: str = ""
     replies: list[Reply] = field(default_factory=list)  # one per request, in order
     detours: list[str] = field(default_factory=list)  # other calls made before the judged one
+    # Fields the judged call's reasoning names but its arguments omit (see ``reasoning_gaps``).
+    reasoning_gaps: list[str] = field(default_factory=list)
+
+
+def reasoning_gaps(
+    required: Iterable[str], optional: Iterable[str], args: dict, text: str
+) -> list[str]:
+    """The fields ``text`` names, as whole words spelled as in the schema, that ``args`` omit.
+
+    A model that reasons "add the summary" and sends no summary points at a schema or host
+    problem, not at a model that misread the tool. The match is on words, so a prose field name
+    ("note", "reason") can be a false alarm, which is why a required field is marked: that is the
+    part to read first. It reports; it fails nothing.
+    """
+
+    def named_and_omitted(field_name: str) -> bool:
+        return field_name not in args and bool(re.search(rf"\b{re.escape(field_name)}\b", text))
+
+    return [
+        *(f"{name} (required)" for name in required if named_and_omitted(name)),
+        *(name for name in optional if named_and_omitted(name)),
+    ]
 
 
 @dataclass
@@ -319,6 +373,27 @@ class Results:
 
 
 RESULTS = Results()
+
+
+@contextmanager
+def started_calls(
+    session: Any, test_function: Callable, run_one: Callable[..., Result]
+) -> Iterator[dict[str, Future]]:
+    """Start the model calls of every collected test of ``test_function`` at once, keyed by test
+    id, ``IDE_TOOL_CALL_PARALLEL`` at a time (default 4): with repeats a run is hundreds of calls
+    that spend most of their time waiting for the host. Each test then waits for its own. Calls
+    not yet started are dropped on exit, so stopping pytest early stops the spending."""
+    pool = ThreadPoolExecutor(int(os.environ.get("IDE_TOOL_CALL_PARALLEL") or 4))
+    try:
+        yield {
+            item.nodeid: pool.submit(run_one, **item.callspec.params)
+            for item in session.items
+            if getattr(item, "function", None) is test_function
+        }
+    finally:
+        pool.shutdown(cancel_futures=True)
+
+
 OUTCOME_CELL = {
     "valid": "ok",  # the judged call's arguments pass the tools' checks
     "invalid": "BAD",  # they do not, or it named another write action of the tool
@@ -328,6 +403,12 @@ OUTCOME_CELL = {
     "rejected": "REJ",  # the host refused the request (4xx)
     "host_error": "ERR",  # transport error, 5xx or account limit: not counted
 }
+
+
+def refusals_in(case_label: str) -> int:
+    """How many refused calls a case's history starts with, from its label."""
+    match = re.search(r"\(after (\d+) refused\)$", case_label)
+    return int(match[1]) if match else 0
 
 
 def _short(model: str) -> str:
@@ -347,10 +428,29 @@ def _cell(results: list[Result]) -> str:
     return f"{valid}/{len(judged)}" + (f" +{errors}E" if errors else "")
 
 
-def _rate(results: list[Result]) -> str:
+def wilson_interval(successes: int, total: int) -> tuple[float, float]:
+    """The 95% Wilson score interval of a rate. It stays sensible at small samples and at rates
+    near 0 or 1, where the usual normal approximation claims a certainty the sample cannot give."""
+    z = 1.96
+    share = successes / total
+    denominator = 1 + z**2 / total
+    center = (share + z**2 / (2 * total)) / denominator
+    margin = z * math.sqrt(share * (1 - share) / total + z**2 / (4 * total**2)) / denominator
+    return max(0.0, center - margin), min(1.0, center + margin)
+
+
+def judged_rate(results: list[Result]) -> tuple[int, int]:
+    """(valid, judged): a transport error, 5xx or account limit says nothing about the call."""
     judged = [r for r in results if r.outcome != "host_error"]
-    valid = sum(r.outcome == "valid" for r in judged)
-    return f"{valid}/{len(judged)} {100 * valid / len(judged):.0f}%" if judged else "-"
+    return sum(r.outcome == "valid" for r in judged), len(judged)
+
+
+def _rate(results: list[Result]) -> str:
+    valid, total = judged_rate(results)
+    if not total:
+        return "-"
+    low, high = wilson_interval(valid, total)
+    return f"{valid}/{total} {100 * valid / total:.0f}% [{100 * low:.0f}-{100 * high:.0f}]"
 
 
 def _hosts(results: list[Result]) -> str:
@@ -368,6 +468,13 @@ def _cached(results: list[Result]) -> str:
     replies = [x for r in results for x in r.replies]
     total = sum(x.prompt_tokens for x in replies)
     return f"{100 * sum(x.cached_tokens for x in replies) / total:.0f}%" if total else "-"
+
+
+def _gap_counts(results: list[Result]) -> str:
+    """Calls whose reasoning names an omitted field, and how many of those name a required one."""
+    gaps = [r.reasoning_gaps for r in results if r.reasoning_gaps]
+    required = sum(any(gap.endswith("(required)") for gap in found) for found in gaps)
+    return f"{len(gaps)} ({required} required)"
 
 
 def _cost(results: list[Result]) -> float:
@@ -389,19 +496,18 @@ def summary() -> list[str]:
     def footer(label: str, value) -> list[str]:
         return [label, *(value([r for r in items if (r.model, r.host) == c]) for c in columns)]
 
-    def recovery(results: list[Result]) -> list[Result]:
-        return [r for r in results if r.case.endswith("(recovery)")]
-
-    def first_try(results: list[Result]) -> list[Result]:
-        return [r for r in results if not r.case.endswith("(recovery)")]
+    def with_refusals(refusals: int) -> Callable[[list[Result]], str]:
+        return lambda results: _rate([r for r in results if refusals_in(r.case) == refusals])
 
     rows += [
         ["-" * 8, *("" for _ in columns)],
         footer("served by", _hosts),
-        footer("first-try valid", lambda rs: _rate(first_try(rs))),
-        footer("recovery valid", lambda rs: _rate(recovery(rs))),
+        footer("first-try valid", with_refusals(0)),
+        footer("after 1 refusal", with_refusals(1)),
+        footer("after 3 refusals", with_refusals(3)),
         footer("valid, all cases", _rate),
         footer("valid, no detour", lambda rs: _rate([r for r in rs if not r.detours])),
+        footer("reasoning gaps", _gap_counts),
         footer("prompt tokens", _first_prompt_tokens),
         footer("cached share", _cached),
         footer("requests", lambda rs: str(sum(len(r.replies) for r in rs))),
@@ -417,7 +523,10 @@ def summary() -> list[str]:
         "limit; TEXT = a text answer at once; STOP = a text answer after other calls; REJ = the "
         "host refused the request (4xx); ERR = transport error or 5xx (not counted). +N = N "
         "other calls first, answered as the tools would (refusal or plausible result). "
-        "Prompt tokens: mean of each case's first request.",
+        "Prompt tokens: mean of each case's first request (through a real Session, of its "
+        "requests: Hermes stores totals). With repeats a cell is valid/judged "
+        "and a rate is valid/judged, percent and [95% Wilson interval]. Intervals that do not "
+        "overlap show a real difference; overlapping ones decide nothing either way.",
         "",
         *rendered,
         "",
@@ -429,5 +538,12 @@ def summary() -> list[str]:
         lines += [
             f"  {_short(r.model)}@{r.host} {r.case}: {r.outcome}: {r.detail}"[:400]
             for r in failures
+        ]
+    gaps = [r for r in items if r.reasoning_gaps]
+    if gaps:
+        lines += ["", "Reasoning names a field the arguments omit:"]
+        lines += [
+            f"  {_short(r.model)}@{r.host} {r.case} ({r.outcome}): {', '.join(r.reasoning_gaps)}"
+            for r in gaps
         ]
     return lines
