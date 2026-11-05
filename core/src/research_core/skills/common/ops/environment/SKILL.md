@@ -15,7 +15,7 @@ Where you are, the image and source commits, the two Python environments, writab
 
 - **Hermes's interpreter** runs the plugin and the store-only tools (`goal`, `task`, `claim`, `directive`, `settings`, `ui`). Nothing else runs there and nothing is installed into it.
 - **The workspace environment** (`tools/venv` under the workspace root; the guide prints its Python) runs the `research` CLI, the platform tools, the mixin commands, `experiment.close` and the watcher. It holds `coworld`, `softmax`, `numpy` and `PyYAML`. Run your own scripts that need those with its Python.
-- **Mixin toolchains** live under `tools/<kind>-<version>`, declared in `MIXIN.md` `toolchains`. Setup, merges and full checks install `python` ones (to test one first: `uv venv --python <version> tools/python-<version>`); install other kinds (Nim) by hand. A command that needs one names it in its `PATH`; a missing one is a repair (`repair` skill).
+- **Mixin toolchains** live under `tools/<kind>-<version>`, declared in `MIXIN.md` `toolchains`. Setup, merges and full checks install `python` ones (to test first: `uv venv --python <version> <that path>`); install other kinds (Nim) by hand. A command that needs one names it in its `PATH`; a missing one is a repair (`repair` skill).
 
 ## Writable and read-only
 
