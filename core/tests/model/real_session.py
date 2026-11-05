@@ -22,8 +22,8 @@ No ``research serve`` runs: its coordinator would start Researchers for the Task
 create, and a chat turn reaches the gateway the same way. Each case gets its own Coworld with
 freshly seeded records (``seed_records``). Sharing one lets runs answer each other: with a shared
 store a repeat of the claim case rightly finds the earlier run's claim and writes nothing, which
-measured 0/5 on correct behaviour. Workspace records and settings are still shared, so a case that writes one
-(``<run>`` in its instruction) is made different for each run.
+measured 0/5 on correct behaviour. Workspace records and settings are still shared, so a case that
+writes one (``<run>`` in its instruction) is made different for each run.
 """
 
 from __future__ import annotations
@@ -224,8 +224,10 @@ class RealGateway:
         argv = [hermes_python(hermes), script, "--source", REPO / role, "--hermes", hermes]
         result = run(argv, self.env(role), timeout=900)
         assert result.returncode == 0, f"prepare {role}:\n{result.stdout}\n{result.stderr}"
-        result = run([hermes, "config", "set", "model.default", self.model], self.env(role))
-        assert result.returncode == 0, result.stdout + result.stderr
+        # One model only: a fallback's valid call would count as this model's.
+        for key, value in (("model.default", self.model), ("fallback_providers", "[]")):
+            result = run([hermes, "config", "set", key, value], self.env(role))
+            assert result.returncode == 0, result.stdout + result.stderr
 
     def _seed(self) -> None:
         env = self.env()
@@ -425,7 +427,7 @@ class RealGateway:
                 message={},
                 calls=[],
                 text="",
-                provider="moonshotai through Hermes",
+                provider=f"{self.model} through Hermes",
                 prompt_tokens=(uncached + cached) // calls,
                 cached_tokens=cached // calls,
                 completion_tokens=output // calls,
