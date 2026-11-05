@@ -3,7 +3,7 @@ version: 1.0.0
 description: >-
   A research worker of the Softmax IDE. Each Session does one Task in the background on the
   Player's policy, proposes Tasks and submissions, and speaks only to the Orchestrator.
-hermes_requires: ">=0.21.6"
+hermes_requires: ">=0.22.6"
 env_requires:
   - name: OPENROUTER_API_KEY
     required: true

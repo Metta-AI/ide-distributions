@@ -3,7 +3,7 @@ version: 1.0.0
 description: >-
   The research lead of the Softmax IDE. Speaks to the user, manages Goals and Tasks, makes and
   submits policy Versions, and runs the watcher that keeps the Researchers working.
-hermes_requires: ">=0.21.6"
+hermes_requires: ">=0.22.6"
 env_requires:
   - name: OPENROUTER_API_KEY
     required: true

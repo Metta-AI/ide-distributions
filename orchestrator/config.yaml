@@ -74,7 +74,7 @@ auxiliary:
   background_review:
     enabled: false
 # Hermes's loop guard hard stop. Hermes leaves it off for api_server, which it treats as
-# attended, but nobody watches a wake or a Task run. In Hermes v0.21.6 it turns on: a halt
+# attended, but nobody watches a wake or a Task run. In Hermes v0.22.6 it turns on: a halt
 # after 5 failures of one tool (same_tool_failure; never for terminal, execute_code and the
 # other failure-tolerant tools); a block after 5 identical failing calls (Hermes's default
 # exact_failure); and a halt after 10 identical calls with identical results, or 10 laps of an

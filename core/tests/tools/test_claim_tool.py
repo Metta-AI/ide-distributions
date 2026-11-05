@@ -16,7 +16,7 @@ FILE_LINES = [f"line {n}" for n in range(1, 11)]
 SESSION = "20261028_210405_0badcafe"
 MESSAGE_CONTENT = "The scouts opened on the left flank and won 12 of 20 episodes."
 
-# Hermes v0.21.6 state.db, the columns the transcript inspector reads (reads/4.md §4).
+# Hermes v0.22.6 state.db, the columns the transcript inspector reads (reads/4.md §4).
 HERMES_SCHEMA = """
 CREATE TABLE sessions (id TEXT PRIMARY KEY, source TEXT NOT NULL, started_at REAL NOT NULL);
 CREATE TABLE messages (

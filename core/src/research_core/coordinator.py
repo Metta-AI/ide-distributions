@@ -799,7 +799,6 @@ class Coordinator:
             "Assign research work using task.assign. Read task.workers, "
             "match capabilities to tasks, "
             "respect dependencies and available slots, and provide worker context and rationale. "
-            "Use the task updated value and a stable assignment_id. "
             "Do not perform worker tasks yourself.\n" + json.dumps(snapshot, sort_keys=True)
         )
         prefix = "planning:" + hashlib.sha256(text.encode()).hexdigest()
@@ -833,6 +832,8 @@ class Coordinator:
             coworld_id=ctx.coworld.coworld_id,
             event="tasks.assignment_requested",
         )
+        # The wake's text shows these revisions, so task.assign is checked against them.
+        tasks.note_seen(ctx.store, ctx.actor, session["id"], candidates)
         admissions.enqueue(
             ctx.wstore,
             ctx.actor,
@@ -1816,7 +1817,7 @@ class Coordinator:
             if occupied >= int(settings.get([ctx.wstore, ctx.store], "max_researchers")):
                 raise StoreError(["research capacity is reserved; wait for a worker to settle"])
             session_id = mint_session_id()
-            # The prompt is rendered from the exact task revision the model selected.
+            # The prompt is rendered from the exact task revision the session saw.
             text = (
                 start_text(ctx.store, coworld, task)
                 + f"\n\nAssignment context:\n{context}\nReason:\n{rationale}"
