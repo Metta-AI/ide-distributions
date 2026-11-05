@@ -114,11 +114,12 @@ only if it is declared, so a provider change is noticed. `test_tool_call_format.
 instruction per tool, on the shipped models and pins.
 
 The default `pytest` needs no network and covers the judging rules, every `tool.action {fields}`
-signature in the prompts, skills, task types and wakes against the specs
+signature and its example values in the prompts, skills, task types and wakes against the specs
 (`core/tests/test_tool_signatures.py`), and every field a validator requires against the schemas
 (`core/tests/tools/test_tool_schemas.py`).
 
-Hermes freezes a Session's tool list, and our deploys do not refresh it. To compare a Session's
+Hermes freezes a Session's tool list until a release's boot refreshes it (`docs/hosting.md`,
+"Open chats after a release"). To compare a Session's
 frozen list with the deployed validator, on a copy of a profile's `state.db`:
 
 ```bash
