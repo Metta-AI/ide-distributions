@@ -37,7 +37,8 @@ RUN mkdir /opt/workspace-plugins \
            ln -s "$plugin" /opt/workspace-plugins/; \
          fi; \
        done
-ENV HOME=/workspace/host \
+ENV HERMES_NEMO_RELAY_PLUGINS_TOML=/opt/distribution/image/relay-plugins.toml \
+    HOME=/workspace/host \
     HERMES_BUNDLED_PLUGINS=/opt/workspace-plugins \
     HERMES_HOME=/workspace/host \
     HERMES_REAL_HOME=/workspace/host \

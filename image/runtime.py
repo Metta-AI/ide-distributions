@@ -6,7 +6,6 @@ import logging
 import os
 import secrets
 import signal
-import time
 from contextlib import AsyncExitStack
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,9 +16,11 @@ import httpx
 from control import serve
 from inference import Availability
 from inference import maintain as maintain_inference
+from opentelemetry import trace
 from processes import managed_process
 from pydantic import BaseModel, ConfigDict, SecretStr
-from timing import StartupTiming
+
+from research_core import telemetry
 
 
 class RuntimeRecovery(BaseModel):
@@ -48,42 +49,32 @@ PROFILES = ("orchestrator", "researcher")
 
 
 async def command(*args: str, env: dict[str, str]) -> None:
-    async with managed_process(*args, env=env) as process:
+    async with managed_process(*args, env=telemetry.process_env(env)) as process:
         code = await process.wait()
     if code:
         raise RuntimeError(f"{args[0]} exited {code}")
 
 
 async def run(stack: AsyncExitStack) -> None:
-    started = time.monotonic()
     boot_id = uuid4().hex
     workspace_state = (
         "retained" if (HOME / "profiles/orchestrator/.softmax-prepared").exists() else "fresh"
     )
     bootstrap = Bootstrap.model_validate_json(Path("/run/workspace/bootstrap.json").read_text())
+    os.environ["IDE_WORKSPACE_ID"] = bootstrap.workspace_id
+    os.environ["IDE_RUNTIME_ID"] = boot_id
+    startup = telemetry.tracer().start_span(
+        "workspace.startup", attributes={"workspace.state": workspace_state}
+    )
+    startup_context = trace.set_span_in_context(startup)
 
-    def report(
-        phase: str,
-        since: float,
-        *,
-        role: str | None = None,
-        outcome: Literal["started", "passed"] = "passed",
-    ) -> None:
-        print(
-            StartupTiming(
-                workspace_id=bootstrap.workspace_id,
-                boot_id=boot_id,
-                workspace_state=workspace_state,
-                phase=phase,
-                outcome=outcome,
-                elapsed_seconds=round(time.monotonic() - since, 3),
-                timestamp=datetime.now(UTC),
-                role=role,
-            ).model_dump_json(exclude_none=True),
-            flush=True,
-        )
+    def finish_startup() -> None:
+        if startup.is_recording():
+            startup.set_attribute("startup.complete", False)
+            startup.set_status(trace.StatusCode.ERROR)
+            startup.end()
 
-    report("startup_total", started, outcome="started")
+    stack.callback(finish_startup)
     HOME.mkdir(parents=True, exist_ok=True, mode=0o700)
     lease_file = HOME / ".inference-lease"
     lease_file.unlink(missing_ok=True)
@@ -99,6 +90,7 @@ async def run(stack: AsyncExitStack) -> None:
     common = {
         **os.environ,
         "IDE_RUNTIME_ID": boot_id,
+        "IDE_WORKSPACE_ID": bootstrap.workspace_id,
         "API_SERVER_ENABLED": "true",
         "API_SERVER_HOST": "127.0.0.1",
         "API_SERVER_PORT": "8642",
@@ -126,23 +118,21 @@ async def run(stack: AsyncExitStack) -> None:
     )
     host_dotenv.chmod(0o600)
     for role in PROFILES:
-        phase_started = time.monotonic()
-        report("profile_install", phase_started, role=role, outcome="started")
-        home = HOME / "profiles" / role
-        if home.exists():
-            await command(HERMES, "profile", "update", role, "--yes", env=common)
-        else:
-            await command(
-                HERMES,
-                "profile",
-                "install",
-                str(SOURCE / role),
-                "--name",
-                role,
-                "--yes",
-                env=common,
-            )
-        report("profile_install", phase_started, role=role)
+        with telemetry.span("workspace.profile_install", context=startup_context, role=role):
+            home = HOME / "profiles" / role
+            if home.exists():
+                await command(HERMES, "profile", "update", role, "--yes", env=common)
+            else:
+                await command(
+                    HERMES,
+                    "profile",
+                    "install",
+                    str(SOURCE / role),
+                    "--name",
+                    role,
+                    "--yes",
+                    env=common,
+                )
         profile_env = {**common, "HERMES_HOME": str(home)}
         # The watcher reads the gateway key from its profile dotenv.
         dotenv = home / ".env"
@@ -167,24 +157,21 @@ async def run(stack: AsyncExitStack) -> None:
             )
         )
         dotenv.chmod(0o600)
-        phase_started = time.monotonic()
-        report("profile_prepare", phase_started, role=role, outcome="started")
-        await command(
-            PYTHON,
-            str(home / "scripts/prepare.py"),
-            "--source",
-            str(SOURCE / role),
-            "--hermes",
-            HERMES,
-            env=profile_env,
-        )
-        report("profile_prepare", phase_started, role=role)
+        with telemetry.span("workspace.profile_prepare", context=startup_context, role=role):
+            await command(
+                PYTHON,
+                str(home / "scripts/prepare.py"),
+                "--source",
+                str(SOURCE / role),
+                "--hermes",
+                HERMES,
+                env=profile_env,
+            )
 
     async def observe_ready(phase: str, ready: asyncio.Event) -> None:
-        since = time.monotonic()
-        report(phase, since, outcome="started")
-        await ready.wait()
-        report(phase, since)
+        with telemetry.span(f"workspace.{phase}", context=startup_context):
+            await ready.wait()
+            trace.get_current_span().set_attribute("readiness.complete", True)
 
     inference_ready = asyncio.Event()
     relay_connected = asyncio.Event()
@@ -202,48 +189,46 @@ async def run(stack: AsyncExitStack) -> None:
             )
         )
         profile_env = {**common, "HERMES_HOME": str(HOME / "profiles/orchestrator")}
-        phase_started = time.monotonic()
-        report("gateway_ready", phase_started, outcome="started")
-        gateway = await stack.enter_async_context(
-            managed_process(PYTHON, "-m", "gateway.run", env=common)
-        )
         async with httpx.AsyncClient(
             base_url="http://127.0.0.1:8642", headers={"Authorization": f"Bearer {key}"}
         ) as client:
-            async with asyncio.timeout(180):
-                while True:
-                    if gateway.returncode is not None:
-                        raise RuntimeError(f"Gateway exited {gateway.returncode}")
-                    result = (
-                        await asyncio.gather(client.get("/v1/capabilities"), return_exceptions=True)
-                    )[0]
-                    if isinstance(result, httpx.Response) and result.is_success:
-                        break
-                    await asyncio.sleep(1)
-            report("gateway_ready", phase_started)
-            phase_started = time.monotonic()
-            report("application_wake", phase_started, outcome="started")
-            await command(RESEARCH, "workspace", "wake", env=profile_env)
-            report("application_wake", phase_started)
-            phase_started = time.monotonic()
-            report("application_ready", phase_started, outcome="started")
-            seam = await stack.enter_async_context(
-                managed_process(RESEARCH, "serve", "--host", "0.0.0.0", env=profile_env)
-            )
-            async with httpx.AsyncClient(base_url="http://127.0.0.1:8650") as seam_client:
-                async with asyncio.timeout(30):
+            with telemetry.span("workspace.gateway_ready", context=startup_context):
+                gateway = await stack.enter_async_context(
+                    managed_process(PYTHON, "-m", "gateway.run", env=common)
+                )
+                async with asyncio.timeout(180):
                     while True:
-                        if seam.returncode is not None:
-                            raise RuntimeError(f"Application exited {seam.returncode}")
                         if gateway.returncode is not None:
                             raise RuntimeError(f"Gateway exited {gateway.returncode}")
                         result = (
-                            await asyncio.gather(seam_client.get("/health"), return_exceptions=True)
+                            await asyncio.gather(
+                                client.get("/v1/capabilities"), return_exceptions=True
+                            )
                         )[0]
                         if isinstance(result, httpx.Response) and result.is_success:
                             break
                         await asyncio.sleep(1)
-            report("application_ready", phase_started)
+            with telemetry.span("workspace.application_wake", context=startup_context):
+                await command(RESEARCH, "workspace", "wake", env=profile_env)
+            with telemetry.span("workspace.application_ready", context=startup_context):
+                seam = await stack.enter_async_context(
+                    managed_process(RESEARCH, "serve", "--host", "0.0.0.0", env=profile_env)
+                )
+                async with httpx.AsyncClient(base_url="http://127.0.0.1:8650") as seam_client:
+                    async with asyncio.timeout(30):
+                        while True:
+                            if seam.returncode is not None:
+                                raise RuntimeError(f"Application exited {seam.returncode}")
+                            if gateway.returncode is not None:
+                                raise RuntimeError(f"Gateway exited {gateway.returncode}")
+                            result = (
+                                await asyncio.gather(
+                                    seam_client.get("/health"), return_exceptions=True
+                                )
+                            )[0]
+                            if isinstance(result, httpx.Response) and result.is_success:
+                                break
+                            await asyncio.sleep(1)
 
             async def reconcile_uncertain_execution() -> None:
                 async with httpx.AsyncClient(base_url="http://127.0.0.1:8650") as observer:
@@ -267,7 +252,8 @@ async def run(stack: AsyncExitStack) -> None:
                         await asyncio.sleep(1)
 
             recovery = group.create_task(reconcile_uncertain_execution())
-            report("startup_total", started)
+            startup.set_attribute("startup.complete", True)
+            startup.end()
 
             group.create_task(observe_ready("relay_connected", relay_connected))
             control = group.create_task(
@@ -294,7 +280,6 @@ async def run(stack: AsyncExitStack) -> None:
 
 async def main() -> None:
     logging.basicConfig()
-    logging.getLogger("application").setLevel(logging.INFO)
     stopping = asyncio.Event()
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGTERM, signal.SIGINT):

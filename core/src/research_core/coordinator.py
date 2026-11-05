@@ -18,6 +18,8 @@ from pathlib import Path
 from typing import Any
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
+from opentelemetry.trace import StatusCode
+
 from research_core import inference, layout, run_failures, transitions
 from research_core.store import admissions, events, notices, sessions, settings, tasks
 from research_core.store._common import now_iso, parse_iso
@@ -25,6 +27,7 @@ from research_core.store.actors import Actor
 from research_core.store.db import Store
 from research_core.store.errors import StoreError
 from research_core.store.events import Event
+from research_core.telemetry import tracer
 from research_core.watcher import (
     champion_sync,
     checks,
@@ -1072,6 +1075,7 @@ class Coordinator:
                 and row["delivery_mode"] == "start"
             ):
                 self._hold(store, row, status, error_class)
+                self.observe_terminal(row, status)
                 return
         with store.tx(ACTOR) as tx:
             tx.execute(
@@ -1084,6 +1088,29 @@ class Coordinator:
                 row["op_id"],
                 {"status": status.status, "error_class": error_class},
             )
+        self.observe_terminal(row, status)
+
+    def observe_terminal(self, row, status: hermes_api.RunStatus) -> None:
+        """Acceptance to terminal observation includes polling delay, not native completion."""
+        current = tracer().start_span(
+            "workspace.run.observed",
+            start_time=int(parse_iso(row["created_at"]).timestamp() * 1e9),
+            attributes={
+                "session.id": row["session_id"],
+                "op.id": row["op_id"],
+                "run.id": status.run_id,
+                "role": row["profile"],
+                "outcome": status.status,
+                "observation.boundary": "acceptance_to_terminal_observation",
+            },
+        )
+        if row["admitted_at"] is not None:
+            current.add_event(
+                "execution.admitted", timestamp=int(parse_iso(row["admitted_at"]).timestamp() * 1e9)
+            )
+        if status.status != "completed":
+            current.set_status(StatusCode.ERROR)
+        current.end()
 
     def _installed_key_id(self) -> str | None:
         lease = inference.read_lease(self.inference_lease_file)

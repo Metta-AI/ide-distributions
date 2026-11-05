@@ -1,13 +1,12 @@
 """The distribution's application interface; hosting only transports these envelopes."""
 
-import logging
-import time
 from contextlib import asynccontextmanager
 from urllib.parse import quote
 from uuid import NAMESPACE_URL, UUID, uuid5
 
 import httpx
 from inference import Availability
+from opentelemetry.trace import StatusCode
 from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
 
 from contract import (
@@ -25,8 +24,7 @@ from contract import (
     Run,
     Snapshot,
 )
-
-log = logging.getLogger(__name__)
+from research_core.telemetry import propagator, span
 
 
 class Operation(BaseModel):
@@ -144,55 +142,45 @@ async def response(
                 method = "POST"
         case _:
             raise AssertionError(type(args))
-    started = time.monotonic()
-    log.info(
-        "Workspace service request started: request_id=%s op_id=%s operation=%s path=%s",
-        operation.id,
-        operation.op_id,
-        operation.name,
-        path,
-    )
-    async with client.stream(
-        method,
-        path,
-        params=params,
-        json=body,
-        headers=headers,
-        timeout=httpx.Timeout(30, read=None) if isinstance(args, Events) else 30,
-    ) as result:
-        log.info(
-            "Workspace service headers: request_id=%s seconds=%.3f status=%s",
-            operation.id,
-            time.monotonic() - started,
-            result.status_code,
-        )
-        if 200 <= result.status_code < 300 and not isinstance(args, Events):
-            reading = time.monotonic()
-            payload = await result.aread()
-            RESPONSES[operation.name].model_validate_json(payload)
-            log.info(
-                "Workspace service body validated: request_id=%s seconds=%.3f bytes=%s",
-                operation.id,
-                time.monotonic() - reading,
-                len(payload),
-            )
-            if isinstance(args, Messages):
-                annotating = time.monotonic()
-                log.info("Workspace history annotation started: request_id=%s", operation.id)
-                annotated = await seam.post(
-                    "/messages/context",
-                    json={
-                        "session_id": args.session_id,
-                        "data": result.json()["data"],
-                    },
-                    timeout=10,
-                )
-                log.info(
-                    "Workspace history annotated: request_id=%s seconds=%.3f status=%s",
-                    operation.id,
-                    time.monotonic() - annotating,
-                    annotated.status_code,
-                )
-                yield annotated
-                return
-        yield result
+    with span(
+        "workspace.request",
+        **{
+            "request.id": str(operation.id),
+            "op.id": str(operation.op_id),
+            "operation": operation.name,
+        },
+    ) as current:
+        propagator.inject(headers)
+        async with client.stream(
+            method,
+            path,
+            params=params,
+            json=body,
+            headers=headers,
+            timeout=httpx.Timeout(30, read=None) if isinstance(args, Events) else 30,
+        ) as result:
+            current.set_attribute("http.response.status_code", result.status_code)
+            if result.status_code >= 400:
+                current.set_status(StatusCode.ERROR)
+            current.add_event("response.headers")
+            if 200 <= result.status_code < 300 and not isinstance(args, Events):
+                with span("workspace.response.validate") as validation:
+                    payload = await result.aread()
+                    RESPONSES[operation.name].model_validate_json(payload)
+                    validation.set_attribute("http.response.body.size", len(payload))
+                if isinstance(args, Messages):
+                    with span("workspace.history.annotate") as annotation:
+                        annotation_headers = {}
+                        propagator.inject(annotation_headers)
+                        annotated = await seam.post(
+                            "/messages/context",
+                            json={"session_id": args.session_id, "data": result.json()["data"]},
+                            headers=annotation_headers,
+                            timeout=10,
+                        )
+                        annotation.set_attribute("http.response.status_code", annotated.status_code)
+                        if annotated.status_code >= 400:
+                            annotation.set_status(StatusCode.ERROR)
+                    yield annotated
+                    return
+            yield result

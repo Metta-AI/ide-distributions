@@ -1,0 +1,15 @@
+# Distribution instrumentation is payload-free. Do not implicitly enable Relay's separate
+# prompt/response exporter when the operator configures OTEL_EXPORTER_OTLP_*.
+version = 1
+
+[[components]]
+kind = "observability"
+enabled = true
+
+[components.config]
+version = 4
+enable_full_payloads = false
+
+[components.config.opentelemetry]
+enabled = false
+endpoints = []

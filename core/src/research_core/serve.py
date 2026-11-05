@@ -58,6 +58,7 @@ from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
 from httpx import HTTPError
+from opentelemetry import trace
 
 from research_core import attachments, contract, inference, intake, layout, profile_models
 from research_core.attachments import AttachmentError
@@ -72,6 +73,7 @@ from research_core.store._common import parse_iso
 from research_core.store.actors import Actor
 from research_core.store.db import Store, change_version, wait_for_change
 from research_core.store.errors import StoreError
+from research_core.telemetry import propagator, span
 from research_core.tools.ui import coworld_conversation, pointer_token
 from research_core.watcher import context, hermes_api
 from research_core.watcher.heartbeat import HAS_WORK_KEY, HAS_WORK_REASONS_KEY, HEARTBEAT_KEY
@@ -392,9 +394,10 @@ class SeamServer:
         """The client page, read from the package on each request so edits show on reload."""
         return PAGE_FILE.read_bytes()
 
+    @span("session.open")
     def session_open(self, body: dict) -> dict:
         """Mint a session id and register a chat Session with the client's context (A.2)."""
-        started = time.monotonic()
+        current = trace.get_current_span()
         client = _object(body, "client")
         kept, problems = contract.validate_context(
             {"contract_version": contract.CONTRACT_VERSION, "client": client}
@@ -406,7 +409,8 @@ class SeamServer:
             )
         actor = _actor(body.get("actor"))
         op_id = str(UUID(_text(body, "op_id")))
-        validated = time.monotonic()
+        current.set_attribute("op.id", op_id)
+        current.add_event("client.validated")
         raw_context = body.get("session_context")
         if raw_context is not None and not isinstance(raw_context, dict):
             raise Refused(HTTPStatus.BAD_REQUEST, "session_context must be an object")
@@ -425,7 +429,7 @@ class SeamServer:
                 HTTPStatus.BAD_REQUEST, "Coworld sessions require session_context.coworld"
             )
         with self.stores(coworld_id) as stores:
-            opened = time.monotonic()
+            current.add_event("store.opened")
             if coworld_id is not None:
                 coworlds.register(
                     stores.wstore, actor, coworld_id, folder=layout.folder_name_for(coworld_id)
@@ -452,7 +456,7 @@ class SeamServer:
                 session_context=session_context,
                 client_capabilities=body.get("capabilities"),
             )
-            metadata = time.monotonic()
+            current.add_event("metadata.prepared")
             receipt = intake.accept(
                 stores.wstore,
                 actor,
@@ -466,16 +470,7 @@ class SeamServer:
             )
             session_id = receipt.session_id
             self._clients[session_id] = client
-            completed = time.monotonic()
-            intake.IntakeTiming(
-                **receipt.model_dump(),
-                operation="session.open",
-                op_id=op_id,
-                validation_ms=(validated - started) * 1000,
-                store_open_ms=(opened - validated) * 1000,
-                metadata_ms=(metadata - opened) * 1000,
-                total_ms=(completed - started) * 1000,
-            ).emit()
+            current.set_attributes({"session.id": receipt.session_id, "replayed": receipt.replayed})
             return {
                 "session_id": session_id,
                 "client": client,
@@ -489,9 +484,10 @@ class SeamServer:
                 "problems": problems,
             }
 
+    @span("session.message")
     def message(self, body: dict) -> dict:
         """Confirm a durable input once; dispatch serially with Hermes's durable run key."""
-        started = time.monotonic()
+        current = trace.get_current_span()
         session_id = _text(body, "session_id")
         message = UserMessage.model_validate(body["message"])
         content = message.root["content"]
@@ -502,10 +498,11 @@ class SeamServer:
         )
         actor = _actor(body.get("actor"))
         op_id = str(UUID(_text(body, "op_id")))
-        validated = time.monotonic()
+        current.set_attribute("op.id", op_id)
+        current.add_event("request.validated")
         log.info("Message admission started: op_id=%s", op_id)
         with self.stores() as stores:
-            opened = time.monotonic()
+            current.add_event("store.opened")
             self._require_session(stores, session_id)
             block, problems = self._context_block(stores, session_id, body.get("context"))
             payload = json.dumps(
@@ -515,7 +512,7 @@ class SeamServer:
                     "instructions": body.get("instructions"),
                 }
             )
-            metadata = time.monotonic()
+            current.add_event("metadata.prepared")
             receipt = intake.accept(
                 stores.wstore,
                 actor,
@@ -526,16 +523,7 @@ class SeamServer:
                 message=text,
                 payload=payload,
             )
-            completed = time.monotonic()
-            intake.IntakeTiming(
-                **receipt.model_dump(),
-                operation="session.message",
-                op_id=op_id,
-                validation_ms=(validated - started) * 1000,
-                store_open_ms=(opened - validated) * 1000,
-                metadata_ms=(metadata - opened) * 1000,
-                total_ms=(completed - started) * 1000,
-            ).emit()
+            current.set_attributes({"session.id": receipt.session_id, "replayed": receipt.replayed})
             return {
                 "op_id": op_id,
                 "session_id": session_id,
@@ -1212,7 +1200,8 @@ class _Handler(BaseHTTPRequestHandler):
             handler = routes.get(path)
             if handler is None:
                 raise Refused(HTTPStatus.NOT_FOUND, f"no route POST {path}")
-            result = handler(self._body())
+            with span("workspace.http", context=propagator.extract(self.headers)):
+                result = handler(self._body())
             status = (
                 HTTPStatus.ACCEPTED
                 if path == "/store/apply" and "status" in result and result["status"] == "pending"

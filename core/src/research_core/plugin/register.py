@@ -2,7 +2,7 @@
 
 Hermes calls ``register(ctx)`` once per process with a ``PluginContext``. Registration must be
 quick (Hermes abandons a plugin after ten seconds) and must not import anything outside the
-standard library, because it runs inside Hermes's own interpreter.
+packaged dependencies, because it runs inside Hermes's own interpreter.
 """
 
 from __future__ import annotations
@@ -27,13 +27,18 @@ def make_register(role: Role) -> Callable[[Any], None]:
         from research_core.plugin.messages import record_native_message
 
         ctx.register_hook("pre_api_request", record_native_message)
+        from research_core.plugin.tracing import make_instrumentation
+
+        hooks, session_span = make_instrumentation(role)
+        for hook_name, callback in hooks.items():
+            ctx.register_hook(hook_name, callback)
 
         for spec in tools_for(role):
             ctx.register_tool(
                 name=spec.name,
                 toolset=toolset_name(role),
                 schema=spec.schema(role),
-                handler=make_handler(spec, role),
+                handler=make_handler(spec, role, session_span),
                 description=spec.description,
             )
         from research_core.plugin.repeats import make_hooks as make_repeat_hooks

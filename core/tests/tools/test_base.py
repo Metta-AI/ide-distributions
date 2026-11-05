@@ -233,21 +233,20 @@ def test_an_action_that_needs_an_object_gets_no_guessed_example(tmp_path):
     ],
 )
 def test_tool_telemetry_outcomes_and_payload_privacy(
-    demo_tool, tmp_path, capsys, name, args, outcome, action
+    demo_tool, tmp_path, spans, name, args, outcome, action
 ):
     base.run_tool(name, args, make_ctx(tmp_path))
-    output = capsys.readouterr().err
-    assert "secret-token" not in output
-    (event,) = [json.loads(line) for line in output.splitlines()]
-    assert event.pop("elapsed_ms") >= 0
-    assert event == {
-        "event": "workspace_tool",
-        "schema_version": 1,
-        "session_id": "s1",
+    (event,) = spans.get_finished_spans()
+    assert "secret-token" not in event.to_json()
+    assert event.end_time >= event.start_time
+    assert dict(event.attributes) == {
+        "gen_ai.operation.name": "execute_tool",
+        "tool.boundary": "distribution",
+        "session.id": "s1",
         "role": "orchestrator",
-        "tool": "unknown" if name == "secret-token" else "demo",
-        "action": action,
+        "gen_ai.tool.name": "unknown" if name == "secret-token" else "demo",
         "outcome": outcome,
+        **({"tool.action": action} if action is not None else {}),
     }
 
 
