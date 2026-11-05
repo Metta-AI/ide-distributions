@@ -39,7 +39,7 @@ EVIDENCE_LINK = a.obj(
     },
     required=("type", "ref", "stance"),
 )
-TAGS = a.strings("Keywords from the shared vocabulary, including the Goal's tags.")
+TAGS = a.strings("Keywords from the shared vocabulary, including the Goal's id (G-n).")
 
 _EVIDENCE_SELECTOR = re.compile(r"^(?:[A-Z]-[0-9]+#)?(?:evidence-)?(?P<number>[1-9][0-9]*)$")
 

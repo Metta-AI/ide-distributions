@@ -27,19 +27,14 @@ refuted claim is a lead.
 
 Work: every claim rests on at least one evidence link (`code` at a commit, `doc`, `replay`,
 `measurement`, `transcript`, `experiment`, `version`, `claim`). Summary at most 40 words, body
-at most 500; tag it with the Goal's tags. Retire what new evidence supersedes or refutes
+at most 500; tag it with the Goal's id (`G-n`). Retire what new evidence supersedes or refutes
 (`claim.retire`). Game-specific reading: see the mixin's `<coworld>-<binding>` skill or docs.
 
 Ask (`task_ask`) when the question itself is unclear or the Goal would change; decide method,
-scope and which claims to write yourself. A wait (`task_wait`) ends your run; the watcher
-resumes you.
+scope and which claims to write yourself. After `task_wait`, end your run yourself; the
+watcher resumes you.
 
 End: `task.complete {task, claims: ["C-12", "C-13"], result, merge: "no", merge_reason}`; a
 research Task merges nothing unless it changed documents in the mixin. When nothing held up,
 `claims: "none: <reason>"` with a reason the Goal can act on ("the lever is already at the
 mixin's floor; see C-4").
-
-When it fails, `task.complete {task, outcome: "failed", failure}` with `what_failed` and `next_step`,
-plus `error`, `exit_code` and `tried` when they exist. Good: what_failed "the build failed on
-nim 2.2: undefined symbol X", next_step "pin nim 2.0 in MIXIN.md toolchains or patch
-tools/build.sh line 12". Bad: what_failed "it broke", next_step "try again".
