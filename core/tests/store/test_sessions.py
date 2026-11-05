@@ -36,6 +36,7 @@ def test_register_inserts_and_emits_session_started(workspace_store, harness):
         "goal_id": None,
         "event": None,
         "parent": "api_1_orch",
+        "pending_inputs": [],
         "run_id": None,
         "attempts": 0,
         "started": T0,

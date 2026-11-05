@@ -56,6 +56,7 @@ class Admission:
     session_id: str
     message: str
     input: dict
+    messages: list[dict]
     status: Literal[
         "queued", "running", "waiting", "completed", "cancelled", "failed", "interrupted"
     ]
@@ -78,11 +79,23 @@ def read(store: Store, op_id: str, kind: str, request: dict) -> dict | None:
 
 def snapshot(store: Store, session_id: str | None = None) -> list[dict]:
     return [
-        asdict(Admission(**{**dict(row), "input": json.loads(row["input"])}))
+        asdict(
+            Admission(
+                **{
+                    **dict(row),
+                    "input": json.loads(row["input"]),
+                    "messages": json.loads(row["messages"]),
+                }
+            )
+        )
         for row in store.q(
             "SELECT op_id,session_id,message,"
             " CASE WHEN origin='answer' THEN json_object('role','user','content',message)"
             " ELSE json_extract(request, '$.message') END AS input,"
+            " CASE WHEN origin='answer' THEN"
+            " json_array(json_object('role','user','content',message))"
+            " ELSE COALESCE(json_extract(request, '$.messages'),"
+            " json_array(json_extract(request, '$.message'))) END AS messages,"
             " CASE WHEN status='queued' AND resume_after IS NOT NULL THEN 'waiting'"
             " ELSE status END AS status,run_id,error,error_class,resume_after,created_at,"
             " json_extract(payload, '$.context.client.id') AS client_id"

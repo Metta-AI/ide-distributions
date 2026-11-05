@@ -10,8 +10,6 @@ from typing import Literal
 from uuid import UUID
 
 import httpx
-from application import Operation
-from application import response as application_response
 from inference import Availability
 from pydantic import BaseModel, ConfigDict
 from websockets.asyncio.client import ClientConnection, connect
@@ -81,10 +79,7 @@ async def reply(
             body = await lifecycle.status(ControlRequest.model_validate(envelope), seam)
             yield httpx.Response(200, json=body)
         else:
-            async with application_response(
-                Operation.model_validate(envelope), seam, gateway, inference
-            ) as result:
-                yield result
+            yield httpx.Response(410, json={"kind": "unsupported", "detail": "Use AIDE 1.0.0"})
 
     async with response() as result:
         frame = {

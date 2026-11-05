@@ -666,6 +666,7 @@ def test_health_and_run_status(seam):
         "profile": "orchestrator",
         "coworld": None,
         "contract_version": 1,
+        "aide_protocol_version": "1.0.0",
     }
     seam.client.open(session_context={"contract_version": 1, "coworld": None})
     run = seam.say("hi")

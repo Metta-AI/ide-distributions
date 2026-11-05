@@ -198,3 +198,25 @@ real builder and platform Player credential. Pass `SOFTMAX_PLAYER_CREDENTIAL` an
 `SOFTMAX_PLAYER_ID` as JSON on stdin, and provide writable `/workspace` and `BUILDKIT_HOST`.
 It creates one uniquely named policy with two versions, verifies an ordinary upload and
 recovery after a deliberately lost response and deleted archive, and never submits or evaluates.
+
+## Native AIDE 1.0.0
+
+The runtime connects directly to `/v2/workspaces/{workspace_id}/aide/1.0.0/backend`
+with subprotocol `aide.1.0.0`. The lifecycle connection accepts lifecycle controls only;
+retired application envelopes return HTTP 410. `research serve /health` reports
+`aide_protocol_version: "1.0.0"`. The bundled contract under `contract/aide/1.0.0`
+validates application requests, results, and notifications.
+
+Before cutting over a retained volume containing pre-league Coworld chat sessions, preview
+those exact records with `/opt/hermes/.venv/bin/python /opt/distribution/image/cleanup-unbound-chats.py`.
+Add `--execute` to delete the selected native transcripts through the gateway's supported
+session DELETE route and then retire their workspace registry/admission records. Active native
+write guards are retained and reported for a later retry. Scoped chats, workspace chats,
+tasks and goals are outside this cleanup. Startup never performs this deletion automatically.
+
+Text acceptance uses durable native intake identities; ordered OpenAI messages and every user
+attachment remain intact. Full retained messages are pushed during work; the native HTTP API
+exposes persisted messages rather than raw OpenAI completion chunks. Pending approvals and
+clarifications are generation-fenced. Commands persist their identities before dispatch.
+A saved reply replays exactly; interrupted dispatch returns `unavailable` with
+`outcome: "unknown"` and never repeats a possibly executed control action.

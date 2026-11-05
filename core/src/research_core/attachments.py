@@ -93,3 +93,17 @@ def prepare(
     if result.returncode:
         raise AttachmentError(result.stderr[-2000:])
     return UserMessage.model_validate_json(result.stdout)
+
+
+def prepare_messages(
+    messages: list[dict], *, ws: layout.Workspace, env: dict, hermes_bin: str
+) -> list[dict]:
+    """Prepare every user attachment without altering ordered non-user context."""
+    return [
+        prepare(
+            UserMessage.model_validate(message), ws=ws, env=env, hermes_bin=hermes_bin
+        ).model_dump(mode="json")
+        if message["role"] == "user"
+        else message
+        for message in messages
+    ]

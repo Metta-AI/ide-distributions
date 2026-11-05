@@ -14,6 +14,7 @@ from typing import Literal
 from uuid import uuid4
 
 import httpx
+from aide import serve as serve_aide
 from control import serve
 from inference import Availability
 from inference import maintain as maintain_inference
@@ -270,6 +271,16 @@ async def run(stack: AsyncExitStack) -> None:
             report("startup_total", started)
 
             group.create_task(observe_ready("relay_connected", relay_connected))
+            group.create_task(
+                serve_aide(
+                    platform_url=bootstrap.platform_url,
+                    workspace_id=bootstrap.workspace_id,
+                    credential=bootstrap.credential.get_secret_value(),
+                    env=profile_env,
+                    connected=relay_connected,
+                    inference=inference,
+                )
+            )
             control = group.create_task(
                 serve(
                     platform_url=bootstrap.platform_url,

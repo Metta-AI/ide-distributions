@@ -48,6 +48,7 @@ for cycle in $(seq 1 "$cycles"); do
   docker exec "$name" /opt/hermes/.venv/bin/python /opt/distribution/image/system_tests/check-contract.py
   docker exec "$name" /opt/hermes/.venv/bin/python /opt/distribution/image/system_tests/check-terminal.py
   docker exec "$name" /opt/hermes/.venv/bin/python /opt/distribution/image/system_tests/check-session-coworld.py
+  docker exec "$name" /opt/hermes/.venv/bin/python /opt/distribution/image/system_tests/check-aide.py
   if [[ "$cycle" == 1 ]]; then
     docker exec "$name" sh -c 'printf %s "$1" > /workspace/.state-proof' sh "$sentinel"
   else

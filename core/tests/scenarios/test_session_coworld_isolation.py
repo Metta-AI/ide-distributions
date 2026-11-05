@@ -242,7 +242,9 @@ def test_runtime_filters_chat_history_and_rejects_wrong_game_reads(tmp_path):
         # The runtime returns only the requested game's chats, even with mixed retained state.
         listed = server.snapshot("workspace", "cow_arena", league="league_arena")
         assert [row["id"] for row in listed["records"]["sessions"]] == ["arena"]
-        assert listed["records"]["admissions"] == []
+        assert {row["session_id"] for row in listed["records"]["admissions"]} == {"arena"}
+        assert "private diplomacy" not in json.dumps(listed)
+        assert "private other_league" not in json.dumps(listed)
         assert server.snapshot("workspace", league="league_arena")["records"]["sessions"] == []
         selected = server.snapshot(
             "workspace", "cow_arena", session_id="arena", league="league_arena"

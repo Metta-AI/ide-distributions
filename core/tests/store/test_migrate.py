@@ -38,6 +38,8 @@ COWORLD_TABLES = {
 }
 
 WORKSPACE_TABLES = {
+    "aide_receipts",
+    "aide_command_receipts",
     "transition_effects",
     "task_assignments",
     "client_admissions",
@@ -159,8 +161,8 @@ def test_second_apply_is_a_noop():
 
 def test_apply_migrations_returns_the_version_it_reached():
     conn = sqlite3.connect(":memory:", isolation_level=None)
-    assert migrate.apply_migrations(conn, "workspace") == 9
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
+    assert migrate.apply_migrations(conn, "workspace") == 10
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
 
 
 def test_admission_waiting_migration_keeps_rows_and_adds_no_hold():
@@ -178,7 +180,7 @@ def test_admission_waiting_migration_keeps_rows_and_adds_no_hold():
         " VALUES (7,'op','message','{}','s','hi',?,'failed','run_1',1,'boom','t',42,'client')",
         (payload,),
     )
-    assert migrate.apply_migrations(conn, "workspace") == 9
+    assert migrate.apply_migrations(conn, "workspace") == 10
     row = conn.execute("SELECT rowid, * FROM client_admissions").fetchone()
     assert (row["rowid"], row["op_id"], row["status"], row["error"]) == (7, "op", "failed", "boom")
     assert (row["payload"], row["native_message_id"], row["origin"]) == (payload, 42, "client")
@@ -197,7 +199,7 @@ def test_scoped_notices_upgrade_keeps_existing_workspace_notices():
         "INSERT INTO notices(text,refs,urgency,created,created_by)"
         " VALUES ('Existing news','[]','normal','t','harness')"
     )
-    assert migrate.apply_migrations(conn, "workspace") == 9
+    assert migrate.apply_migrations(conn, "workspace") == 10
     row = conn.execute("SELECT * FROM notices").fetchone()
     assert row["text"] == "Existing news" and row["coworld_id"] is None
 
@@ -473,3 +475,77 @@ def test_attempt_pointer_migration_preserves_live_authority_or_first_queued_succ
     migrate.apply_migrations(conn, "workspace")
     expected = "lost-receipt" if lost_receipt else "queued-retry" if state == "failed" else "second"
     assert conn.execute("SELECT current_attempt_id FROM task_assignments").fetchone()[0] == expected
+
+
+def test_canonical_receipts_preserve_accepted_open_and_message_identity(tmp_path):
+    import json
+    from uuid import NAMESPACE_URL, uuid4, uuid5
+
+    from research_core import intake
+    from research_core.store.actors import Actor
+    from research_core.store.db import Store
+    from research_core.store.errors import StoreError
+
+    path = tmp_path / "store.db"
+    conn = sqlite3.connect(path, isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    for number, migration in migrate.migration_files("workspace")[:9]:
+        migrate._run_migration(conn, number, migration)
+    scope = {"scope": "coworld", "coworld": "cow_game", "league": "league_game"}
+    conn.execute(
+        "INSERT INTO sessions(id,profile,kind,coworld_id,started,session_context)"
+        " VALUES ('s','orchestrator','chat','cow_game','t',?)",
+        (json.dumps(scope),),
+    )
+    message = {"role": "user", "content": "Retained original input"}
+    message_id = str(uuid4())
+    ids = {"message": message_id, "open": str(uuid5(NAMESPACE_URL, f"session-open:{message_id}"))}
+    for kind, request_id in ids.items():
+        request = {
+            "op_id": request_id,
+            "session_id": "s",
+            "message": message,
+            "actor": "user:ide-next",
+        }
+        conn.execute(
+            "INSERT INTO client_admissions"
+            "(op_id,kind,request,session_id,message,payload,status,created_at)"
+            " VALUES (?,?,?,'s','retained','{}','queued','t')",
+            (request_id, kind, json.dumps(request)),
+        )
+    conn.close()
+    with Store.open(path, kind="workspace") as store:
+        for kind, request_id in ids.items():
+            canonical = {
+                "scope": scope,
+                **({"session_id": "s", "messages": [message]} if kind == "message" else {}),
+            }
+            receipt = intake.accept(
+                store,
+                Actor.user("aide"),
+                op_id=request_id,
+                kind=kind,
+                request={"new_envelope": True},
+                session_id="s",
+                message="",
+                payload="",
+                canonical_request=canonical,
+            )
+            assert receipt.replayed and receipt.session_id == "s"
+        assert store.one("SELECT COUNT(*) FROM client_admissions")[0] == 2
+        with pytest.raises(StoreError, match="different input"):
+            intake.accept(
+                store,
+                Actor.user("aide"),
+                op_id=ids["message"],
+                kind="message",
+                request={},
+                session_id="s",
+                message="",
+                payload="",
+                canonical_request={
+                    "session_id": "s",
+                    "scope": scope,
+                    "messages": [{"role": "user", "content": "Changed input"}],
+                },
+            )

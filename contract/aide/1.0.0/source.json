@@ -1,0 +1,7 @@
+{
+  "owner": "softmax.com",
+  "openai_sdk": "openai-python",
+  "openai_version": "2.54.0",
+  "pydantic_version": "2.14.1",
+  "source": "https://github.com/openai/openai-python/tree/v2.54.0/src/openai/types/chat"
+}

@@ -670,6 +670,7 @@ SESSION = _spec(
         _f("goal_id", "int", "The Goal a wake concerns, if any."),
         _f("event", "text", "For wakes, the event that started it."),
         _f("parent", "text", "The Session that started this one."),
+        _f("pending_inputs", "json", "Canonical pending approval and clarification inputs."),
         _f("run_id", "text", "The current Hermes run."),
         _f("attempts", "int", "Runs started for this Session, counting resumes."),
         _f("started", "timestamp", "When the Session started."),

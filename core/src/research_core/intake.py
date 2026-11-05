@@ -13,6 +13,7 @@ from pydantic import BaseModel, ConfigDict, NonNegativeFloat
 from research_core.store import admissions, sessions
 from research_core.store.actors import Actor
 from research_core.store.db import Store
+from research_core.store.errors import StoreError
 
 
 class OpenRegistration(BaseModel):
@@ -61,11 +62,31 @@ def accept(
     message: str,
     payload: str,
     registration: OpenRegistration | None = None,
+    canonical_request: dict | None = None,
 ) -> Receipt:
     started = time.monotonic()
     with store.tx(actor) as tx:
         acquired = time.monotonic()
-        existing = admissions.read(store, op_id, kind, request)
+        command = tx.one("SELECT method FROM aide_command_receipts WHERE request_id=?", (op_id,))
+        if command is not None and command["method"] != (
+            "session.open" if kind == "open" else "chat.send"
+        ):
+            raise StoreError(["op_id was already used for different input"])
+        if canonical_request is not None:
+            identity = tx.one("SELECT * FROM aide_receipts WHERE request_id=?", (op_id,))
+            if identity is not None and (
+                (kind == "message" and identity["session_id"] != canonical_request["session_id"])
+                or json.loads(identity["scope"]) != canonical_request["scope"]
+                or json.loads(identity["messages"]) != canonical_request.get("messages", [])
+            ):
+                raise StoreError(["op_id was already used for different input"])
+            existing = (
+                store.one("SELECT * FROM client_admissions WHERE op_id=?", (op_id,))
+                if identity is not None
+                else admissions.read(store, op_id, kind, request)
+            )
+        else:
+            existing = admissions.read(store, op_id, kind, request)
         if existing is None:
             tx.execute(
                 "INSERT INTO client_admissions"
@@ -83,8 +104,19 @@ def accept(
                 ),
             )
             tx.event("client.accepted", op_id, {"kind": kind, "session_id": session_id})
+            if canonical_request is not None:
+                tx.execute(
+                    "INSERT INTO aide_receipts(request_id,session_id,scope,messages)"
+                    " VALUES (?,?,?,?)",
+                    (
+                        op_id,
+                        session_id,
+                        json.dumps(canonical_request["scope"], sort_keys=True),
+                        json.dumps(canonical_request.get("messages", []), sort_keys=True),
+                    ),
+                )
         registering = time.monotonic()
-        if registration is not None:
+        if registration is not None and existing is None:
             sessions.register_in_transaction(
                 tx,
                 session_id=existing["session_id"] if existing is not None else session_id,

@@ -53,11 +53,13 @@ from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
 from pathlib import Path
-from typing import Any
+from typing import Annotated, Any
 from urllib.parse import parse_qs, urlsplit
 from uuid import UUID
 
 from httpx import HTTPError
+from openai.types.chat import ChatCompletionMessageParam
+from pydantic import Field, TypeAdapter
 
 from research_core import attachments, contract, inference, intake, layout, profile_models
 from research_core.attachments import AttachmentError
@@ -332,6 +334,7 @@ class SeamServer:
                 "profile": self.profile,
                 "coworld": stores.coworld_id,
                 "contract_version": contract.CONTRACT_VERSION,
+                "aide_protocol_version": "1.0.0",
             }
 
     def status(self) -> dict:
@@ -463,6 +466,7 @@ class SeamServer:
                 message="",
                 payload="",
                 registration=registration,
+                canonical_request=body.get("canonical_request"),
             )
             session_id = receipt.session_id
             self._clients[session_id] = client
@@ -494,6 +498,16 @@ class SeamServer:
         started = time.monotonic()
         session_id = _text(body, "session_id")
         message = UserMessage.model_validate(body["message"])
+        messages_adapter = TypeAdapter(
+            list[Annotated[ChatCompletionMessageParam, Field(discriminator="role")]]
+        )
+        messages = (
+            messages_adapter.dump_python(
+                messages_adapter.validate_python(body["messages"]), mode="json"
+            )
+            if "messages" in body
+            else [message.model_dump(mode="json", exclude_none=True)]
+        )
         content = message.root["content"]
         text = (
             content
@@ -510,7 +524,7 @@ class SeamServer:
             block, problems = self._context_block(stores, session_id, body.get("context"))
             payload = json.dumps(
                 {
-                    "input": [message.model_dump(mode="json", exclude_none=True)],
+                    "input": messages,
                     "context": block,
                     "instructions": body.get("instructions"),
                 }
@@ -525,6 +539,7 @@ class SeamServer:
                 session_id=session_id,
                 message=text,
                 payload=payload,
+                canonical_request=body.get("canonical_request"),
             )
             completed = time.monotonic()
             intake.IntakeTiming(
@@ -675,8 +690,8 @@ class SeamServer:
                 ):
                     (prepared,) = await asyncio.gather(
                         asyncio.to_thread(
-                            attachments.prepare,
-                            UserMessage.model_validate(payload["input"][0]),
+                            attachments.prepare_messages,
+                            payload["input"],
                             ws=self.ws,
                             env=self.env,
                             hermes_bin=self.hermes_bin,
@@ -702,7 +717,7 @@ class SeamServer:
                         continue
                     if isinstance(prepared, BaseException):
                         raise prepared
-                    payload["input"] = [prepared.model_dump(mode="json")]
+                    payload["input"] = prepared
                     # Freeze the prepared body before native admission, retaining the user's
                     # original message in request for the application contract and history.
                     with admissions.dispatch_lock(stores.wstore), stores.wstore.tx(actor) as tx:
@@ -751,6 +766,104 @@ class SeamServer:
                 if row["cancel_requested"]:
                     self.hermes.stop(run_id, profile=row["profile"])
 
+    def aide_command(self, body: dict) -> dict:
+        request_id = str(UUID(_text(body, "request_id")))
+        with self.stores() as stores, stores.wstore.tx(Actor.harness()) as tx:
+            prior = tx.one("SELECT * FROM aide_command_receipts WHERE request_id=?", (request_id,))
+            if body["method"] == "chat.send":
+                if prior is not None:
+                    return {"state": "id_reused"}
+                accepted = tx.one("SELECT * FROM aide_receipts WHERE request_id=?", (request_id,))
+                if accepted is None:
+                    return {"state": "new"}
+                params = body["params"]
+                if (
+                    accepted["session_id"] != params["session_id"]
+                    or json.loads(accepted["scope"]) != params["scope"]
+                    or json.loads(accepted["messages"]) != params["messages"]
+                ):
+                    return {"state": "id_reused"}
+                return {
+                    "state": "recorded",
+                    "result": {
+                        "accepted": True,
+                        "session_id": accepted["session_id"],
+                        "request_id": request_id,
+                    },
+                }
+            if prior is not None:
+                if (
+                    prior["method"] != body["method"]
+                    or json.loads(prior["params"]) != body["params"]
+                ):
+                    return {"state": "id_reused"}
+                if "result" in body:
+                    if prior["result"] is None:
+                        tx.execute(
+                            "UPDATE aide_command_receipts SET result=? WHERE request_id=?",
+                            (json.dumps(body["result"], sort_keys=True), request_id),
+                        )
+                    elif json.loads(prior["result"]) != body["result"]:
+                        raise ValueError("AIDE result cannot change")
+                    return {"state": "recorded", "result": body["result"]}
+                return (
+                    {"state": "recorded", "result": json.loads(prior["result"])}
+                    if prior["result"] is not None
+                    else {"state": "unknown"}
+                )
+            existing = tx.one("SELECT kind FROM client_admissions WHERE op_id=?", (request_id,))
+            if existing is not None and (
+                body["method"] != "session.open" or existing["kind"] != "open"
+            ):
+                return {"state": "id_reused"}
+            tx.execute(
+                "INSERT INTO aide_command_receipts(request_id,method,params) VALUES (?,?,?)",
+                (request_id, body["method"], json.dumps(body["params"], sort_keys=True)),
+            )
+            return {"state": "dispatch"}
+
+    def cleanup_unbound_chats(self, body: dict) -> dict:
+        with self.stores() as stores:
+            selected = [
+                dict(row)
+                for row in stores.wstore.q(
+                    "SELECT id,profile,run_id FROM sessions WHERE kind='chat'"
+                    " AND coworld_id IS NOT NULL"
+                    " AND json_extract(session_context,'$.league') IS NULL"
+                )
+            ]
+            if "execute_ids" in body:
+                allowed = {row["id"] for row in selected}
+                if not set(body["execute_ids"]).issubset(allowed):
+                    raise Refused(HTTPStatus.CONFLICT, "Cleanup selection changed; preview again")
+                with stores.wstore.tx(Actor.user("cleanup-unbound-chats")) as tx:
+                    for session_id in body["execute_ids"]:
+                        tx.execute("DELETE FROM aide_receipts WHERE session_id=?", (session_id,))
+                        tx.execute(
+                            "DELETE FROM client_admissions WHERE session_id=?", (session_id,)
+                        )
+                        tx.execute("DELETE FROM sessions WHERE id=?", (session_id,))
+                        tx.event(
+                            "session.deleted",
+                            session_id,
+                            {"reason": "operator cleanup of unbound chat"},
+                        )
+            return {"items": selected}
+
+    def aide_pending(self, body: dict) -> dict:
+        session_id = _text(body, "session_id")
+        pending = body["pending"]
+        with self.stores() as stores:
+            session = self._require_session(stores, session_id)
+            if session["pending_inputs"] != pending:
+                with stores.wstore.tx(Actor.harness()) as tx:
+                    tx.execute(
+                        "UPDATE sessions SET pending_inputs=? WHERE id=?",
+                        (json.dumps(pending), session_id),
+                    )
+                    tx.event("session.pending_changed", session_id, {})
+            return {"revision": stores.wstore.last_seq()}
+
     def session_pending(self, session_id: str) -> dict:
         """A locally accepted chat is empty until its serial native opening completes."""
         with self.stores() as stores:
@@ -774,9 +887,10 @@ class SeamServer:
                 row["native_message_id"]: (
                     json.loads(row["payload"])["context"],
                     json.loads(row["request"])["message"]["content"],
+                    row["op_id"],
                 )
                 for row in stores.wstore.q(
-                    "SELECT native_message_id,payload,request FROM client_admissions"
+                    "SELECT op_id,native_message_id,payload,request FROM client_admissions"
                     " WHERE session_id=? AND native_message_id IS NOT NULL AND origin='client'",
                     (session_id,),
                 )
@@ -787,6 +901,11 @@ class SeamServer:
                         **message,
                         **(
                             {"content": admissions_by_message[message["id"]][1]}
+                            if message["id"] in admissions_by_message
+                            else {}
+                        ),
+                        **(
+                            {"request_id": admissions_by_message[message["id"]][2]}
                             if message["id"] in admissions_by_message
                             else {}
                         ),
@@ -918,14 +1037,17 @@ class SeamServer:
                                 (coworld_id, league),
                             )
                         ]
+                    selected_ids = {row["id"] for row in selected}
                     return {
                         "store": "workspace",
                         "seq": stores.wstore.last_seq(),
                         "records": {
                             "sessions": selected,
-                            "admissions": admissions.snapshot(stores.wstore, session_id)
-                            if session_id
-                            else [],
+                            "admissions": [
+                                row
+                                for row in admissions.snapshot(stores.wstore, session_id)
+                                if row["session_id"] in selected_ids
+                            ],
                         },
                         "ui_state": [],
                     }
@@ -1201,6 +1323,9 @@ class _Handler(BaseHTTPRequestHandler):
         seam = self.server.seam
         routes = {
             "/session-open": seam.session_open,
+            "/aide-pending": seam.aide_pending,
+            "/aide-command": seam.aide_command,
+            "/cleanup-unbound-chats": seam.cleanup_unbound_chats,
             "/message": seam.message,
             "/message-cancel": seam.message_cancel,
             "/messages/context": seam.message_context,
