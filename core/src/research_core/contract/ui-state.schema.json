@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/Metta-AI/ide-distributions/contract/ui-state.schema.json",
+  "$id": "https://github.com/softmax-universe/ide-distributions/contract/ui-state.schema.json",
   "title": "UI state document",
   "description": "What the agent shows in a conversation (design A.10): the record or view it brought into view, the panels it set, its open questions, and the agent-context panel. Changed only by the ui tool and the watcher, through JSON Patch events (ui.patch).",
   "contract_version": 1,

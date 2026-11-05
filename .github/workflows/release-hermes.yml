@@ -45,5 +45,5 @@ jobs:
           SOURCE_REVISION: ${{ github.sha }}
           RELEASE_STARTED_AT: ${{ steps.origin.outputs.started_at }}
         run: >-
-          gh workflow run deploy-hermes-agent.yml --repo Metta-AI/metta --ref main
+          gh workflow run deploy-hermes-agent.yml --repo softmax-universe/softmax --ref main
           -f "source_revision=$SOURCE_REVISION" -f "release_started_at=$RELEASE_STARTED_AT"
