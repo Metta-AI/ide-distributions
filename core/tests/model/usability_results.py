@@ -44,7 +44,8 @@ def _first_real_call(run: dict) -> str:
 
 
 def _steps_before_act(run: dict) -> int:
-    return max(len(run["calls"]) - 1, 0)
+    """Calls before the one that ended the run; all of them when no call did."""
+    return len(run["calls"]) - (1 if run["act"] else 0)
 
 
 def _preparation_count(run: dict) -> int:
@@ -70,7 +71,6 @@ def situation_row(situation: Situation, runs: list[dict]) -> dict:
         "args_right": sum(r.get("args_right") is True for r in counted),
         "attempted": len(attempts),
         "act_valid_first_try": sum(bool(r["act_valid"]) for r in attempts),
-        "first_ide_valid": sum(r["first_ide_valid"] is not False for r in counted),
         "mean_steps": _mean(_steps_before_act(r) for r in counted),
         "mean_preparation": _mean(_preparation_count(r) for r in counted),
         "mean_requests": _mean(r["requests"] for r in counted),
@@ -205,7 +205,6 @@ def totals(situations: list[Situation], rows: dict[str, dict]) -> dict:
             "first_call_right": sum(r["first_call_right"] for r in picked),
             "attempted": sum(r["attempted"] for r in picked),
             "act_valid_first_try": sum(r["act_valid_first_try"] for r in picked),
-            "first_ide_valid": sum(r["first_ide_valid"] for r in picked),
             "args_checked": sum(r["args_checked"] for r in picked),
             "args_right": sum(r["args_right"] for r in picked),
             "skill_n": sum(r["n"] for r in with_skill),
@@ -302,9 +301,18 @@ def compare(old: dict, new: dict) -> list[str]:
                         name, metric, (was[metric], was[n_key]), (row[metric], row[n_key]), 0.01
                     )
                 )
+    comparable = old["situations"].keys() == new["situations"].keys() and not any(
+        old["situations"][name]["hash"] != row["hash"]
+        for name, row in new["situations"].items()
+        if name in old["situations"]
+    )
+    if not comparable:
+        found.append(
+            "Whole-skill and whole-tool totals not compared: they add up different situations."
+        )
     for section, metrics in (
-        ("skills", (("opened_accepted", "n"),)),
-        ("tools", (("right", "n"), ("valid_first_try", "attempted"))),
+        ("skills", (("opened_accepted", "n"),)) if comparable else ("skills", ()),
+        ("tools", (("right", "n"), ("valid_first_try", "attempted")) if comparable else ()),
     ):
         for name, row in new[section].items():
             was = old[section].get(name)

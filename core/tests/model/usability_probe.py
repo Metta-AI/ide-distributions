@@ -1,7 +1,8 @@
 """Running one situation with the session's real prompt and tools, and judging what the model did.
 
 A run asks until the model does something that settles the situation, at most ``MAX_REQUESTS``
-requests. Every call it makes before that is answered as a session would answer it:
+requests. Every call it makes before that is answered as a session would answer it, and every call
+in the reply that settles it still counts, because a session would run them all:
 
 - ``skill_view`` and ``skills_list`` return the real skill text or list, and count as opening;
 - a preparation (a read, a terminal command, an edit: :func:`is_preparation`) gets the tool's own
@@ -15,7 +16,8 @@ requests. Every call it makes before that is answered as a session would answer 
   and the run goes on.
 
 Outcomes: ``right`` (also words alone when ``"text"`` is in ``situation.acts``), ``wrong_act``,
-``text`` (answered in words where a call was wanted, with or without earlier calls),
+``text`` (answered in words where a call was wanted, with or without earlier calls, or with
+nothing at all),
 ``limit`` (still preparing after ``MAX_REQUESTS``), ``rejected`` (the host refused the request),
 ``host_error`` (transport, 5xx, or account limit; not counted in any rate).
 
@@ -94,7 +96,6 @@ class Run:
     act_attempts: int = 0  # calls naming an expected act
     args_right: bool | None = None  # whether the right call holds what ``situation.args`` asks
     act_args: dict | None = None  # the arguments of the call that ended the run
-    first_ide_valid: bool | None = None  # whether the first IDE tool call passed the checks
     problems: list[str] = field(default_factory=list)  # what the checks said, per refused call
     unknown_tools: list[str] = field(default_factory=list)
     requests: int = 0
@@ -118,7 +119,10 @@ class Run:
 # --- the conversation -------------------------------------------------------------------------
 
 
-def _assistant_call(call_id: str, tool: str, args: dict) -> dict:
+def _assistant_call(
+    call_id: str, role: str, tool: str, args: dict, schemas: harness.SchemaSet
+) -> dict:
+    tool, args = schemas.outgoing(role, tool, args)
     return {
         "role": "assistant",
         "content": "",
@@ -153,7 +157,7 @@ def _task_prompt(situation: Situation) -> str:
         title=situation.title,
         type=situation.task_type,
         priority="normal",
-        goal="G-1 Reach the top 3 of league_cogs_main — end state: our policy ranks in the top 3",
+        goal=usability_reads.goal_line(situation.goal),
         end_condition="deliverable",
         experiment=None,
         depends_on=None,
@@ -164,12 +168,12 @@ def _task_prompt(situation: Situation) -> str:
     )
 
 
-def _claim_exchange(situation: Situation) -> list[dict]:
+def _claim_exchange(situation: Situation, schemas: harness.SchemaSet) -> list[dict]:
     """The ``task.claim`` already made, with the type's real instructions in its result."""
     result = usability_reads.claim_result(situation, load_task_type(situation.task_type).body)
     args = {"action": "claim", "task": TASK_ID, "operation_id": "claim-t-21"}
     return [
-        _assistant_call("call_claim", "task", args),
+        _assistant_call("call_claim", situation.role, "task", args, schemas),
         {"role": "tool", "tool_call_id": "call_claim", "content": json.dumps(result)},
     ]
 
@@ -185,12 +189,12 @@ def first_user_message(situation: Situation) -> str:
     return situation.text
 
 
-def messages_for(situation: Situation) -> list[dict]:
+def messages_for(situation: Situation, schemas: harness.SchemaSet) -> list[dict]:
     your_task = ""
     if situation.role == "researcher":
         your_task = (
-            f'Your Task: {TASK_ID} "{situation.title}" — {situation.task_type} for G-1, '
-            "in-progress; read it with task.read before working\n"
+            f'Your Task: {TASK_ID} "{situation.title}" — {situation.task_type} for '
+            f"{situation.goal}, in-progress; read it with task.read before working\n"
         )
     system = usability_context.system_prompt(
         situation.role,
@@ -204,11 +208,11 @@ def messages_for(situation: Situation) -> list[dict]:
         {"role": "user", "content": first_user_message(situation)},
     ]
     if situation.role == "researcher" and situation.claimed:
-        history += _claim_exchange(situation)
+        history += _claim_exchange(situation, schemas)
     for number, prior in enumerate(situation.prior):
         call_id = f"call_prior_{number}"
         history += [
-            _assistant_call(call_id, prior.tool, prior.args),
+            _assistant_call(call_id, situation.role, prior.tool, prior.args, schemas),
             {"role": "tool", "tool_call_id": call_id, "content": prior.result},
         ]
     return history
@@ -266,19 +270,24 @@ def _handle_call(
     situation: Situation, run: Run, call: harness.Call, schemas: harness.SchemaSet
 ) -> str | None:
     """Record one call. Returns what to answer it with, or None when it ends the run."""
+    if call.arguments is not None:
+        name, canonical = schemas.canonical(situation.role, call.name, call.arguments)
+        call = harness.Call(call.id, name, canonical, call.raw)
     args = call.arguments
     label = label_of(call.name, args)
     run.calls.append(label)
     if call.name == "skill_view":
         run.skills.append(usability_context.bare_skill_name(str((args or {}).get("name"))))
         return _answer(situation, call, schemas)
+    if situation.stop and call.name != "skills_list":
+        run.outcome, run.act, run.act_args = "wrong_act", label, args
+        run.detail = call.raw[:300]
+        return None
     is_ide = _is_ide_tool(situation, call.name)
     if not is_ide and call.name not in usability_context.builtin_names():
         run.unknown_tools.append(call.name)
         return json.dumps({"error": f"Unknown tool: {call.name}"})
     problems = _problems(situation, call) if is_ide else ""
-    if is_ide and run.first_ide_valid is None:
-        run.first_ide_valid = not problems
     if problems:
         run.problems.append(f"{label}: {problems}"[:400])
     if label in situation.acts:
@@ -286,6 +295,8 @@ def _handle_call(
         if run.act_valid is None:
             run.act_valid = not problems
         if not problems:
+            if run.outcome == "right":  # a second valid act in the reply: the first one is judged
+                return None
             run.outcome, run.act, run.act_args = "right", label, args
             if situation.args is not None:
                 run.args_right = args_hold(situation.args, args or {})
@@ -335,7 +346,7 @@ def run_situation(
     schemas: harness.SchemaSet,
 ) -> Run:
     run = Run(situation.id, repeat)
-    history = messages_for(situation)
+    history = messages_for(situation, schemas)
     tools = usability_context.session_tools(situation.role, schemas, model)
     provider = harness.provider_for(model, host)
     for _ in range(MAX_REQUESTS):
@@ -347,14 +358,17 @@ def run_situation(
             return run
         _count(run, reply)
         if not reply.calls:
-            run.outcome = "right" if "text" in situation.acts else "text"
+            run.outcome = "right" if "text" in situation.acts and reply.text.strip() else "text"
             run.detail = reply.text[:300]
             return run
         answers = []
         for call in reply.calls:
             content = _handle_call(situation, run, call, schemas)
-            if content is None:
+            if run.outcome == "wrong_act":
                 return run
-            answers.append({"role": "tool", "tool_call_id": call.id, "content": content})
+            if content is not None:
+                answers.append({"role": "tool", "tool_call_id": call.id, "content": content})
+        if run.outcome == "right":
+            return run
         history = [*history, reply.message, *answers]
     return run
