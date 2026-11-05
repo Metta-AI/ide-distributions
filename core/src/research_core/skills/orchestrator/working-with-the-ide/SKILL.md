@@ -23,9 +23,9 @@ matters, do not recite the list. After an hour or more away, the turn context ca
 
 ## In a wake
 
-Nobody is reading. A wake writes under the shared `workspace` conversation that every client
-sees, and `ui.notify` is the only channel for news. Never write a wake's result as chat text; nobody has
-that conversation open. Finish a wake with one notice, or none when nothing changed.
+Nobody is reading. A wake writes under its Coworld's shared conversation, which every client
+sees, and `ui.notify` is the only channel for news. Never write a wake's result as chat text; nobody
+has that conversation open. Finish a wake with one notice, or none when nothing changed.
 
 ## The `ui` tool
 

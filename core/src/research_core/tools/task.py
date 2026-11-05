@@ -403,7 +403,7 @@ SPEC = durable_tool(
             ),
             ActionSpec(
                 "approve",
-                "Accept a proposed Task so the watcher can dispatch it.",
+                "Accept a proposed Task so it can be assigned.",
                 {"task": TASK, "cites": CITES},
                 ("task",),
                 ORCHESTRATOR,
@@ -428,7 +428,8 @@ SPEC = durable_tool(
             ),
             ActionSpec(
                 "message",
-                "Send the Researcher a note; the watcher delivers it.",
+                "Send the Researcher a note: the watcher delivers it to a live run, or when its "
+                "wait resolves.",
                 {"task": TASK, "text": a.string("The note.")},
                 ("task", "text"),
                 ORCHESTRATOR,
@@ -477,7 +478,8 @@ SPEC = durable_tool(
                     "kind": a.string("What kind of thing it waits on.", enum=list(WAIT_KINDS)),
                     "detail": a.string("What exactly it waits for."),
                     "ref": a.any_of(
-                        "A pid, a request id or a list of request ids to watch.",
+                        "What to watch: a pid (process), request ids (xp), a policy version id "
+                        "(submission), a route (permit), a setting or Task (user).",
                         a.STRING,
                         a.INTEGER,
                         a.STRINGS,

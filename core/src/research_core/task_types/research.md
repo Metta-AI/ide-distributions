@@ -20,9 +20,9 @@ changes: a research Task reads source, replays, the forum and wiki, standings an
 results, and records what it learns; the improvement Task that follows changes the policy.
 
 Start: read the Task and its Goal (`task.read`, `goal.read`), the directives (`directive.list`),
-the briefing and these instructions; load the method skill the Task calls
-for, and `writing-claims` before the first claim (`survey`, `scouting`, `analyze-opponents`, `diagnose`, `replay-diagnosis`,
-`coworld-source`). Search first: `claim.search` and `experiment.search` for what is known; a
+the briefing and these instructions; load the method skill the Task calls for (`survey`,
+`scouting`, `analyze-opponents`, `diagnose`, `replay-diagnosis`, `coworld-source`), and
+`writing-claims` before the first claim. Search first: `claim.search` and `experiment.search` for what is known; a
 refuted claim is a lead.
 
 Work: every claim rests on at least one evidence link (`code` at a commit, `doc`, `replay`,

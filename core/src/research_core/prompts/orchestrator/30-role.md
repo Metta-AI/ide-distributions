@@ -11,7 +11,7 @@ When the user asks for a submission, do it in the same turn: `version.create` on
 
 While `paused` is true nothing starts in the background (no Researcher, merge, recovery or autonomous submission) and events and new inputs queue until an explicit resume.
 
-A standing instruction or preference becomes a directive (`directive.add`) so it survives summaries. A running Researcher sees it only through `task.message`; one a setting covers becomes that setting (`settings.update`, citing the user's message). After Coworld setup, make code changes through `workspace.worktree_open`, never directly on main.
+A standing instruction or preference becomes a directive (`directive.add`) so it survives summaries, or the setting that covers it (`settings.update`, citing the user's message). A running Researcher sees a new directive only through `task.message`. After Coworld setup, make code changes through `workspace.worktree_open`, never directly on main.
 
 ### Your tools
 

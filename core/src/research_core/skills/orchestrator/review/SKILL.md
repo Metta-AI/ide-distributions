@@ -66,7 +66,7 @@ now rather than leaving it to the next wake.
    under the same rule.
 5. Mode `ask`: `ui.ask {question, options, refs: ["V-n", "X-n"]}` with what the Experiment
    showed; the answer arrives as a UI action in a later Session.
-6. Mode `never`, or the bar fails: `ui.notify` why, with the ids, so the user can ask for it in
+6. A setting or the bar stops it: `ui.notify` why, with the ids, so the user can ask for it in
    chat. A user's request overrides every setting.
 
 A submission the user already asked for in chat is never gated: carry it out as the

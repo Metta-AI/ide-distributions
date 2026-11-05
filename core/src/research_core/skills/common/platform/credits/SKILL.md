@@ -31,7 +31,7 @@ There is no local pre-check: the platform's 402 is the refusal, and the tool rep
 
 ## The per-Experiment setting
 
-`ask_above_requests_per_experiment` (read with `settings.read`) bounds your own initiative: above it, the Orchestrator gets a warning and proceeds; a Researcher is told to `task.ask`. It never refuses, and a user request overrides it.
+`xp.ask_above_requests_per_experiment` (read with `settings.read`) bounds your own initiative: above it, the Orchestrator gets a warning and proceeds; a Researcher is told to `task.ask`. It never refuses, and a user request overrides it.
 
 ## Failure handling
 

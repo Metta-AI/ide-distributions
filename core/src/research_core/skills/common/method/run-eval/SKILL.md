@@ -43,4 +43,4 @@ Never conclude from a rung below the question's weight.
 - Sampled seats (`league`) in an A/B invalidate the comparison: the arms saw different fields.
 - A created or running request counts for nothing until its results are inspected.
 - A platform 4xx on a body means the route changed: read the error's detail and the `softmax-api-routes` skill, do not retry blind.
-- A request above the `ask_above_requests_per_experiment` setting is a warning for the Orchestrator and a `task.ask` suggestion for a Researcher; it never refuses.
+- A request above the `xp.ask_above_requests_per_experiment` setting is a warning for the Orchestrator and a `task.ask` suggestion for a Researcher; it never refuses.

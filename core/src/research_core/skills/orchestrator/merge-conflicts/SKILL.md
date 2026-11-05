@@ -25,7 +25,7 @@ never commit on `main` directly.
 For a conflict you can judge (both sides touched the same file; a dependency pin; a renamed
 function):
 
-1. `workspace.worktree_open {name}` gives `worktrees/orch-<n>/` on branch `orch/<n>` from
+1. `workspace.worktree_open` gives `worktrees/orch-<n>/` on branch `orch/<n>` from
    `main`. Work there.
 2. Merge the Task branch into your worktree branch, resolve each conflict keeping the intent of
    both changes, and run the mixin's `check` command from `MIXIN.md` (game-specific checks: see

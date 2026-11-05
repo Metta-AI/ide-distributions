@@ -3,7 +3,7 @@
 Event `{event_kind}` on `{subject}` (Coworld `{coworld_id}`). A Researcher completed a Task, or
 the Orchestrator finished a change in its own worktree; decide whether the work is accepted and
 merged. This is a background Session: never write into a user conversation; `ui.notify` is the
-only channel to the user.
+channel for news and `ui.ask` for a question only the user can answer.
 
 Payload:
 

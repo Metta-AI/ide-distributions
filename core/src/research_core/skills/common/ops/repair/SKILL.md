@@ -21,7 +21,7 @@ A failing tool, command, install or call is work, not a wall. Capabilities are w
 
 - Make the change in your Task worktree and commit it: a mixin command, a toolchain declaration, a script, a dependency pin. Keep the same inputs and engine version.
 - Run the fixed command yourself until it passes; that is the evidence. Then `workspace.capabilities {check: true}`: the watcher reruns the checks within a minute and marks the capability `ok`. Read `workspace.capabilities` once afterwards to confirm; one read is not polling. Still broken: read the new output and continue.
-- `task.complete {task, outcome: succeeded, commit, summary, capability: <name>}` names the capability so dependent Tasks resume. A maintenance Task never makes a Version.
+- `task.complete {task, outcome: succeeded, commit, summary, capability: <name>, merge: yes, result}` names the capability so dependent Tasks resume. A maintenance Task never makes a Version.
 
 ## Keep working around a block
 
