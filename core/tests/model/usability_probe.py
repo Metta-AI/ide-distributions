@@ -1,8 +1,8 @@
 """Running one situation with the session's real prompt and tools, and judging what the model did.
 
 A run asks until the model does something that settles the situation, at most ``MAX_REQUESTS``
-requests. Every call it makes before that is answered as a session would answer it, and every call
-in the reply that settles it still counts, because a session would run them all:
+requests. Every call it makes before that is answered as a session would answer it. A session runs
+every call in a reply, so a write later in the reply that settled a run makes it ``wrong_act``:
 
 - ``skill_view`` and ``skills_list`` return the real skill text or list, and count as opening;
 - a preparation (a read, a terminal command, an edit: :func:`is_preparation`) gets the tool's own
@@ -222,8 +222,12 @@ def messages_for(situation: Situation, schemas: harness.SchemaSet) -> list[dict]
 
 
 def _problems(situation: Situation, call: harness.Call) -> str:
-    """Why production's argument and record checks refuse this IDE call; empty when they pass."""
+    """Why production's argument and record checks refuse this call; empty when they pass."""
     args = call.arguments or {}
+    if call.name == "delegate_task":
+        # Hermes's own tool: only a spawn with tasks asks anyone for anything.
+        spawns = args.get("tasks") and args.get("action") in (None, "spawn")
+        return "" if spawns else f"delegate_task did not spawn a task; sent {sorted(args)}"
     case = write_actions.Case(
         situation.role, call.name, str(args.get("action") or ""), situation.text
     )
@@ -287,7 +291,7 @@ def _handle_call(
     if not is_ide and call.name not in usability_context.builtin_names():
         run.unknown_tools.append(call.name)
         return json.dumps({"error": f"Unknown tool: {call.name}"})
-    problems = _problems(situation, call) if is_ide else ""
+    problems = _problems(situation, call) if is_ide or call.name == "delegate_task" else ""
     if problems:
         run.problems.append(f"{label}: {problems}"[:400])
     if label in situation.acts:

@@ -15,8 +15,16 @@ from research_core.store import experiments, goals, sessions, tasks, versions
 from research_core.store.actors import Actor
 from research_core.tools import catalog
 from research_core.tools import experiment as experiment_tool
+from research_core.tools import xp as xp_tool
 from research_core.tools.xp import _credits_refused
-from tests.model import harness, usability_context, usability_probe, usability_reads, write_actions
+from tests.model import (
+    harness,
+    usability_context,
+    usability_probe,
+    usability_reads,
+    usability_results,
+    write_actions,
+)
 from tests.model.usability_situations import (
     BUILD_BACKGROUND,
     CREDITS_REFUSAL,
@@ -252,7 +260,12 @@ def test_offline_a_policy_file_and_a_replay_have_the_real_keys(world, call):  # 
 
 @pytest.mark.parametrize(
     ("state", "verdict"),
-    [("stored", "confirmed"), ("confirmed", "confirmed"), ("refuted", "refuted")],
+    [
+        ("stored", "confirmed"),
+        ("confirmed", "confirmed"),
+        ("refuted", "refuted"),
+        ("renamed", "inconclusive"),
+    ],
 )
 def test_offline_x5_rows_give_its_verdict_under_the_real_rule(state, verdict):
     """The stored rows of X-5 pair and decide as the real close would, so a reviewer who checks
@@ -263,9 +276,10 @@ def test_offline_x5_rows_give_its_verdict_under_the_real_rule(state, verdict):
     design = experiment_tool.design_from(record["methods"], "V-12", record["runs"], rows)
     kept, _ = ingest.ingest_rows(rows, design.game_version, [m.name for m in design.metrics])
     pairs = ingest.pair(experiment_tool.one_row_per_seed(kept), design)
-    assert len(pairs) == usability_reads.N_MIN
+    expected_pairs = usability_reads.N_MIN // 2 if state == "renamed" else usability_reads.N_MIN
+    assert len(pairs) == expected_pairs
     assert decision_rule.evaluate(design, pairs).verdict == verdict
-    if state != "stored":
+    if record["status"] != "running":
         assert record["results"]["verdict"] == verdict
 
 
@@ -276,6 +290,49 @@ def test_offline_read_results_agree_with_what_the_situation_says():
     league_question = next(s for s in SITUATIONS if s.id == "r-ask")
     assert "league" not in usability_probe.first_user_message(league_question).split("Goal")[1][:90]
     assert _read("task.read", {"task": "T-21"}, league_question)["record"]["goal_id"] == 2
+
+
+def test_offline_a_version_shows_an_upload_only_once_it_has_one():
+    for version, status, uploaded in (("V-12", "built", False), ("V-11", "uploaded", True)):
+        record = _read("version.read", {"version": version})["record"]
+        assert record["submission_status"] == status
+        assert bool(record["uploaded"]) is uploaded
+
+
+def test_offline_the_mixin_floor_is_the_one_the_situation_names():
+    path = {"path": "mixin/MIXIN.md"}
+    reopen = next(s for s in SITUATIONS if s.id == "o-hard-review-reopen")
+    assert "min_episodes: 100" in _read("read_file", path, reopen)["content"]
+    assert "min_episodes: 20" in _read("read_file", path)["content"]
+
+
+def test_offline_xp_status_has_the_real_keys_running_and_closed(world):
+    ctx = world["ctx"]
+    real = {**xp_tool._report(experiments.read(ctx.store, 1)), "ok": True}
+    started = dataclasses.replace(SITUATION, x5="started")
+    assert differences(real, _read("xp.status", {"experiment": "X-5"}, started)) == []
+    closed = dataclasses.replace(SITUATION, x5="confirmed")
+    fixture = _read("xp.status", {"experiment": "X-5"}, closed)
+    assert fixture["note"] == "X-5 is confirmed; its runs are final"
+    assert "next" not in fixture
+
+
+def test_offline_a_delegate_call_must_spawn_something(monkeypatch):
+    situation = next(s for s in SITUATIONS if s.id == "o-expert")
+    listing = ("delegate_task", {"action": "list"})
+    spawn = ("delegate_task", {"tasks": [{"goal": "Which reading of the logs fits?"}]})
+    run = _run_replies(monkeypatch, situation, [[listing], [spawn]])
+    assert run.outcome == "right"
+    assert run.act_valid is False
+    assert run.problems
+
+
+def test_offline_calls_before_acting_stop_at_the_act():
+    run = {"act": "goal.read", "calls": ["goal.read", "terminal"]}
+    assert usability_results._steps_before_act(run) == 0
+    run = {"act": "task.review", "calls": ["skill_view", "task.review", "task.review"]}
+    assert usability_results._steps_before_act(run) == 2
+    assert usability_results._steps_before_act({"act": "", "calls": ["terminal"]}) == 1
 
 
 def test_offline_a_second_call_in_the_reply_that_settles_it_still_counts(monkeypatch):
@@ -409,7 +466,7 @@ def test_offline_a_run_finds_its_own_task_and_the_state_of_x5():
     assert record["description"] == own.text
     assert len(record["messages"]) == 2
     states = {
-        "r-candidate": ("proposed", ""),
+        "r-candidate": ("running", ""),
         "r-experiment-start": ("proposed", "V-12"),
         "r-run-eval": ("running", "V-12"),
         "r-propose-submission": ("confirmed", "V-12"),

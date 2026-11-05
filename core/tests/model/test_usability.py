@@ -48,6 +48,7 @@ from tests.model import (
     usability_readability,
     usability_reads,
     usability_results,
+    write_actions,
 )
 from tests.model.usability_situations import SITUATIONS, Situation
 
@@ -56,22 +57,24 @@ MODEL = "moonshotai/kimi-k3.1-pro"
 ALL_PARTS = ("sizes", "comprehension", "readability", "findability")
 
 
-def inputs_fingerprint(model: str, host: str, schemas_label: str) -> dict:
-    """Everything a run's results depend on, so a resumed run cannot pass off old results."""
-    source = "".join(
-        Path(module.__file__).read_text() for module in (usability_probe, usability_readability)
-    )
+def inputs_fingerprint(model: str, host: str, schemas: harness.SchemaSet) -> dict:
+    """Everything a run's results depend on, so a resumed run cannot pass off old results: what
+    the model is sent, what answers it, and what judges it."""
+    judging = (usability_probe, usability_readability, write_actions)
+    source = "".join(Path(module.__file__).read_text() for module in judging)
+    tools = {role: schemas.tools(role) for role in catalog.ROLES}
     return {
         "model": model,
         "host": host,
-        "schemas": schemas_label,
+        "schemas": schemas.label,
         "reads": usability_reads.READS_HASH,
         "source": usability_results.short_hash(source),
-        "prompts": {
-            role: usability_results.short_hash(usability_context.system_prompt(role))
-            for role in catalog.ROLES
-        },
+        "tools": usability_results.short_hash(json.dumps([tools, usability_context.HERMES])),
         "situations": {s.id: usability_results.situation_hash(s) for s in SITUATIONS},
+        "messages": {
+            s.id: usability_results.short_hash(json.dumps(usability_probe.messages_for(s, schemas)))
+            for s in SITUATIONS
+        },
         "items": {
             item.id: usability_results.short_hash(item.text)
             for item in usability_readability.items()
@@ -161,10 +164,13 @@ def run_findability(folder: Path, model: str, host: str, schemas: harness.Schema
         work(job)
     warmed = {(job[0].id, job[1]) for job in warmers.values()}
     in_parallel([job for job in jobs if (job[0].id, job[1]) not in warmed], work)
+    wanted = {
+        (situation.id, repeat) for situation in selected_situations() for repeat in range(repeats)
+    }
     latest: dict[tuple[str, int], dict] = {}
     for row in raw.rows:
         latest[(row["situation"], row["repeat"])] = row
-    return list(latest.values())
+    return [row for key, row in latest.items() if key in wanted]
 
 
 def _item_jobs(raw: RawFile, repeats: int) -> list[tuple[usability_readability.Item, int]]:
@@ -552,7 +558,7 @@ def test_offline_compare_leaves_out_totals_of_changed_situations():
 
 
 def test_offline_a_run_folder_is_refused_for_other_inputs(tmp_path):
-    inputs = inputs_fingerprint(MODEL, harness.SHIPPED, "shipped")
+    inputs = inputs_fingerprint(MODEL, harness.SHIPPED, harness.ShippedSchemas())
     require_same_inputs(tmp_path, inputs)
     require_same_inputs(tmp_path, inputs)
     with pytest.raises(pytest.fail.Exception, match="new folder"):
@@ -572,7 +578,7 @@ def test_measure_usability(capsys):
     folder = run_dir()
     model, host, provider = model_and_provider()
     schemas = harness.schema_set()
-    require_same_inputs(folder, inputs_fingerprint(model, host, schemas.label))
+    require_same_inputs(folder, inputs_fingerprint(model, host, schemas))
     sizes, cost = run_sizes(folder, model, provider) if "sizes" in parts else ({}, 0.0)
     comprehension: list[dict] = []
     if "comprehension" in parts:
