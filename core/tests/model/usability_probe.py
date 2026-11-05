@@ -260,9 +260,12 @@ def _answer(
 
 
 def args_hold(wanted: dict[str, str | None], args: dict) -> bool:
-    """``wanted`` maps an argument to a regex searched in its JSON, or None for must be absent."""
+    """``wanted`` maps an argument to a regex searched in its JSON, or None for must be absent. A
+    name ending in ``?`` may also be absent, for an argument whose default is right."""
     for name, pattern in wanted.items():
-        value = args.get(name)
+        value = args.get(name.removesuffix("?"))
+        if name.endswith("?") and value is None:
+            continue
         if pattern is None:
             if value not in (None, "", []):
                 return False
@@ -304,7 +307,10 @@ def _handle_call(
     problems = _problems(situation, call) if is_ide or call.name == "delegate_task" else ""
     if problems:
         run.problems.append(f"{label}: {problems}"[:400])
-    if label in situation.acts:
+    # A call to the wanted tool with no action is a try at the wanted act, refused as such.
+    no_action = call.arguments is None or not args.get("action")
+    aimed = no_action and any(act.split(".")[0] == call.name for act in situation.acts)
+    if label in situation.acts or (is_ide and aimed):
         run.act_attempts += 1
         if run.act_valid is None:
             run.act_valid = not problems
