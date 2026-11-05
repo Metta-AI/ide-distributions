@@ -479,6 +479,39 @@ def test_tasks_goals_cancellation_and_pending_input(system):
     run(system, scenario)
 
 
+def test_pending_clarification_has_no_choices_field(system):
+    async def scenario(backend, gateway, ctx, hermes):
+        session_id = await opened(backend)
+        hermes.script = lambda run: gateway.controls.__setitem__(
+            run.run_id,
+            [
+                {
+                    "kind": "clarify",
+                    "prompt_id": "q1",
+                    "execution_generation": 1,
+                    "question": "Which league?",
+                }
+            ],
+        )
+        gateway.script = lambda run_id: [{"event": "run.started"}]
+        params = {"session_id": session_id, "messages": say("go"), "scope": WORKSPACE}
+        await call(backend, "chat.send", params)
+        state = {"resource": "sessions", "id": session_id, "scope": WORKSPACE}
+        await until(lambda: hermes.runs)
+        while not (await call(backend, "state.get", state))["result"]["item"]["pending"]:
+            await asyncio.sleep(0.05)
+        (pending,) = (await call(backend, "state.get", state))["result"]["item"]["pending"]
+        (run_id,) = hermes.runs
+        # The contract's clarification variant forbids extra properties, including a null `choices`.
+        assert pending == {
+            "request_id": str(uuid5(NAMESPACE_URL, f"aide-input:{session_id}:{run_id}:1:q1")),
+            "prompt": "Which league?",
+            "kind": "clarification",
+        }
+
+    run(system, scenario)
+
+
 def test_relay_failures_reconnect_without_touching_the_legacy_connection():
     from control import serve as legacy
     from websockets.asyncio.server import serve as websocket_server
