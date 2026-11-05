@@ -6,7 +6,8 @@ that the situations still match the shipped tools and skills, how a run is judge
 run answers has the real tools' shape. The measurement writes its raw runs to
 ``USABILITY_RUN_DIR``, ends by printing a comparison with ``usability_baseline.json``, and replaces
 that file only when ``USABILITY_WRITE_BASELINE=1``.
-A run that is cut short resumes from the same ``USABILITY_RUN_DIR``. The report on a run belongs in
+A run that is cut short resumes from the same ``USABILITY_RUN_DIR``, and is refused there if the
+tools, skills, situations or test changed. The report on a run belongs in
 ``docs/reports/``; the first is ``tool-usability-baseline-2026-11-04.md``.
 
 Environment, all optional but the first:
@@ -53,6 +54,40 @@ from tests.model.usability_situations import SITUATIONS, Situation
 BASELINE = Path(__file__).with_name("usability_baseline.json")
 MODEL = "moonshotai/kimi-k3.1-pro"
 ALL_PARTS = ("sizes", "comprehension", "readability", "findability")
+
+
+def inputs_fingerprint(model: str, host: str, schemas_label: str) -> dict:
+    """Everything a run's results depend on, so a resumed run cannot pass off old results."""
+    source = "".join(
+        Path(module.__file__).read_text() for module in (usability_probe, usability_readability)
+    )
+    return {
+        "model": model,
+        "host": host,
+        "schemas": schemas_label,
+        "reads": usability_reads.READS_HASH,
+        "source": usability_results.short_hash(source),
+        "prompts": {
+            role: usability_results.short_hash(usability_context.system_prompt(role))
+            for role in catalog.ROLES
+        },
+        "situations": {s.id: usability_results.situation_hash(s) for s in SITUATIONS},
+        "items": {
+            item.id: usability_results.short_hash(item.text)
+            for item in usability_readability.items()
+        },
+    }
+
+
+def require_same_inputs(folder: Path, inputs: dict) -> None:
+    """A run folder holds results of one set of inputs: resume it only with those."""
+    path = folder / "inputs.json"
+    if not path.exists():
+        path.write_text(json.dumps(inputs, indent=1))
+    elif json.loads(path.read_text()) != inputs:
+        pytest.fail(
+            f"{folder} holds results of other inputs: set USABILITY_RUN_DIR to a new folder"
+        )
 
 
 def today() -> str:
@@ -503,6 +538,27 @@ def _results_of_two_runs() -> dict:
     )
 
 
+def test_offline_compare_leaves_out_totals_of_changed_situations():
+    old = json.loads(usability_results.baseline_text(_results_of_two_runs()))
+    new = json.loads(json.dumps(old))
+    new["situations"]["o-review"]["hash"] = "changed"
+    old["tools"]["task"] |= {"right": 0, "n": 50}
+    new["tools"]["task"] |= {"right": 50, "n": 50}
+    lines = usability_results.compare(old, new)
+    assert "situation o-review changed: not comparable" in lines
+    assert not any("tools task" in line for line in lines)
+    new["situations"]["o-review"]["hash"] = old["situations"]["o-review"]["hash"]
+    assert any("tools task" in line for line in usability_results.compare(old, new))
+
+
+def test_offline_a_run_folder_is_refused_for_other_inputs(tmp_path):
+    inputs = inputs_fingerprint(MODEL, harness.SHIPPED, "shipped")
+    require_same_inputs(tmp_path, inputs)
+    require_same_inputs(tmp_path, inputs)
+    with pytest.raises(pytest.fail.Exception, match="new folder"):
+        require_same_inputs(tmp_path, {**inputs, "reads": "other"})
+
+
 def test_offline_fisher_separates_only_what_five_repeats_can():
     assert usability_results.fisher_p(0, 5, 5, 5) < 0.01
     assert usability_results.fisher_p(3, 5, 5, 5) > 0.4
@@ -516,6 +572,7 @@ def test_measure_usability(capsys):
     folder = run_dir()
     model, host, provider = model_and_provider()
     schemas = harness.schema_set()
+    require_same_inputs(folder, inputs_fingerprint(model, host, schemas.label))
     sizes, cost = run_sizes(folder, model, provider) if "sizes" in parts else ({}, 0.0)
     comprehension: list[dict] = []
     if "comprehension" in parts:

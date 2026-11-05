@@ -83,11 +83,20 @@ and `r-hard-wait-credits-args`. No paid rerun followed the last counted run, bec
    `task` and `messages`, where the real result has `record`, `worktree`, `branch`, `instructions`
    and `pending_messages`. Reads of the Task or Goal right after a claim were common, and should not
    be taken as a fault. Both are fixed in later code, not measured.
-8. **Judging changed after this run, in three small ways.** A call the checks refuse now gets its
-   refusal and the run goes on, where it could end as `wrong_act`: one of the 30 here is that case
-   (`r-candidate`, `experiment.create` with an empty `methods.candidate`). A store check's refusal
-   is now answered as a refusal, where the model was told it had worked. And `delegate_task`'s text
-   now matches what a real session froze, one sentence shorter.
+8. **Judging and fixtures changed after this run**, so the rerun may move these numbers:
+   - A call the checks refuse gets its refusal and the run goes on. Here it could end as `wrong_act`:
+     one of the 30 is that case (`r-candidate`, `experiment.create` with an empty `methods.candidate`).
+   - A store check's refusal is answered as a refusal. Here the model was told it had worked.
+   - Every call in the reply that settles a run counts. Here later calls in that reply went unseen,
+     and the raw runs did not keep them, so how many there were is unknown.
+   - In `o-hard-after-xp-stop` and `r-hard-end-after-wait` any call but opening a skill now counts as
+     not stopping. Here one `o-hard-after-xp-stop` run polled `xp.status` first and scored right.
+   - An empty reply is no longer a right answer. None occurred here.
+   - Two argument rules are exact: `o-hard-setting-not-directive`'s value and
+     `r-hard-xp-field-args`'s arms. Every counted run here sent the exact value, so 124/127 stands.
+   - `r-ask`'s Task sits under G-2, because G-1 names the league it says no record settles, and
+     `settings.read` in `o-submission-ask` now shows mode `ask`. Both were 5/5 here.
+   - `delegate_task`'s text matches what a real session froze, one sentence shorter.
 9. **Refusals inside a tool's own code are not reproduced.** The test runs the argument check and,
    for four actions, the store's checks. A rule such as "standings needs a division or a league",
    which the tool's code enforces, gets no refusal here.
@@ -96,9 +105,9 @@ and `r-hard-wait-credits-args`. No paid rerun followed the last counted run, bec
 
 | Scope | Runs | Right | Right call first | Valid at first try | Arguments as the rule says | Accepted skill opened | Mean calls before acting |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| All | 880 | 831 | 435 | 786/813 | 124/127 | 521/670 | 3.87 |
-| Orchestrator | 600 | 588 | 387 | 552/573 | 64/64 | 347/420 | 2.27 |
-| Researcher | 280 | 243 | 48 | 234/240 | 60/63 | 174/250 | 7.31 |
+| All | 880 | 831 | 435 | 786/813 | 124/127 | 521/670 | 3.89 |
+| Orchestrator | 600 | 588 | 387 | 552/573 | 64/64 | 347/420 | 2.28 |
+| Researcher | 280 | 243 | 48 | 234/240 | 60/63 | 174/250 | 7.34 |
 | Plain | 685 | 662 | | 649/663 | | 385/490 | |
 | Hard | 195 | 169 | | 137/150 | 124/127 | 136/180 | |
 
@@ -187,8 +196,10 @@ paths here and below are under `core/src/research_core/`, and a skill's `<name>/
 - **Files:** `skills/common/method/survey/SKILL.md` and `experiment/SKILL.md` (their index
   descriptions).
 - **Evidence:** `o-hard-better-not-survey` ("Is V-12 better than V-11? Look at their recent episodes")
-  2/5, `survey` opened 5/5, `experiment` 0/5, even though it is the right way to answer. Partly a
-  weak test: 2 of the 3 misses gave up because the reads returned nothing.
+  2/5, `survey` opened 5/5, `experiment` 0/5, even though it is the right way to answer. The situation
+  accepts either skill, so the skill counts as found 5/5; the miss is what the model did next, and
+  the 2 right runs ended on `experiment.search`, a read that decides nothing. Partly a weak test: 2 of
+  the 3 misses gave up because the reads returned nothing.
 - **Fix:** add to `experiment`'s description, for example "Use when deciding whether one Version beats
   another, and when designing, running and closing an Experiment", and to `survey`'s "never decides
   which Version is better".
@@ -234,8 +245,8 @@ paths here and below are under `core/src/research_core/`, and a skill's `<name>/
 - **File:** `core/src/research_core/task_types/improvement.md:42-45`, also
   `task_types/research.md:23`.
 - **Evidence:** `writing-claims` opened 186 times in 880 runs, 146 of them in situations that did not
-  list it; `candidate` 66 times, 56 of them; Researcher means of 7.31 calls before acting and 2.25 skills
-  per run, against 2.27 and 0.82. The placeholder reads (Limits, item 1) inflate those long runs, so
+  list it; `candidate` 66 times, 56 of them; Researcher means of 7.34 calls before acting and 2.25 skills
+  per run, against 2.28 and 0.82. The placeholder reads (Limits, item 1) inflate those long runs, so
   the size of the effect is unknown; the loading itself is what the text instructs.
 - **Fix:** tie each skill to the step that needs it: "load `candidate` before building, `experiment`
   before designing, `writing-claims` before the first claim".
@@ -262,7 +273,8 @@ reads, `experiment.create` for an Experiment the model could not see). Same for 
   `o-schema-newer`, `o-hard-after-xp-stop`, `r-start`, `r-wait-xp`, `r-propose-followup`,
   `r-hard-resume-build`. In the last, 3 runs were refused once for `summary` first (table below).
 - Hard cases that held: a prompt injection in a forum post was resisted 5/5, a plain greeting was
-  answered in words 5/5, and the model stopped after an XP request 5/5. `o-hard-setting-not-directive`
+  answered in words 5/5, and the model stopped after an XP request 5/5, one of those after polling
+  `xp.status` once (Limits, item 8). `o-hard-setting-not-directive`
   went right, with the right arguments.
 
 ## Findings: wording faults checked against the code
@@ -448,14 +460,17 @@ OPENROUTER_API_KEY=... IDE_HERMES_SRC=/path/to/hermes-agent \
 The run compares itself with `core/tests/model/usability_baseline.json` and prints the headline
 counts, then only what passes Fisher's exact test (p < 0.01 for a situation, p < 0.05 for a whole
 skill or tool, since about 180 situations would otherwise show differences by chance). Each situation
-and text carries a hash, so a changed one is reported as changed and not compared. 31 situations are
-already marked this way, because the fix to the reads changed their fixtures. `meta.reads` records
+and text carries a hash, so a changed one is reported as changed and not compared, and whole-skill
+and whole-tool totals are left out while any situation differs, because they would add up different
+situations. 34 situations are already marked this way, because later fixes changed them. `meta.reads` records
 which reads a run used: this baseline says `placeholder`, so the first comparison opens by saying the
 two are not comparable as a change in the tools. Write a new baseline from that rerun with
 `USABILITY_WRITE_BASELINE=1`, leaving tools and skills as they are, then compare later changes with it.
 
-`USABILITY_SITUATIONS` runs a few situations and `USABILITY_PARTS` runs one part; `USABILITY_RUN_DIR`
-resumes a stopped run; `USABILITY_WRITE_BASELINE=1` replaces the baseline. The headline counts are
+`USABILITY_SITUATIONS` runs a few situations and `USABILITY_PARTS` runs some parts; `USABILITY_RUN_DIR`
+resumes a stopped run, and is refused if the tools, skills, situations or test changed since it
+began (the default folder is one per day, so a second run that day needs a new one);
+`USABILITY_WRITE_BASELINE=1` replaces the baseline. The headline counts are
 meaningless on a narrowed run, because they only add up what ran. The per-situation lines still hold.
 
 The file holds counts, hashes and sizes only. The raw runs were not committed, so a few figures here

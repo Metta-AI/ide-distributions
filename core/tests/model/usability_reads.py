@@ -37,7 +37,7 @@ DIVISION = "div_main"
 PLAYER = "ply_cogs"
 WORKTREE = "/opt/data/workspace/cow_cogs/worktrees/task-21"
 SESSION = "session:researcher-21"
-POLICY_VERSIONS = {"V-7": "pv-7", "V-11": "pv-11"}
+POLICY_VERSIONS = {"V-7": "pv-7", "V-11": "pv-11", "V-12": "pv-12"}
 HIGH_ROSTER = ["pv-1", "pv-2"]
 N_MIN = 40
 
@@ -85,8 +85,14 @@ GOALS = {
 }
 
 
+def goal_line(goal_id: str) -> str:
+    """The Goal as the Task's start prompt names it."""
+    goal = GOALS[goal_id]
+    return f"{goal_id} {goal['title']} — end state: {goal['end_state']}"
+
+
 def _goal_row(goal_id: str) -> dict:
-    goal = GOALS[goal_id] if goal_id in GOALS else GOALS["G-2"]
+    goal = GOALS.get(goal_id, GOALS["G-2"])
     return {
         "id": goal_id,
         "title": goal["title"],
@@ -105,7 +111,7 @@ def _goal_row(goal_id: str) -> dict:
 
 def goal_read(situation: Situation, args: dict) -> dict:
     goal_id = _ref("G", args["goal"])
-    goal = GOALS[goal_id] if goal_id in GOALS else GOALS["G-2"]
+    goal = GOALS.get(goal_id, GOALS["G-2"])
     claims = [_claim_summary(_claim(claim_id)) for claim_id in goal["claims"]]
     return {
         "record": {
@@ -165,15 +171,24 @@ def directive_list(situation: Situation, args: dict) -> dict:
     return {"records": [row for row in rows if scope in (None, "", row["scope"])]}
 
 
+def _setting_value(situation: Situation, key: str) -> Any:
+    """A wake's payload may name a setting's value; else the default, as a fresh workspace has."""
+    return (situation.payload or {}).get(key, settings.spec(key).default)
+
+
 def settings_read(situation: Situation, args: dict) -> dict:
-    """The real settings with their defaults; a fresh workspace reads the same."""
+    """The real settings, with this situation's values."""
     key = args.get("key")
     if key in settings.SETTINGS:
-        return {"record": describe(settings.spec(key), settings.spec(key).default)}
+        return {"record": describe(settings.spec(key), _setting_value(situation, key))}
     if key:
         problem = f"unknown setting {key!r}; known settings: {', '.join(settings.SETTINGS)}"
         return error_payload([problem], {"tool": "settings", "action": "read"})
-    return {"records": [describe(row, row.default) for row in settings.SETTINGS.values()]}
+    return {
+        "records": [
+            describe(row, _setting_value(situation, row.key)) for row in settings.SETTINGS.values()
+        ]
+    }
 
 
 # --- Tasks ----------------------------------------------------------------------------------------
@@ -262,6 +277,7 @@ def own_task(situation: Situation) -> dict:
     )
     return _task_row(
         usability_context.TASK_ID,
+        goal_id=int(situation.goal.split("-")[1]),
         title=situation.title,
         type=situation.task_type,
         description=situation.text,
@@ -534,23 +550,32 @@ X5_STATUS = {
 }
 
 
-def _run(run_id: int, seed: int, arm: str, state: str, *, stored: bool = False) -> dict:
-    policy_version = "pv-12" if arm == "candidate" else "pv-11"
+# How much a stored X-5's candidate beats its baseline by, in win rate.
+X5_EFFECT = {"stored": 0.04, "confirmed": 0.04, "refuted": -0.03}
+BASELINE_WIN_RATE = 0.5
+
+
+def _run(
+    run_id: int, seed: int, arm: str, state: str, baseline: str, effect: float | None = None
+) -> dict:
+    version = "V-12" if arm == "candidate" else baseline
     results: dict = {
-        "policy_version_id": policy_version,
+        "policy_version_id": POLICY_VERSIONS[version],
         "title": f"ide:X-5:{seed}:{arm}",
-        "version": "V-12" if arm == "candidate" else "V-11",
+        "version": version,
     }
-    if stored:
+    if effect is not None:
+        # The two arms differ by the effect on every seed, around a rate that moves by seed.
+        win_rate = BASELINE_WIN_RATE + (seed % 5 - 2) / 100 + (effect if arm == "candidate" else 0)
         results["rows"] = [
             {
                 "episode_id": f"ereq_{run_id}",
                 "game_version": "65",
-                "policy_version": policy_version,
+                "policy_version": version,
                 "seed": seed,
                 "seats": [0],
                 "opponents": HIGH_ROSTER,
-                "metrics": {"win_rate": float(seed % 2), "timeouts": 1.0},
+                "metrics": {"win_rate": round(win_rate, 4), "timeouts": 1.0},
             }
         ]
     return {
@@ -570,17 +595,30 @@ def _run(run_id: int, seed: int, arm: str, state: str, *, stored: bool = False) 
     }
 
 
+def _x5_baseline(state: str) -> str:
+    """A closed X-5 ran against the champion, as the situations that close it say."""
+    return "V-7" if state in ("confirmed", "refuted") else "V-11"
+
+
 def _x5_runs(state: str) -> list[dict]:
+    baseline = _x5_baseline(state)
     if state == "pending":
-        return [_run(1, 1, "candidate", "pending"), _run(2, 1, "baseline", "pending")]
+        return [
+            _run(1, 1, "candidate", "pending", baseline),
+            _run(2, 1, "baseline", "pending", baseline),
+        ]
     if state == "finished":
-        return [_run(1, 1, "candidate", "completed"), _run(2, 1, "baseline", "completed")]
-    if state not in ("stored", "confirmed", "refuted"):
+        return [
+            _run(1, 1, "candidate", "completed", baseline),
+            _run(2, 1, "baseline", "completed", baseline),
+        ]
+    if state not in X5_EFFECT:
         return []
     runs = []
     for seed in range(1, N_MIN + 1):
-        runs.append(_run(2 * seed - 1, seed, "candidate", "completed", stored=True))
-        runs.append(_run(2 * seed, seed, "baseline", "completed", stored=True))
+        effect = X5_EFFECT[state]
+        runs.append(_run(2 * seed - 1, seed, "candidate", "completed", baseline, effect))
+        runs.append(_run(2 * seed, seed, "baseline", "completed", baseline, effect))
     return runs
 
 
@@ -657,16 +695,13 @@ def _x5(situation: Situation) -> dict:
     state = situation.x5
     status = X5_STATUS[state]
     results = {}
-    if state == "confirmed":
-        results = _closed_results("confirmed", 0.54, 0.5)
-    elif state == "refuted":
-        results = _closed_results("refuted", 0.5, 0.5)
+    if status in ("confirmed", "refuted"):
+        results = _closed_results(status, BASELINE_WIN_RATE + X5_EFFECT[state], BASELINE_WIN_RATE)
     return _experiment(
         "X-5",
         "Does a lower retreat threshold reduce late losses?",
         status,
-        # A closed X-5 was run against the champion, as the situations say.
-        "V-7" if status in ("confirmed", "refuted") else "V-11",
+        _x5_baseline(state),
         "" if state == "designed" else "V-12",
         _x5_runs(state),
         results,
@@ -1010,6 +1045,22 @@ def _revision(page_id: Any, revision_id: str, parent: str | None, author: str) -
     }
 
 
+def _replay_pin(episode: str) -> dict:
+    return {
+        "id": 1,
+        "kind": "replay",
+        "ref": f"episode:{episode}",
+        "download": {
+            "path": f"/opt/data/workspace/cow_cogs/documents/replays/{episode}.json",
+            "digest": "0" * 64,
+            "size_bytes": 4096,
+            "artifact": "replay",
+        },
+        "created": NOW,
+        "existing": False,
+    }
+
+
 def _forum_read(args: dict) -> dict:
     post = _post(str(args["post"]))
     markdown = f"# {post['title']}\n\n{post['body']}\n\n## Comments\n\n- Ember: agreed."
@@ -1055,9 +1106,9 @@ PLATFORM: dict[str, Callable[[Situation, dict], dict]] = {
     "policy_file": lambda s, a: {
         "policy_version": a["policy_version"],
         "path": f"/opt/data/workspace/cow_cogs/documents/policies/{a['policy_version']}.bin",
-        "size": 2048,
+        "size_bytes": 2048,
+        "sha256": "0" * 64,
         "identity": "player",
-        "tried": ["player"],
     },
     "results": lambda s, a: {
         "player": a.get("player") or PLAYER,
@@ -1074,7 +1125,7 @@ PLATFORM: dict[str, Callable[[Situation, dict], dict]] = {
     "replay": lambda s, a: {
         "episode": a["episode"],
         "path": f"/opt/data/workspace/cow_cogs/documents/replays/{a['episode']}.json",
-        "pin": {"ref": f"episode:{a['episode']}", "existing": False},
+        "pin": _replay_pin(str(a["episode"])),
         "existing": False,
     },
     "credits": lambda s, a: {"credits": platform_credits(s)},

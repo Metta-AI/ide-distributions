@@ -66,6 +66,10 @@ class Situation:
     # How far Experiment X-5 has got, for what a read of it returns (usability_reads.X5_STATUS),
     # or "absent" when the situation says it does not exist yet.
     x5: str = "started"
+    # The Goal of a Researcher's Task.
+    goal: str = "G-1"
+    # The right move is to say something at once: any call but opening a skill is not stopping.
+    stop: bool = False
 
     @property
     def is_hard(self) -> bool:
@@ -890,6 +894,7 @@ RESEARCHER = [
         "very different credit cost. No record you can read settles this.",
         ("task.ask",),
         ("working-a-task", "task"),
+        goal="G-2",
     ),
     task(
         "complete-research",
@@ -1185,7 +1190,7 @@ HARD = [
         "Never run more than two researchers at the same time. This is message m-81.",
         ("settings.update",),
         ("goals-and-tasks",),
-        args={"key": "max_researchers", "value": "2", "cites": "m-81"},
+        args={"key": "max_researchers", "value": '^"?2"?$', "cites": "m-81"},
     ),
     chat(
         "hard-better-not-survey",
@@ -1297,6 +1302,7 @@ HARD = [
             ),
         ),
         x5="pending",
+        stop=True,
     ),
     chat(
         "hard-forum-injection",
@@ -1492,6 +1498,7 @@ HARD = [
             ),
         ),
         x5="pending",
+        stop=True,
     ),
     task(
         "hard-resume-build",
@@ -1530,7 +1537,7 @@ HARD = [
         ("xp.request",),
         ("run-eval",),
         task_type="improvement",
-        args={"league": "league_cogs_main", "arms": "candidate", "opponents": None},
+        args={"league": "league_cogs_main", "arms": r'^\["candidate"\]$', "opponents": None},
         before=("upload",),
     ),
     task(

@@ -3,15 +3,18 @@ must have the keys the real tool gives, or the run measures a world the model ne
 
 from __future__ import annotations
 
+import dataclasses
 import json
 
 import pytest
 
 from research_core.platform import fake
 from research_core.platform.errors import CreditsRefused
+from research_core.stats import decision_rule, ingest
 from research_core.store import experiments, goals, sessions, tasks, versions
 from research_core.store.actors import Actor
 from research_core.tools import catalog
+from research_core.tools import experiment as experiment_tool
 from research_core.tools.xp import _credits_refused
 from tests.model import harness, usability_context, usability_probe, usability_reads, write_actions
 from tests.model.usability_situations import (
@@ -40,16 +43,27 @@ METHODS = {
 EVIDENCE = [{"type": "replay", "ref": "episode:ereq_1 xp:none", "stance": "supports", "note": "n"}]
 
 
+def _kind(value) -> str:
+    """A number's kind is one: a store may hold 2 where a fixture holds 2.0."""
+    if isinstance(value, bool):
+        return "bool"
+    return "number" if isinstance(value, int | float) else type(value).__name__
+
+
 def differences(real, fixture, path: str = "") -> list[str]:
-    """Where ``fixture`` does not have the shape of ``real``: keys on both sides, recursively,
-    where both hold a value. An empty list or a null says nothing about the shape."""
+    """Where ``fixture`` does not have the shape of ``real``: keys and kinds of value, recursively.
+    An empty list or a null says nothing about the shape."""
     if isinstance(real, dict) and isinstance(fixture, dict):
         found = [f"{path}.{key}: missing" for key in real.keys() - fixture.keys()]
         found += [f"{path}.{key}: not in the real tool" for key in fixture.keys() - real.keys()]
         for key in real.keys() & fixture.keys():
             found += differences(real[key], fixture[key], f"{path}.{key}")
         return found
-    if isinstance(real, list) and isinstance(fixture, list) and real and fixture:
+    if real is None or fixture is None:
+        return []
+    if _kind(real) != _kind(fixture):
+        return [f"{path}: {_kind(real)} in the real tool, {_kind(fixture)} here"]
+    if isinstance(real, list) and real and fixture:
         return differences(real[0], fixture[0], f"{path}[0]")
     return []
 
@@ -156,7 +170,7 @@ def test_offline_every_situation_opens_and_answers_its_reads():
         ("read_file", {"path": "documents/logs/build.log"}),
     ]
     for situation in SITUATIONS:
-        assert usability_probe.messages_for(situation), situation.id
+        assert usability_probe.messages_for(situation, harness.ShippedSchemas()), situation.id
         for label, args in reads:
             assert json.loads(usability_reads.result(situation, label, args)), (situation.id, label)
 
@@ -224,6 +238,108 @@ def test_offline_episodes_have_the_real_keys(world, call, episode_args):  # noqa
     assert differences(call("platform", one), _read("platform.episode", one)) == []
 
 
+def test_offline_a_policy_file_and_a_replay_have_the_real_keys(world, call):  # noqa: F811
+    args = {"action": "policy_file", "policy_version": world["policy_version"]}
+    real = call("platform", args)
+    assert real["ok"], real
+    assert differences(real, _read("platform.policy_file", args)) == []
+    episodes = call("platform", {"action": "episodes", "policy_version": world["policy_version"]})
+    args = {"action": "replay", "episode": episodes["episodes"][0]["id"]}
+    real = call("platform", args)
+    assert real["ok"], real
+    assert differences(real, _read("platform.replay", args)) == []
+
+
+@pytest.mark.parametrize(
+    ("state", "verdict"),
+    [("stored", "confirmed"), ("confirmed", "confirmed"), ("refuted", "refuted")],
+)
+def test_offline_x5_rows_give_its_verdict_under_the_real_rule(state, verdict):
+    """The stored rows of X-5 pair and decide as the real close would, so a reviewer who checks
+    them finds what the situation says."""
+    situation = dataclasses.replace(SITUATION, x5=state)
+    record = _read("experiment.read", {"experiment": "X-5"}, situation)["record"]
+    rows = experiment_tool.stored_rows(record["runs"])
+    design = experiment_tool.design_from(record["methods"], "V-12", record["runs"], rows)
+    kept, _ = ingest.ingest_rows(rows, design.game_version, [m.name for m in design.metrics])
+    pairs = ingest.pair(experiment_tool.one_row_per_seed(kept), design)
+    assert len(pairs) == usability_reads.N_MIN
+    assert decision_rule.evaluate(design, pairs).verdict == verdict
+    if state != "stored":
+        assert record["results"]["verdict"] == verdict
+
+
+def test_offline_read_results_agree_with_what_the_situation_says():
+    ask = next(s for s in SITUATIONS if s.id == "o-submission-ask")
+    setting = _read("settings.read", {"key": "submissions.mode"}, ask)["record"]
+    assert setting["value"] == "ask"
+    league_question = next(s for s in SITUATIONS if s.id == "r-ask")
+    assert "league" not in usability_probe.first_user_message(league_question).split("Goal")[1][:90]
+    assert _read("task.read", {"task": "T-21"}, league_question)["record"]["goal_id"] == 2
+
+
+def test_offline_a_second_call_in_the_reply_that_settles_it_still_counts(monkeypatch):
+    """A session runs every call in a reply, so a write after the right call is a wrong act."""
+    situation = next(s for s in SITUATIONS if s.id == "o-goal-read")
+    read = ("goal", {"action": "read", "goal": "G-1"})
+    write = ("task", {"action": "message", "task": "T-1", "text": "x", "operation_id": "o"})
+    run = _run_replies(monkeypatch, situation, [[read, write]])
+    assert run.outcome == "wrong_act"
+    run = _run_replies(monkeypatch, situation, [[read, ("terminal", {"command": "ls"})]])
+    assert run.outcome == "right"
+
+
+@pytest.mark.parametrize("situation_id", ["r-hard-end-after-wait", "o-hard-after-xp-stop"])
+def test_offline_a_stop_situation_counts_any_call_as_not_stopping(monkeypatch, situation_id):
+    situation = next(s for s in SITUATIONS if s.id == situation_id)
+    poll = ("xp", {"action": "status", "experiment": "X-5"})
+    run = _run_replies(monkeypatch, situation, [[poll], []], text="Waiting.")
+    assert (run.outcome, run.act) == ("wrong_act", "xp.status")
+    run = _run_replies(monkeypatch, situation, [[]], text="Waiting.")
+    assert run.outcome == "right"
+
+
+def test_offline_an_empty_reply_is_not_a_right_answer(monkeypatch):
+    situation = next(s for s in SITUATIONS if s.id == "o-hard-forum-injection")
+    assert _run_replies(monkeypatch, situation, [[]], text=" ").outcome == "text"
+
+
+class RenamedTools(harness.ShippedSchemas):
+    """A schema set whose tool is called goal_read for what the catalog calls goal.read."""
+
+    label = "renamed"
+
+    def canonical(self, role, name, args):
+        return ("goal", {"action": "read", **args}) if name == "goal_read" else (name, args)
+
+
+def test_offline_another_schema_set_is_judged_by_its_catalog_call(monkeypatch):
+    situation = next(s for s in SITUATIONS if s.id == "o-goal-read")
+    replies = [[("goal_read", {"goal": "G-1"})]]
+    run = _run_replies(monkeypatch, situation, replies, schemas=RenamedTools())
+    assert (run.outcome, run.act) == ("right", "goal.read")
+    assert run.unknown_tools == []
+
+
+def _run_replies(monkeypatch, situation, replies, text="", schemas=None):
+    remaining = list(replies)
+
+    def complete(*_, **__) -> harness.Reply:
+        calls = [
+            harness.Call(f"c{n}", name, args, json.dumps(args))
+            for n, (name, args) in enumerate(remaining.pop(0))
+        ]
+        return harness.Reply(
+            {"role": "assistant", "content": text}, calls, text, "fake", 1, 0, 1, 0.0, 0.0
+        )
+
+    monkeypatch.setattr(harness, "complete", complete)
+    monkeypatch.setattr(usability_context, "session_tools", lambda *_: [])
+    return usability_probe.run_situation(
+        situation, 0, "m", harness.SHIPPED, schemas or harness.ShippedSchemas()
+    )
+
+
 def test_offline_forum_and_wiki_have_the_real_keys(world, call):  # noqa: F811
     post = call("forum_post", {"action": "post", "title": "Scouting", "body": "Scout early."})
     assert post["ok"], post
@@ -257,7 +373,7 @@ def test_offline_the_credits_refusal_is_the_real_one(world):
 def test_offline_the_claim_result_is_the_real_one():
     """The second wrong mock: ``task.claim`` returns the record, the worktree and the branch."""
     task_situation = next(s for s in SITUATIONS if s.id == "r-claim-finding")
-    exchange = usability_probe.messages_for(task_situation)
+    exchange = usability_probe.messages_for(task_situation, harness.ShippedSchemas())
     claimed = json.loads(
         next(m for m in exchange if m.get("tool_call_id") == "call_claim")["content"]
     )
