@@ -524,7 +524,8 @@ def summary() -> list[str]:
         "limit; TEXT = a text answer at once; STOP = a text answer after other calls; REJ = the "
         "host refused the request (4xx); ERR = transport error or 5xx (not counted). +N = N "
         "other calls first, answered as the tools would (refusal or plausible result). "
-        "Prompt tokens: mean of each case's first request. With repeats a cell is valid/judged "
+        "Prompt tokens: mean of each case's first request (through a real Session, of its "
+        "requests: Hermes stores totals). With repeats a cell is valid/judged "
         "and a rate is valid/judged, percent and [95% Wilson interval]. Intervals that do not "
         "overlap show a real difference; overlapping ones decide nothing either way.",
         "",

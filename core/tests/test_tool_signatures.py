@@ -37,7 +37,7 @@ CORE = Path(research_core.__file__).parent
 SOURCES = ("prompts", "skills", "task_types", "watcher/wakes")
 
 catalog._load_tool_modules()
-OPENING = re.compile(r"`([a-z_0-9]+)(?:\.([a-z_0-9]+))?\s*\{")
+OPENING = re.compile(r"`([A-Za-z_0-9]+)(?:\.([A-Za-z_0-9]+))?\s*\{")
 # Names (one field, or alternatives joined by ``|``), then a ``: value`` or a ``{keys}``.
 ITEM = re.compile(r"([a-z_]+\??(?:\s*\|\s*[a-z_]+\??)*)\s*(?::\s*(.*)|(\{.*\}))?", re.DOTALL)
 NAME = re.compile(r"[a-z_]+")
@@ -328,7 +328,9 @@ def test_every_object_of_a_list_is_checked():
     assert "no field 'typo'" in unknown[0] and "evidence.type" in omitted
 
 
-@pytest.mark.parametrize("text", ["`claim.write2 {summary}`", "`claim.write  {summary}`"])
+@pytest.mark.parametrize(
+    "text", ["`claim.write2 {summary}`", "`claim.write  {summary}`", "`claim.Write {summary}`"]
+)
 def test_unusual_spelling_does_not_escape_the_scan(text):
     assert problems_with(only(text)) != ([], [])
 

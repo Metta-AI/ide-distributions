@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from research_core.plugin.repeats import firmer_refusal
-from research_core.store import claims, experiments, settings, tasks
+from research_core.store import claims, experiments, goals, settings, tasks
 from research_core.tools import catalog
 from research_core.tools.base import validate_args
 from tests.model import harness
@@ -319,6 +319,14 @@ def _task_abandon(args: dict, problems: list[str]) -> None:
 def _task_create(args: dict, problems: list[str]) -> None:
     if args.get("goal") is None and args.get("type") != "maintenance":
         problems.append("goal is required unless type is maintenance")
+    problems.extend(
+        tasks._end_condition_problems(args.get("end_condition"), args.get("end_detail"))
+    )
+
+
+def _goal_create(args: dict, problems: list[str]) -> None:
+    fields = {name: args.get(name) for name in ("title", "end_state", "reason")}
+    goals._check_fields(problems, {**fields, "tags": args.get("tags", [])})
 
 
 def _settings_update(args: dict, problems: list[str]) -> None:
@@ -330,13 +338,15 @@ def _settings_update(args: dict, problems: list[str]) -> None:
 
 
 # The checks past validate_args that depend only on the arguments (lists of objects, objects, word
-# limits, a field required in some cases), run with records assumed to exist.
+# limits, a field required in some cases), run with records assumed to exist. This is the actions
+# that have such checks and that a model gets wrong; it is not every check a store makes.
 RECORD_CHECKS = {
     ("claim", "write"): _claim_write,
     ("claim", "add_evidence"): _claim_add_evidence,
     ("experiment", "create"): _experiment_create,
     ("task", "abandon"): _task_abandon,
     ("task", "create"): _task_create,
+    ("goal", "create"): _goal_create,
     ("settings", "update"): _settings_update,
 }
 

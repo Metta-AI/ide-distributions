@@ -327,6 +327,22 @@ def test_a_task_without_a_goal_is_invalid_unless_it_is_maintenance():
     assert judged({**args, "type": "maintenance"}, case)[0] == "valid"
 
 
+def test_an_end_condition_without_its_detail_is_invalid():
+    case = Case("orchestrator", "task", "create", "Create a Task.")
+    args = {"action": "create", "type": "research", "title": "T", "description": "D"}
+    args |= {"goal": "G-1", "operation_id": "o", "end_condition": "steps"}
+    outcome, detail = judged(args, case)
+    assert outcome == "invalid" and "end_detail is required" in detail
+
+
+@pytest.mark.parametrize("change", [{"title": "x" * 201}, {"tags": [17]}])
+def test_a_goal_the_store_refuses_is_invalid(change):
+    case = Case("orchestrator", "goal", "create", "Create a Goal.")
+    args = {"action": "create", "title": "T", "end_state": "E", "reason": "R"}
+    assert judged({**args, **change}, case)[0] == "invalid"
+    assert judged(args, case) == ("valid", "")
+
+
 def test_the_detour_limit_applies_before_a_later_judged_call():
     gateway = RealGateway(Path("/"), Path("h"), "k", "m")
     other = {"id": "c", "function": {"name": "todo_list", "arguments": "{}"}}
