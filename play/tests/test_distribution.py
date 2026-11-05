@@ -36,8 +36,6 @@ def test_no_research_machinery_mode_flags_or_chat_commands():
         assert "SOFTMAX_COGENT_MODE" not in text and not re.search(r"(?m)^\s*/[a-z]", text)
     play_soul = (PROFILES["play"] / "SOUL.md").read_text()
     assert "Coworlds you can't build for here" in play_soul
-    assert "Copy prompt for your local agent" in play_soul
-    assert "Not now" in play_soul
     assert "this only applies once the coworld comes up" in play_soul
     assert (
         "Container coworlds are not supported yet." in (PROFILES["builder"] / "SOUL.md").read_text()
@@ -81,12 +79,9 @@ def test_play_lead_does_the_whole_loop_itself_in_plain_words():
         assert word not in soul, word
 
 
-def test_play_restart_words_point_to_start_over_and_never_name_files():
+def test_play_restart_needs_an_explicit_yes_and_never_names_files():
     soul = (PROFILES["play"] / "SOUL.md").read_text()
     for needle in (
-        '"Start over" action',
-        "/play page",
-        "Team testing",
         "explicit yes",
         "confirm: true",
     ):
@@ -123,9 +118,7 @@ def test_play_cares_first_decides_small_things_recovers_and_learns():
         "once, on the first message",
         "at most twice",
         "never covers changing or uploading",
-        '"[page]"',
         "unless the user names another",
-        'never mention the "[page]" line itself',
         "## Always a conversation",
         "picking up where you left off",
         "`league_status` (call it once",
