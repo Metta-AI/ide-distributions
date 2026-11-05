@@ -160,6 +160,13 @@ def test_prepare_rejects_unknown_role(tmp_path, homes):
         )
 
 
+def test_the_checkouts_own_script_belongs_to_no_profile(monkeypatch):
+    monkeypatch.delenv("HERMES_HOME", raising=False)
+    source = REPO / "orchestrator"
+    with pytest.raises(prepare.PrepareError, match="HERMES_HOME"):
+        prepare.load_profile_env(source / "scripts" / "prepare.py", source)
+
+
 def test_prepare_requires_hermes_home():
     with pytest.raises(prepare.PrepareError, match="HERMES_HOME"):
         prepare.prepare(

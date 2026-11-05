@@ -23,7 +23,7 @@ In order, ``prepare``:
 6. builds or checks the workspace environment under a file lock;
 7. writes ``<profile>/.softmax-prepared`` and prints one JSON summary line.
 
-``check=True`` (the script's ``--check``) plans steps 3 to 5 against the live config and
+``check=True`` (the script's ``--check``) plans steps 3 and 5 against the live config and
 writes nothing. ``apply_skill_dirs`` is the same profile-pointing step for every profile of
 the sandbox, which a Coworld switch calls after preparation.
 
@@ -617,6 +617,24 @@ def ensure_workspace_env(
 
 
 # --- entry point ------------------------------------------------------------------------------
+
+
+def load_profile_env(script: Path, source: Path) -> None:
+    """Give the installed script what Hermes would give anything it runs for the profile.
+
+    ``HERMES_HOME`` defaults to the profile the script is installed in, and the profile's ``.env``
+    fills in what the environment does not set. The copy in the checkout belongs to no profile.
+    """
+    home = os.environ.get("HERMES_HOME")
+    if not home:
+        installed_in = script.resolve().parents[1]
+        if installed_in == source.resolve():
+            raise PrepareError("HERMES_HOME must name the profile home to prepare")
+        home = os.environ["HERMES_HOME"] = str(installed_in)
+    from hermes_cli.env_loader import resolve_home_dotenv
+
+    for name, value in resolve_home_dotenv(Path(home)).items():
+        os.environ.setdefault(name, value)
 
 
 def prepare(
