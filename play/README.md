@@ -1,6 +1,21 @@
 # play
 
-Play is the user's Softmax cogent on one coworld. One profile, `play` (this folder), does the
+**Not hosted now.** Metta #30416 (2026-11-03) retired Play's hosted runtime and its release path,
+so production can no longer select this profile. Metta kept users' Play volumes and files, and its
+rankings, program details and replays; Play's chat, tasks, notes and Mind panels show as
+unavailable. Whether Play comes back has not been decided, so this folder stays and CI still tests
+it. Text here describes the profile, not a running service, and may lag the current game pages.
+
+`.github/workflows/release-play.yml` was deleted because it dispatched a workflow #30416 removed,
+so it failed on every push under `play/`. To release Play again, restore it from git history
+(`git log --diff-filter=D -- .github/workflows/release-play.yml`) together with a metta workflow
+to dispatch.
+
+`builder/` is the earlier builder profile. It never runs: the `play` profile no longer creates
+cards and nothing hosts it now. Its files still describe that flow, and are kept with the rest
+until Play's future is decided.
+
+Play is the user's Softmax cogent. One profile, `play` (this folder), does the
 whole loop itself: it changes the user's program, saves each change as a new version, practices
 it, reports the results in plain words and releases a version only when the user says yes to it.
 It has only its own tools and the `memory` toolset: no raw file, terminal or Kanban tools.
@@ -13,11 +28,6 @@ no player container. Unsupported coworlds still use a local coding agent.
 Existing GoTA files stay in the workspace root; Generals files and journals live in
 `generals/`. `game.json` records which supported game the source tools currently edit.
 Fetch the selected league's starter before switching games or requesting practice.
-
-`builder/` is the earlier builder profile. The hosted Play runtime still installs it
-(metta `devops/hermes-fleet/applications/play/runtime_definition.py` lists both profiles, and
-the image's prepare and check steps expect it), but the `play` profile no longer creates cards,
-so it never runs. Removing it needs that metta change.
 
 ## Tools
 
