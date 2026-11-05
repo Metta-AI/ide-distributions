@@ -20,8 +20,8 @@ services; ``--reset`` removes the container and the volume first.
 
 Secrets come from the caller's environment and go into the container only: ``OPENROUTER_API_KEY``
 (required on a fresh volume; later ``up`` runs keep the key already in the ``.env`` files) and,
-with ``--platform real``, ``SOFTMAX_PLAYER_ID``, ``SOFTMAX_PLAYER_CREDENTIAL``, optionally
-``COGAMES_API_URL`` and ``IDE_DEFAULT_COWORLD``. Hermes reads the ``.env`` files inside the
+with ``--platform real``, ``SOFTMAX_PLAYER_ID``, ``SOFTMAX_PLAYER_CREDENTIAL`` and optionally
+``COGAMES_API_URL``. Hermes reads the ``.env`` files inside the
 volume, so that is where the keys end up; nothing is written on this machine and nothing is
 printed. Stdlib only; ``docker`` runs through subprocess.
 """
@@ -47,7 +47,7 @@ except ModuleNotFoundError:  # a plain `python3`, outside the workspace environm
     sys.path.insert(0, str(REPO / "core" / "src"))
     from research_core.client import ScriptedClient, SeamError
 
-# The hosted Hermes runtime: the digest CI runs the hermes-marked tests in (ci.yml).
+# The hosted Hermes runtime: the digest of image/Dockerfile and ci.yml (test_image_pins.py).
 IMAGE = (
     "nousresearch/hermes-agent"
     "@sha256:d27689bc6e8581ec884a7227c9101fdaebf6c853cff8859020dac14f21452b4d"
@@ -314,7 +314,6 @@ def bootstrap_values(settings: Settings) -> dict[str, str]:
             "PLATFORM": "fake",
             "PLAYER_ID": FAKE_PLAYER_ID,
             "COGAMES_API_URL": "",
-            "DEFAULT_COWORLD": "",
         }
     return {
         "GATEWAY_PORT": str(settings.gateway_port),
@@ -322,7 +321,6 @@ def bootstrap_values(settings: Settings) -> dict[str, str]:
         "PLATFORM": "real",
         "PLAYER_ID": env.get("SOFTMAX_PLAYER_ID", ""),
         "COGAMES_API_URL": env.get("COGAMES_API_URL") or DEFAULT_SERVER,
-        "DEFAULT_COWORLD": env.get("IDE_DEFAULT_COWORLD", ""),
     }
 
 
@@ -762,7 +760,6 @@ SEAM_PORT=@@SEAM_PORT@@
 PLATFORM=@@PLATFORM@@
 PLAYER_ID=@@PLAYER_ID@@
 COGAMES_API_URL=@@COGAMES_API_URL@@
-DEFAULT_COWORLD=@@DEFAULT_COWORLD@@
 
 DATA={DATA}
 STACK_DIR={STACK_DIR}
@@ -837,7 +834,6 @@ env_lines() {{ # env_lines <API_SERVER_HOST>: what the host home's and every pro
     if [ "$PLATFORM" = real ]; then
         echo "SOFTMAX_PLAYER_CREDENTIAL='$PLAYER_CREDENTIAL'"
         if [ -n "$COGAMES_API_URL" ]; then echo "COGAMES_API_URL=$COGAMES_API_URL"; fi
-        if [ -n "$DEFAULT_COWORLD" ]; then echo "IDE_DEFAULT_COWORLD=$DEFAULT_COWORLD"; fi
     fi
 }}
 
