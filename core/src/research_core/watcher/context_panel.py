@@ -38,9 +38,9 @@ from research_core.store.db import Store
 if TYPE_CHECKING:  # pragma: no cover
     from research_core.watcher.context import TickContext
 
-from research_core.tools.ui import coworld_conversation
+from research_core.tools.ui import AGENT_CONTEXT_PANEL, coworld_conversation
 
-PANEL = "agent-context"
+PANEL = AGENT_CONTEXT_PANEL
 PANEL_PATH = f"/panels/{PANEL}"
 VERSION_LIMIT = 5
 HEARTBEAT_ALIVE = timedelta(minutes=3)
