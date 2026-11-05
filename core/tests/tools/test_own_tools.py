@@ -112,25 +112,31 @@ def test_a_call_without_action_is_told_about_the_own_tools(ctx_factory):
     assert "usage.own_tools" in refused["error"]
 
 
+def _reported(spans) -> tuple:
+    (span,) = [span for span in spans.get_finished_spans() if span.name == "execute_tool"]
+    attributes = span.attributes
+    return (
+        attributes["gen_ai.tool.name"],
+        attributes.get("tool.action"),
+        attributes["outcome"],
+    )
+
+
 @pytest.mark.parametrize(
     ("args", "outcome"), [(CLAIM, "succeeded"), ({"body": "x"}, "validation_rejected")]
 )
 def test_telemetry_reports_an_own_tool_as_the_grouped_tool_and_action(
-    ctx_factory, capsys, args, outcome
+    ctx_factory, spans, args, outcome
 ):
     ctx = ctx_factory("orchestrator")
-    capsys.readouterr()
     run_tool("claim_write", args, ctx)
-    (event,) = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
-    assert (event["tool"], event["action"], event["outcome"]) == ("claim", "write", outcome)
+    assert _reported(spans) == ("claim", "write", outcome)
 
 
-def test_telemetry_does_not_name_an_own_tool_the_role_lacks(ctx_factory, capsys):
+def test_telemetry_does_not_name_an_own_tool_the_role_lacks(ctx_factory, spans):
     ctx = ctx_factory("orchestrator")
-    capsys.readouterr()
     run_tool("task_wait", {}, ctx)
-    (event,) = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
-    assert (event["tool"], event["action"], event["outcome"]) == ("unknown", None, "unknown_tool")
+    assert _reported(spans) == ("unknown", None, "unknown_tool")
 
 
 def test_own_tool_text_stands_alone():
