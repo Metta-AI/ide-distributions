@@ -5,10 +5,12 @@ profiles on a real gateway with the real plugin, against a local fake model that
 request, and boots them the way ``image/runtime.py`` does: replace the release checkout,
 ``hermes profile update``, ``prepare.py``, then the gateway. It needs no model key and no network.
 
-The old release is the current tree with ``operation_id`` taken off the durable tools and a
-marker in ``SOUL.md``, which is the state a chat like api_1793743095_1cb893cb was stuck in.
+The old release is the current tree with an extra field on every tool and a marker in ``SOUL.md``.
+A chat left on it holds a schema and instructions the current release does not have, which is the
+state a chat like api_1793743095_1cb893cb was stuck in.
 
-Run it inside the image the release uses, as the image's own user (the gateway refuses root)::
+CI runs it as root, where the test sets ``HERMES_ALLOW_ROOT_GATEWAY`` for its throwaway home. To run
+it by hand, use the image the release uses, as the image's own user::
 
     uv pip install --python 3.14 --target <dir> pytest
     docker run --rm --user 10000:10000 -v <checkout>:/repo:ro -v <dir>:/pytest:ro \\
@@ -22,6 +24,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 import shutil
 import threading
@@ -36,6 +39,7 @@ from tests.hermes.test_spike_s1 import REPO, Host, free_port, hermes_python, run
 
 ROLES = ("orchestrator", "researcher")
 OLD_SOUL_MARKER = "OLD-RELEASE-INSTRUCTIONS"
+OLD_RELEASE_FIELD = "old_release_field"
 REFRESHED = "open sessions: refreshed tools and system prompts"
 RUN_TIMEOUT_S = 120
 
@@ -96,11 +100,24 @@ class FakeModel:
 
 
 def old_release(checkout: Path) -> None:
-    transitions = checkout / "core/src/research_core/transitions.py"
-    text = transitions.read_text()
-    with_operation_id = "return tool(replace(spec, actions=actions))"
-    assert with_operation_id in text, "update this test: durable_tool changed"
-    transitions.write_text(text.replace(with_operation_id, "return tool(spec)"))
+    tools_base = checkout / "core/src/research_core/tools/base.py"
+    tools_base.write_text(
+        tools_base.read_text()
+        + f"""
+
+_current_schema = ToolSpec.schema
+
+
+def _old_release_schema(self, role):
+    schema = _current_schema(self, role)
+    field = {{"type": "string", "description": "Old."}}
+    schema["parameters"]["properties"]["{OLD_RELEASE_FIELD}"] = field
+    return schema
+
+
+ToolSpec.schema = _old_release_schema
+"""
+    )
     for role in ROLES:
         soul = checkout / role / "SOUL.md"
         soul.write_text(soul.read_text() + f"\n{OLD_SOUL_MARKER}\n")
@@ -122,6 +139,8 @@ class Workspace:
         # The workspace environment is not under test; hosted workspaces also use a prebuilt one.
         monkeypatch.setenv("IDE_WORKSPACE_ENV", str(self.prebuilt_env))
         monkeypatch.setenv("IDE_RESEARCHER_PROFILES", "researcher")
+        if os.geteuid() == 0:  # CI's container; the Hermes home is a temporary folder
+            monkeypatch.setenv("HERMES_ALLOW_ROOT_GATEWAY", "1")
         monkeypatch.setenv("IDE_PLATFORM", "fake")
         monkeypatch.setenv("HOME", str(root / "host"))
         self.host = Host(
@@ -248,7 +267,7 @@ def _scenario(workspace: Workspace) -> None:
     for role, session_id in sessions.items():
         workspace.turn(role, session_id)
         latest[role] = workspace.turn(role, session_id)
-        assert "operation_id" not in task_properties(latest[role])
+        assert OLD_RELEASE_FIELD in task_properties(latest[role])
         assert OLD_SOUL_MARKER in system_prompt(latest[role])
     host.stop_gateway()
 
@@ -285,7 +304,7 @@ def _scenario(workspace: Workspace) -> None:
     assert all(REFRESHED in actions[role] for role in ROLES), actions
     for role, session_id in sessions.items():
         first_turn = workspace.turn(role, session_id)
-        assert "operation_id" in task_properties(first_turn)
+        assert OLD_RELEASE_FIELD not in task_properties(first_turn)
         assert OLD_SOUL_MARKER not in system_prompt(first_turn)
         assert "[session context]" in system_prompt(first_turn)
         assert "[briefing]" in system_prompt(first_turn)
@@ -302,5 +321,5 @@ def _scenario(workspace: Workspace) -> None:
     assert not any(REFRESHED in actions[role] for role in ROLES), actions
     for role, session_id in sessions.items():
         request = workspace.turn(role, session_id)
-        assert "operation_id" in task_properties(request)
+        assert OLD_RELEASE_FIELD not in task_properties(request)
         assert_cache_prefix_kept(latest[role], request)

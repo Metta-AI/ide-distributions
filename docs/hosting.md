@@ -96,7 +96,7 @@ frozen, no session is touched and the cache stays valid.
   the hash. Both were measured with the pinned Hermes.
 
 The Hermes behaviour this depends on is listed in the module's docstring and exercised by
-`core/tests/hermes/test_frozen_sessions_real.py`. Run that test when the Hermes image changes.
+`core/tests/hermes/test_frozen_sessions_real.py`, which CI runs against the pinned image.
 
 ## Environment per profile (`.env`)
 
