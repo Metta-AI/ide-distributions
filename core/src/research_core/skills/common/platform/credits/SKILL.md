@@ -26,12 +26,12 @@ XP requests spend the account's credits. Credits are the platform's: you cannot 
 
 There is no local pre-check: the platform's 402 is the refusal, and the tool reports the balance, the held amount and the next refill with it.
 
-- A Researcher: `task.wait {task, kind: credits, detail: "XP for X-5: <n> requests, about <cost>"}` and end the run. The watcher resumes you when the balance covers it. Requests already accepted stay recorded as runs; `xp.request` again creates only the missing ones.
+- A Researcher: `task.wait {task, kind: credits, detail: "XP for X-5: need <cost> credits"}` and end the run. The watcher reads `need <cost>` and resumes you when the balance covers it; without it, as soon as the balance is above zero. Requests already accepted stay recorded as runs; `xp.request` again creates only the missing ones.
 - The Orchestrator: tell the user (`ui.notify`), finish other work, and request again after the refill. A user's "go ahead" changes nothing here: the platform decides.
 
 ## The per-Experiment setting
 
-`ask_above_requests_per_experiment` (read with `settings.read`) bounds your own initiative: above it, the Orchestrator gets a warning and proceeds; a Researcher is told to `task.ask`. It never refuses, and a user request overrides it.
+`xp.ask_above_requests_per_experiment` (read with `settings.read`) bounds your own initiative: above it, the Orchestrator gets a warning and proceeds; a Researcher is told to `task.ask`. It never refuses, and a user request overrides it.
 
 ## Failure handling
 

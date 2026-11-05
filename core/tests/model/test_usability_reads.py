@@ -360,13 +360,12 @@ def test_offline_a_version_reads_as_uploaded_after_this_runs_upload(monkeypatch)
     assert seen[1]["record"]["uploaded"]["policy_version_id"] == "pv-12"
 
 
-def test_offline_a_checklist_nested_or_flat_meets_the_argument_rule(monkeypatch):
+def test_offline_a_flat_checklist_meets_the_argument_rule(monkeypatch):
     situation = next(s for s in SITUATIONS if s.id == "r-hard-no-version-maintenance")
     deliverables = {"commit": "3f2a9c1", "summary": "Fixed the script.", "merge": "yes"}
-    base = {"action": "complete", "task": "T-21", "outcome": "succeeded", "operation_id": "o"}
-    for args in ({**base, **deliverables}, {**base, "checklist": deliverables}):
-        run = _run_replies(monkeypatch, situation, [[("task", args)]])
-        assert (run.outcome, run.args_right) == ("right", True), args
+    args = {"action": "complete", "task": "T-21", "outcome": "succeeded", **deliverables}
+    run = _run_replies(monkeypatch, situation, [[("task", args)]])
+    assert (run.outcome, run.args_right) == ("right", True), args
 
 
 def test_offline_task_list_filters_as_the_real_tool_does():
@@ -518,8 +517,9 @@ def test_offline_forum_and_wiki_have_the_real_keys(world, call):  # noqa: F811
         assert differences(real, _read(f"platform.{args['action']}", args)) == [], args
 
 
-def test_offline_the_credits_refusal_is_the_real_one(world):
+def test_offline_the_credits_refusal_is_the_real_one(world, monkeypatch):
     """The first wrong mock: a Researcher's refusal carries the wait to make, with its detail."""
+    monkeypatch.setattr("research_core.platform.credits.estimate", lambda *_, **__: 2.0)
     ctx = world["ctx"]
     ctx = type(ctx).from_env("researcher", ctx.env)
     error = CreditsRefused("not enough credits", balance=4.0, held=36.0, next_refill_at="soon")

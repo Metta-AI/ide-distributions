@@ -25,6 +25,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
+
+from research_core.mixin import CommandResult
+from research_core.tools.version import background_result
 
 
 @dataclass(frozen=True)
@@ -53,6 +57,8 @@ class Situation:
     task_type: str = "research"
     claimed: bool = True
     prior: tuple[Prior, ...] = ()
+    # The message that resumes the Session after ``prior``, as the watcher sends it.
+    after_prior: str = ""
     # The client: what it declared at session open, and the turn's context block.
     declared: dict | None = None
     capabilities: dict | None = None
@@ -331,8 +337,9 @@ ORCHESTRATOR_CHATS = [
     # Experiments
     chat(
         "experiment-create",
-        "Set up a comparison of V-12 against V-11. The idea is that earlier scouting raises the "
-        "win rate because we see their build sooner. Adopt V-12 if it works and keep V-11 if not. "
+        "Set up a comparison of V-12 against V-11. The idea is that a lower retreat threshold "
+        "raises the win rate because we lose fewer late fights. Adopt V-12 if it works and keep "
+        "V-11 if not. "
         "Primary metric win_rate, going up, by at least 3 points, with 40 paired seeds.",
         ("experiment.create",),
         ("experiment",),
@@ -796,19 +803,25 @@ XP_ACCEPTED = ok(
     credits="credits: 838 available of 1000; 162 spent this period",
     estimate={"episodes": 2, "credits": 2.0},
     warnings=[],
-    next='task.wait {kind: xp, ref: ["xreq_1", "xreq_2"]} and end your run; the watcher resumes '
-    "you when they finish, then xp.status stores the rows",
+    next="task.wait {task, kind: xp, detail: 'XP requests for X-5', ref: "
+    '["xreq_1", "xreq_2"]} and end your run; the watcher resumes you when they finish, then '
+    "xp.status stores the rows",
 )
-BUILD_BACKGROUND = ok(
-    background={
-        "pid": 4242,
-        "log": "documents/logs/build-20261104.log",
-        "resume": "res_8c1",
-    },
-    output_tail="building...",
-    next="the build is still running: call version.create again with the same arguments plus "
-    "resume=<background.resume> when it ends, or task.wait {kind: process, ref: 4242} and end "
-    "this run",
+BUILD_BACKGROUND = json.dumps(
+    background_result(
+        "researcher",
+        CommandResult(
+            name="build",
+            command="tools/build.sh",
+            finished=False,
+            exit_code=None,
+            output_tail="building...",
+            log_path=Path("documents/logs/build-20261104.log"),
+            duration_s=600.0,
+            pid=4242,
+            resume_token="res_8c1",
+        ),
+    )
 )
 # ``_credits_refused`` in tools/xp.py, as a Researcher gets it; an Orchestrator's ``next`` differs.
 CREDITS_REFUSAL = json.dumps(
@@ -820,8 +833,8 @@ CREDITS_REFUSAL = json.dumps(
         "created": [],
         "reconciled": [],
         "runs": [],
-        "next": "task.wait {kind: credits, detail: 'XP requests for X-5', ref: 2} and end your "
-        "run; the watcher resumes you when the balance covers it",
+        "next": "task.wait {task, kind: credits, detail: 'XP requests for X-5: need 2.00 credits'} "
+        "and end your run; the watcher resumes you when the balance covers it",
     }
 )
 
@@ -831,7 +844,7 @@ RESEARCHER = [
         "Study late fights",
         "Read 20 replays of late fights we lost and report what they have in common.",
         ("task.claim",),
-        ("working-a-task", "task"),
+        ("working-a-task",),
         claimed=False,
     ),
     task(
@@ -857,7 +870,11 @@ RESEARCHER = [
         "Test the retreat threshold",
         "Run X-5 to a verdict.",
         ("task.wait",),
-        ("experiment", "run-eval", "working-a-task", "task"),
+        (
+            "experiment",
+            "run-eval",
+            "working-a-task",
+        ),
         task_type="improvement",
         prior=(Prior("xp", {"action": "request", "experiment": "X-5"}, XP_ACCEPTED),),
         x5="pending",
@@ -867,7 +884,10 @@ RESEARCHER = [
         "Test the retreat threshold",
         "Run X-5 to a verdict.",
         ("task.wait",),
-        ("credits", "working-a-task", "task"),
+        (
+            "credits",
+            "working-a-task",
+        ),
         task_type="improvement",
         prior=(Prior("xp", {"action": "request", "experiment": "X-5"}, CREDITS_REFUSAL),),
     ),
@@ -876,7 +896,10 @@ RESEARCHER = [
         "Test the retreat threshold",
         "Build the candidate for X-5. Its change is committed.",
         ("task.wait",),
-        ("candidate", "working-a-task", "task"),
+        (
+            "candidate",
+            "working-a-task",
+        ),
         task_type="improvement",
         prior=(
             Prior(
@@ -894,7 +917,7 @@ RESEARCHER = [
         "which league that is, and the two leagues it could mean need different Experiments, at "
         "very different credit cost. No record you can read settles this.",
         ("task.ask",),
-        ("working-a-task", "task"),
+        ("working-a-task",),
         goal="G-2",
     ),
     task(
@@ -903,7 +926,7 @@ RESEARCHER = [
         "Find out why late fights are lost. You have finished: claims C-21 and C-22 are recorded, "
         "and nothing changes code. There is nothing left to do but finish.",
         ("task.complete",),
-        ("working-a-task", "task"),
+        ("working-a-task",),
     ),
     task(
         "complete-failed",
@@ -913,7 +936,10 @@ RESEARCHER = [
         "tried from this Task: the fix needs a new toolchain pin in the mixin, which a directive "
         "keeps out of this Task.",
         ("task.complete",),
-        ("repair", "working-a-task", "task"),
+        (
+            "repair",
+            "working-a-task",
+        ),
         task_type="maintenance",
     ),
     task(
@@ -923,7 +949,7 @@ RESEARCHER = [
         "the opening book, and there is no other way to do this Task, so you must not continue "
         "with it.",
         ("task.release", "task.ask"),
-        ("working-a-task", "task"),
+        ("working-a-task",),
         task_type="improvement",
     ),
     task(
@@ -1193,6 +1219,54 @@ HARD = [
         ("goals-and-tasks",),
         args={"key": "max_researchers", "value": '^"?2"?$', "cites": r"\bm-81\b"},
     ),
+    # Settings the goals-and-tasks skill does not name: settings.read has to find them.
+    chat(
+        "hard-setting-xp-threshold",
+        "Check with me before going over 50 XP requests on any one Experiment. Message m-82.",
+        ("settings.update",),
+        ("goals-and-tasks",),
+        args={
+            "key": r"xp\.ask_above_requests_per_experiment",
+            "value": '^"?50"?$',
+            "cites": r"\bm-82\b",
+        },
+    ),
+    chat(
+        "hard-setting-forum",
+        "Ask me before you post on the forum on your own. Message m-83.",
+        ("settings.update",),
+        ("goals-and-tasks",),
+        args={"key": r"platform_writes\.forum", "value": "ask", "cites": r"\bm-83\b"},
+    ),
+    chat(
+        "hard-setting-anti-stall",
+        "Move the daily check on stalled Goals to 6 in the morning. Message m-84.",
+        ("settings.update",),
+        ("goals-and-tasks",),
+        args={"key": r"anti_stall\.hour", "value": "06:00", "cites": r"\bm-84\b"},
+    ),
+    chat(
+        "hard-setting-park-rounds",
+        "Give a Goal five rounds of ideation without progress before you park it. Message m-85.",
+        ("settings.update",),
+        ("goals-and-tasks",),
+        args={"key": r"ideation\.park_after_rounds", "value": '^"?5"?$', "cites": r"\bm-85\b"},
+    ),
+    chat(
+        "hard-setting-recovery",
+        "If a Researcher's run keeps failing, try it four times before giving up. Message m-86.",
+        ("settings.update",),
+        ("goals-and-tasks",),
+        args={"key": r"recovery\.max_attempts", "value": '^"?4"?$', "cites": r"\bm-86\b"},
+    ),
+    chat(
+        "hard-directive-reaches-running-task",
+        "From now on, never use more than 30 seeds in an evaluation. This goes for everything, "
+        "including what is already running. This is message m-41.",
+        ("task.message",),
+        ("goals-and-tasks",),
+        before=("directive.add",),
+    ),
     chat(
         "hard-better-not-survey",
         "Is V-12 actually better than V-11? Look at their recent episodes and tell me which one "
@@ -1434,7 +1508,11 @@ HARD = [
         "Test the retreat threshold",
         "Run X-5 to a verdict.",
         ("task.wait",),
-        ("experiment", "run-eval", "working-a-task", "task"),
+        (
+            "experiment",
+            "run-eval",
+            "working-a-task",
+        ),
         task_type="improvement",
         prior=(Prior("xp", {"action": "request", "experiment": "X-5"}, XP_ACCEPTED),),
         args={"kind": "xp", "ref": r"(?=.*\bxreq_1\b)(?=.*\bxreq_2\b)", "task": r"\bT-21\b"},
@@ -1445,7 +1523,10 @@ HARD = [
         "Test the retreat threshold",
         "Run X-5 to a verdict.",
         ("task.wait",),
-        ("credits", "working-a-task", "task"),
+        (
+            "credits",
+            "working-a-task",
+        ),
         task_type="improvement",
         prior=(Prior("xp", {"action": "request", "experiment": "X-5"}, CREDITS_REFUSAL),),
         args={"kind": "credits"},
@@ -1455,7 +1536,10 @@ HARD = [
         "Test the retreat threshold",
         "Build the candidate for X-5. Its change is committed.",
         ("task.wait",),
-        ("candidate", "working-a-task", "task"),
+        (
+            "candidate",
+            "working-a-task",
+        ),
         task_type="improvement",
         prior=(
             Prior(
@@ -1472,7 +1556,10 @@ HARD = [
         "Test the retreat threshold",
         "Run X-5 to a verdict.",
         ("text",),
-        ("experiment", "working-a-task", "task"),
+        (
+            "experiment",
+            "working-a-task",
+        ),
         task_type="improvement",
         prior=(
             Prior("xp", {"action": "request", "experiment": "X-5"}, XP_ACCEPTED),
@@ -1484,7 +1571,6 @@ HARD = [
                     "kind": "xp",
                     "detail": "X-5's requests",
                     "ref": ["xreq_1", "xreq_2"],
-                    "operation_id": "wait-1",
                 },
                 ok(
                     record={
@@ -1506,8 +1592,7 @@ HARD = [
     task(
         "hard-resume-build",
         "Test the retreat threshold",
-        "Build the candidate for X-5. Its change is committed. The background build you started "
-        "(pid 4242) has now ended; the watcher resumed you.",
+        "Build the candidate for X-5. Its change is committed.",
         ("version.create",),
         ("candidate",),
         task_type="improvement",
@@ -1517,7 +1602,31 @@ HARD = [
                 {"action": "create", "summary": "Lower retreat threshold", "experiment": "X-5"},
                 BUILD_BACKGROUND,
             ),
+            Prior(
+                "task",
+                {
+                    "action": "wait",
+                    "task": "T-21",
+                    "kind": "process",
+                    "ref": 4242,
+                    "detail": "the build",
+                },
+                ok(
+                    record={
+                        "id": "T-21",
+                        "status": "in-progress",
+                        "waiting_on": {
+                            "kind": "process",
+                            "detail": "the build",
+                            "ref": 4242,
+                            "since": "2026-11-04T18:00:00Z",
+                        },
+                    }
+                ),
+            ),
         ),
+        # coordinator.wait_resolved's prompt, with waits._process's note.
+        after_prior="Your wait on process resolved: process 4242 has ended. Continue.",
         args={"resume": r"\bres_8c1\b"},
         x5="designed",
     ),
@@ -1554,7 +1663,10 @@ HARD = [
         "checkout; both end in 'undefined symbol X', exit code 1. It cannot succeed from this "
         "Task: the fix is a new toolchain pin, and a directive keeps that out of this Task.",
         ("task.complete",),
-        ("repair", "working-a-task", "task"),
+        (
+            "repair",
+            "working-a-task",
+        ),
         task_type="maintenance",
         args={"outcome": "failed", "failure": "what_failed.*next_step|next_step.*what_failed"},
     ),
@@ -1565,7 +1677,10 @@ HARD = [
         "3f2a9c1, reran it until it passed, asked for a check, and workspace.capabilities now "
         "shows evaluate ok. All that remains is to finish.",
         ("task.complete",),
-        ("repair", "working-a-task", "task"),
+        (
+            "repair",
+            "working-a-task",
+        ),
         task_type="maintenance",
         args={"capability": "evaluate", "commit": "3f2a9c1", "summary": ".", "merge": "yes"},
     ),
@@ -1575,7 +1690,7 @@ HARD = [
         "X-5 is closed as refuted. V-12 was tested. C-30 records it, the commit on your branch is "
         "3f2a9c1. All that remains is to finish.",
         ("task.complete",),
-        ("working-a-task", "task"),
+        ("working-a-task",),
         task_type="improvement",
         args={
             "experiment": r"\bX-5\b",
@@ -1635,7 +1750,7 @@ HARD = [
         "You fixed tools/build.sh and committed 3f2a9c1; the mixin's build and check pass. "
         "Nothing else was asked for.",
         ("task.complete",),
-        ("working-a-task", "task", "repair"),
+        ("working-a-task", "repair"),
         task_type="maintenance",
         args={"commit": "3f2a9c1", "summary": ".", "merge": "yes"},
     ),

@@ -1,6 +1,6 @@
 ---
 name: experiment
-description: Use when designing, running and closing an Experiment.
+description: Use to test if a Version beats another, by Experiment.
 ---
 
 # Experiment
@@ -18,7 +18,7 @@ An Experiment compares two Versions and ends in the verdict its pre-registered d
 
 - `summary`: at most 40 words.
 - `hypothesis {statement, if_true, if_false, motivation}`: a mechanism ("X because Y, so Z"), not a tweak. `if_true` and `if_false` must differ and name the metric that moves.
-- `methods {baseline, candidate, procedure, metrics, decision_rule}`: Versions as `V-n`; leave `candidate` empty until it is built, the one Version built for the Experiment fills it. `metrics`: `[{name, direction, role, min_effect?, tolerance?}]` with roles `primary`, `guardrail`, `performance`. Every behavioural primary metric gets an anti-gaming guardrail; a rate metric needs its volume counterparts. `decision_rule {text, n_min, k?}`: `n_min` pairs from the noise record (`calibrate-noise`) or the mixin's floors.
+- `methods {baseline, candidate, procedure, metrics, decision_rule}`: Versions as `V-n`; leave `candidate` empty until it is built, the one Version built for the Experiment fills it. `metrics`: `[{name, direction, role, min_effect?, tolerance?}]` with roles `primary`, `guardrail`, `performance`. Every behavioural primary metric gets an anti-gaming guardrail; a rate metric needs its volume counterparts. `decision_rule {text, n_min}`: `n_min` pairs from the noise record (`calibrate-noise`) or the mixin's floors.
 - Metric names, directions, rosters and floors are game-specific: see the mixin's `<coworld>-eval-design` and `<coworld>-ab` skills or docs. Without them, say so and treat the result as directional.
 - `tags`: the lever and the Goal (`G-n`).
 
@@ -26,16 +26,16 @@ Attack the design before starting: does the metric measure the mechanism or a co
 
 ## Run
 
-1. Build the candidate (`candidate` skill): one conceptual change, `version.create {summary, task, experiment}`.
-2. `experiment.start {experiment}` locks the design; it refuses while a part is missing and names each.
+1. `experiment.start {experiment}` locks the design; it refuses while a part is missing and names each, and the candidate may still be empty.
+2. Build the candidate (`candidate` skill): one conceptual change, `version.create {summary, task, experiment}`, then `upload {version}`.
 3. `xp.request {experiment}`: one request per seed and arm, recorded as runs the moment the platform accepts them. In an A/B both arms get the same `opponents` and are paired by seed (`run-eval`).
-4. Then `task.wait {kind: xp, ref: [<request ids>]}` and end your run; the watcher resumes you when the requests are terminal. Never poll. A credits refusal (402) is `task.wait {kind: credits}`. The Orchestrator ends its turn and returns later.
-5. On resume, `xp.status {experiment}` refreshes the runs, downloads finished results, runs the mixin's `evaluate` and stores the rows. If `evaluate` is backgrounded, `task.wait {kind: process, ref: <pid>}`, then `xp.status {resume}`.
+4. Then `task.wait {task, kind: xp, detail: "X-n's requests", ref: [<request ids>]}` and end your run; the watcher resumes you when the requests are terminal. Never poll. A credits refusal (402) is `task.wait {task, kind: credits, detail}`. The Orchestrator ends its turn and returns later.
+5. On resume, `xp.status {experiment}` refreshes the runs, downloads finished results, runs the mixin's `evaluate` and stores the rows. If `evaluate` is backgrounded, `task.wait {task, kind: process, detail: "evaluate of X-n", ref: <pid>}`, then `xp.status {resume}`.
 6. Inspect before you trust: failed episodes, dropped rows, the right Versions and seeds, and that the change activated (one replay per arm, `replay-diagnosis`). Mark a bad run `experiment.update_run {run, validity: "invalid: <reason>"}`.
 
 ## Close
 
-`experiment.close {experiment}` pairs baseline and candidate rows by seed and applies the rule: `confirmed` (no reason codes), `inconclusive` (`n_short`), or `refuted` (`primary_not_significant`, `guardrail_breach`, `performance_slip`). Give an explicit `verdict` with `measurements`, `interpretation` and `reason` only when the rule cannot be applied as registered. Never move a threshold after seeing data; N was committed with the rule, so do not peek and stop early. `experiment.abandon {reason}` stops before a verdict; the record stays and a replacement cites it.
+`experiment.close {experiment}` pairs baseline and candidate rows by seed and applies the rule: `confirmed` (no reason codes), `inconclusive` (`n_short`), or `refuted` (`primary_not_significant`, `guardrail_breach`, `performance_slip`). Give an explicit `verdict` with `measurements`, `interpretation` and `reason` only when the rule cannot be applied as registered. Never move a threshold after seeing data; N was committed with the rule, so do not peek and stop early. `experiment.abandon {experiment, reason}` stops before a verdict; the record stays and a replacement cites it.
 
 ## Record
 

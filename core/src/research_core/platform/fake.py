@@ -628,14 +628,18 @@ class FakePlatform:
         if mode == "always":
             return True
         if mode == "lineage":
-            name = state["policies"][membership["policy_version_id"]]["name"]
-            return any(
-                m["is_champion"]
-                and m["league_id"] == membership["league_id"]
-                and m["player_id"] == membership["player_id"]
-                and state["policies"].get(m["policy_version_id"], {}).get("name") == name
-                for m in state["memberships"].values()
-            )
+            policy = state["policies"][membership["policy_version_id"]]
+            for m in state["memberships"].values():
+                champion_policy = state["policies"].get(m["policy_version_id"], {})
+                if (
+                    m["is_champion"]
+                    and m["league_id"] == membership["league_id"]
+                    and m["player_id"] == membership["player_id"]
+                    and champion_policy.get("name") == policy["name"]
+                    and champion_policy["version"] < policy["version"]
+                ):
+                    return True
+            return False
         return False
 
     @staticmethod

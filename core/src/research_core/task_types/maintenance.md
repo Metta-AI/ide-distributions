@@ -48,7 +48,7 @@ End: `task.complete {task, commit, summary, capability, merge: "yes", result}`. 
 your branch; `capability` is required for a repair. The change merges after review once build
 and check pass again.
 
-When it fails, `task.complete {outcome: "failed", failure}` with `what_failed` and `next_step`,
+When it fails, `task.complete {task, outcome: "failed", failure}` with `what_failed` and `next_step`,
 plus `error`, `exit_code` and `tried` when they exist. Good: what_failed "the build failed on
 nim 2.2: undefined symbol X", next_step "pin nim 2.0 in MIXIN.md toolchains or patch
 tools/build.sh line 12". Bad: what_failed "it broke", next_step "try again".

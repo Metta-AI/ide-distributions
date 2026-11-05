@@ -289,11 +289,6 @@ QUESTIONS: dict[str, list[Question]] = {
             r"scores?[- ]only",
         ),
     ],
-    "skill:task": [
-        q("What is your first call?", r"task\.claim"),
-        q("Which two fields must a failure have?", r"what_failed", r"next_step"),
-        q("Which call gives a Task back unfinished?", r"task\.release"),
-    ],
     "skill:writing-claims": [
         q("How many words may the summary and the body have?", r"\b40\b", r"\b500\b"),
         q("What are the three stances?", r"supports", r"contradicts", r"qualifies"),
@@ -469,9 +464,8 @@ QUESTIONS: dict[str, list[Question]] = {
             r"accept",
             r"merge",
             r"reason",
-            r"operation_id",
         ),
-        q("What are the required arguments for answer?", r"task", r"text", r"operation_id"),
+        q("What are the required arguments for answer?", r"task", r"text"),
         q("Which action shows the available workers?", r"workers"),
     ],
     "tool:researcher:task": [
@@ -480,7 +474,6 @@ QUESTIONS: dict[str, list[Question]] = {
             r"task",
             r"kind",
             r"detail",
-            r"operation_id",
         ),
         q("What fields does a failed complete need?", r"failure"),
         q("Is merge needed when a Task succeeded?", r"yes|required"),
@@ -488,7 +481,7 @@ QUESTIONS: dict[str, list[Question]] = {
     "tool:ui": [
         q("What are the required arguments for panel_set?", r"panel", r"kind", r"content"),
         q("Does notify ask anything?", r"\bno\b|never|inform"),
-        q("What is the only channel a wake has to the user?", r"notice|notify"),
+        q("How does a wake report to the user?", r"notice|notify"),
     ],
     "tool:upload": [
         q("Which argument is required?", r"version"),
@@ -510,7 +503,6 @@ QUESTIONS: dict[str, list[Question]] = {
             "What are the required arguments for change_complete?",
             r"worktree",
             r"summary",
-            r"operation_id",
         ),
         q("How do you work in another Coworld?", r"new session"),
         q("Which action tells you where you are and what is writable?", r"environment_guide"),

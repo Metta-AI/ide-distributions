@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 import traceback
@@ -107,7 +108,7 @@ class ToolSpec:
             properties["action"] = {
                 "type": "string",
                 "enum": [action.name for action in actions],
-                "description": " ".join(f"{a.name}: {a.description}" for a in actions),
+                "description": " ".join(action_line(a) for a in actions),
             }
             takers: dict[str, list[ActionSpec]] = {}
             for action in actions:
@@ -151,6 +152,16 @@ class ToolSpec:
         if required:
             parameters["required"] = required
         return {"name": self.name, "description": self.description, "parameters": parameters}
+
+
+def action_line(action: ActionSpec) -> str:
+    """One action in the tool's list: its name, the fields it requires, what it does.
+
+    A JSON schema can mark only ``action`` as required when the rest depend on the action, so this
+    puts them where the model chooses the action. Measured on Kimi K3.1 Pro on 2026-11-04.
+    """
+    needs = f" (needs {', '.join(action.required)})" if action.required else ""
+    return f"{action.name}{needs}: {action.description}"
 
 
 def field_description(name: str, taking: list[ActionSpec], action_count: int) -> str:
@@ -360,11 +371,23 @@ def drop_unused_empty(spec: ToolSpec, action: str | None, args: Mapping[str, Any
 PLACEHOLDERS = {"string": "<text>", "integer": 1, "number": 1.0, "boolean": True}
 
 
+# The format a description gives, as in "The Task, such as T-3." or 'such as ["C-3"]'.
+SUCH_AS = re.compile(r"""such as \[?"?([\w:./-]*\w)""")
+
+
 def _placeholder(schema: dict) -> Any:
+    """A value that shows the format and that no tool would take for a real record if it were sent
+    as it is: ``<such as T-3>``, not ``T-3``."""
     if "enum" in schema:
         return schema["enum"][0]
+    format_given = SUCH_AS.search(str(schema.get("description", "")))
     if schema.get("type") == "array":
-        return [_placeholder(schema.get("items") or {"type": "string"})]
+        item = schema.get("items") or {"type": "string"}
+        if format_given and item.get("type") == "string":
+            return [f"<such as {format_given[1]}>"]
+        return [_placeholder(item)]
+    if format_given and schema.get("type") == "string":
+        return f"<such as {format_given[1]}>"
     return PLACEHOLDERS.get(schema.get("type", ""), "<value>")
 
 
@@ -444,7 +467,10 @@ def argument_error(
     label = f"{spec.name} {action}" if action else spec.name
     how_to = usage(spec, role, action)
     if "example" in how_to:
-        fix = "Call again with every required field in one call; see usage.example."
+        fix = (
+            "Call again with every required field in one call; usage.example shows the shape, "
+            "with real values in place of each <...>."
+        )
     elif "actions" in how_to:
         fix = "Call again with one of the actions in usage.actions and the fields it requires."
     else:

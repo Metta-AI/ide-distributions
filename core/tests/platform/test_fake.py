@@ -186,6 +186,27 @@ def test_submission_is_placed_after_polls_and_crowns_the_champion(tmp_path):
     assert platform.snapshot()["counts"]["submit"] == 2
 
 
+def test_lineage_crowns_only_a_later_version_of_the_champions_policy(tmp_path):
+    """As ``should_auto_promote_membership_to_champion`` in metta: same policy, earlier version."""
+    platform = make(tmp_path)
+    first = platform.upload_file_policy(name="starter", content=policy_bytes(3, 5))
+    second = platform.upload_file_policy(name="starter", content=policy_bytes(3, 9))
+    third = platform.upload_file_policy(name="starter", content=policy_bytes(3, 11))
+    other = platform.upload_file_policy(name="other", content=policy_bytes(3, 13))
+
+    def champion_after(policy, auto_champion):
+        platform.submit(league_id=LEAGUE, policy_version_id=policy.id, auto_champion=auto_champion)
+        platform.memberships(mine=True)
+        platform.memberships(mine=True)
+        (champion,) = platform.memberships(mine=True, champions_only=True)
+        return champion.policy_version.id
+
+    assert champion_after(second, "always") == second.id
+    assert champion_after(first, "lineage") == second.id  # an earlier version
+    assert champion_after(other, "lineage") == second.id  # another policy
+    assert champion_after(third, "lineage") == third.id
+
+
 def test_submit_refuses_unknown_policy_and_league(tmp_path):
     platform = make(tmp_path)
     version = platform.upload_file_policy(name="starter", content=policy_bytes(3, 5))

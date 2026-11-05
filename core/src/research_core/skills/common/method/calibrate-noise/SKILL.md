@@ -5,7 +5,7 @@ description: Use when sizing an Experiment from measured metric noise.
 
 # Calibrate noise
 
-A decision rule needs `n_min` pairs and guardrail tolerances that match how much each metric moves on its own between episodes. That noise is per game version; a new version needs a new record. Existing Experiments keep their locked designs; only new ones use the new record.
+A decision rule needs `n_min` pairs that match how much each metric moves on its own between episodes, and a guardrail `tolerance` needs the same number. That noise is per game version; a new version needs a new record. Existing Experiments keep their locked designs; only new ones use the new record.
 
 ## Sources
 
@@ -19,7 +19,7 @@ Only hosted episodes count; local runs never do.
 
 1. Find the game version: `platform.coworld {coworld}` (version and commit). Take the metric names and directions from `MIXIN.md`.
 2. Collect at least 10 rows per metric; aim for 100 or more. Drop rows of other game versions and failed episodes, and report the counts you dropped.
-3. For each metric compute the per-episode standard deviation and, where rows pair by seed, the standard deviation of the paired difference. The workspace environment ships helpers: `research_core.stats.noise.compute_noise` (rows to a record), `research_core.stats.power.min_episodes` and `power.delta` (the pairs an effect needs at `k`). Run them with the workspace environment's Python (`environment` skill).
+3. For each metric compute the per-episode standard deviation and, where rows pair by seed, the standard deviation of the paired difference. The workspace environment ships helpers: `research_core.stats.noise.compute_noise` (rows to a record), `research_core.stats.power.min_episodes` and `power.delta` (the pairs an effect needs, and the slip a `tolerance` should allow: `k` is how many standard errors, default 0.5). Run them with the workspace environment's Python (`environment` skill).
 4. Store the record under `documents/measurements/noise-<game version>.json` with the rows' source ids, and commit it in your worktree.
 5. Write one claim per record (`writing-claims`): summary "metric noise for <game version>: <metric> sd <x> (n=<rows>)…", body with the counts, sources and what would change it (a new game version, a field shift), tags `noise`, the game version and the League, evidence `measurement` (`<command> @<sha> -> documents/measurements/noise-<game version>.json`). Fewer than 10 rows per metric: say the record is weak in the summary.
 6. Experiments cite the claim in `decision_rule.text` and take `n_min` from it.

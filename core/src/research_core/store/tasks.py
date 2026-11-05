@@ -413,7 +413,7 @@ def claim_result(
         elif row["status"] == "in-progress":
             problems.append(
                 f"{_t(n)} is held by session:{row['held_by']}; "
-                "lease age cannot release execution ownership"
+                "only that Session can work on it until the watcher releases it"
             )
             lease_problem = True
         else:
@@ -755,11 +755,11 @@ def complete(
             isinstance(checklist, Mapping),
             "checklist is required: the type's deliverables",
         )
-        require(problems, merge_request in ("yes", "no"), "merge_request must be yes or no")
+        require(problems, merge_request in ("yes", "no"), "merge must be yes or no")
         if merge_request == "yes":
-            require(problems, commit, "merge_request yes needs the commit to merge")
+            require(problems, commit, "merge yes needs the commit to merge")
         if merge_request == "no":
-            require(problems, _text(merge_reason), "merge_request no needs merge_reason")
+            require(problems, _text(merge_reason), "merge no needs merge_reason")
         require(problems, _text(result), "result is required: what came of the Task")
         if submission_candidate is not None:
             require(

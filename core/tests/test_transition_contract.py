@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import pytest
 
-from research_core import transitions
+from research_core import gitops, transitions
 from research_core.coordinator import Coordinator
 from research_core.store import admissions, db, sessions, tasks
 from research_core.store.actors import Actor
@@ -276,7 +276,6 @@ def test_live_event_guidance_is_rerouted_when_parent_finishes_before_delivery(tm
 
 
 def test_queued_claim_preserves_worker_profile_under_orchestrator_environment(tmp_path):
-    from research_core import gitops
 
     ctx = make_ctx(tmp_path)
     gitops.init_repo(ctx.coworld.code)
@@ -820,6 +819,7 @@ def test_accepted_worker_report_survives_exit_before_application(tmp_path, monke
         env=ctx.env,
     )
     tool_ctx.store, tool_ctx.wstore = ctx.store, ctx.wstore
+    monkeypatch.setattr(gitops, "commit_on_branch", lambda *_: True)
     args = {"action": action, "task": "T-1", "operation_id": "report"}
     args.update(
         {
@@ -827,7 +827,8 @@ def test_accepted_worker_report_survives_exit_before_application(tmp_path, monke
             "ask": {"question": "Which approach?"},
             "release": {"reason": "Cannot proceed"},
             "complete": {
-                "checklist": {"summary": "Fixed", "commit": "a" * 40},
+                "summary": "Fixed",
+                "commit": "a" * 40,
                 "merge": "no",
                 "merge_reason": "No code",
                 "result": "Fixed",
@@ -878,7 +879,7 @@ def test_worker_report_cannot_be_accepted_after_execution_retires(tmp_path):
         role="researcher", actor=Actor.session(row["session_id"]), workspace=ctx.ws, env=ctx.env
     )
     tool_ctx.store, tool_ctx.wstore = ctx.store, ctx.wstore
-    with pytest.raises(ToolError, match="no longer has task transition authority"):
+    with pytest.raises(ToolError, match="no longer holds the Task"):
         transitions.request(tool_ctx, "task", {"action": "release", "task": "T-1"}, "late")
     assert not ctx.store.q("SELECT * FROM transition_commands")
 
@@ -921,7 +922,7 @@ def test_release_retirement_serializes_with_worker_report_acceptance(
             pending = transitions.request(worker, "task", args, "report")
     Coordinator.request_release(worker, 1, "Done")
     if not accepted_first:
-        with pytest.raises(ToolError, match="no longer has task transition authority"):
+        with pytest.raises(ToolError, match="no longer holds the Task"):
             transitions.request(worker, "task", args, "late")
         assert not ctx.store.q("SELECT * FROM transition_commands")
         return

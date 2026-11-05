@@ -83,9 +83,10 @@ SPEC = tool(
     ToolSpec(
         name="settings",
         description=(
-            "Settings bound the agents' own initiative (pauses, researcher count, approval "
-            "gates, submission rules); they never refuse what the user asks for. Returns the "
-            "setting with its spec."
+            "Settings bound the agents' own initiative: pausing, researcher count, approval "
+            "gates, submission rules, XP request limits, forum and wiki writes, parking Goals, "
+            "recovery attempts, the daily check's hour. They never refuse what the user asks "
+            "for. Returns the setting with its spec."
         ),
         handler=handle,
         roles=BOTH,
@@ -107,6 +108,7 @@ SPEC = tool(
                         {"type": "number"},
                         a.STRING,
                         a.STRINGS,
+                        {"type": "null"},
                     ),
                     "cites": a.string("The user's message that asked for the change."),
                 },

@@ -579,7 +579,7 @@ def test_complete_requires_holder_and_checklist(coworld_store, harness, research
         tasks.complete(coworld_store, researcher, task["id"], checklist={}, merge_request="yes")
     problems = info.value.problems
     assert any(p.startswith("checklist: claims") for p in problems)
-    assert any("merge_request yes needs the commit" in p for p in problems)
+    assert any("merge yes needs the commit" in p for p in problems)
     assert any("result" in p for p in problems)
     assert len(problems) == 3
     assert tasks.read(coworld_store, task["id"])["status"] == "in-progress"
@@ -803,7 +803,7 @@ def test_merge_request_no_needs_a_reason_and_commit_is_a_sha(
     problems = info.value.problems
     assert any("merge_reason" in p for p in problems)
     assert any("commit" in p and "sha" in p for p in problems)
-    with pytest.raises(StoreError, match="merge_request"):
+    with pytest.raises(StoreError, match="merge must be"):
         tasks.complete(
             coworld_store,
             researcher,

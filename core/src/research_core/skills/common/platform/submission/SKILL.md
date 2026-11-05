@@ -31,11 +31,11 @@ The bar is on your initiative, not on the user: they can turn it off (`settings.
 
 ## Researchers
 
-A Researcher never submits. `task.propose_submission {task, version, reason}` records the proposal; a management wake applies the rule above, and in mode `ask` the Orchestrator asks the user. `task.complete` carries `submission_candidate: yes|no` with `submission_reason`. Waiting for a placed submission is `task.wait {kind: submission}`.
+A Researcher never submits. `task.propose_submission {task, version, reason}` records the proposal; a management wake applies the rule above, and in mode `ask` the Orchestrator asks the user. `task.complete` carries `submission_candidate: yes|no` with `submission_reason`. Waiting for a placed submission is `task.wait {task, kind: submission, detail: "V-n in <league>", ref: <its policy version id>}`.
 
 ## Options and after
 
-- `auto_champion`: `always` (default: the platform makes it the Player's champion once placed), `never`, or `lineage`.
+- `auto_champion`: whether the platform makes it the Player's champion when it starts competing: `always` (default: unless the champion is a later upload), `never`, or `lineage` (only if the champion is an earlier version of the same policy).
 - `reason` is kept on the champion record; every autonomous submission sends a notice.
 - After `submit`, say where it stands in platform terms (`submitted`, `qualifying`, `competing`, `champion`) and nothing else. A `rejected` submission is a finding: read the platform's notes, record a claim, fix the Version.
 - A policy the user uploaded elsewhere becomes a Version with `version.adopt {policy_version | label, summary}`, so it can be submitted and compared.

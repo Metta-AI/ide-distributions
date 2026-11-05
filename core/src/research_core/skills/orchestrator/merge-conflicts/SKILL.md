@@ -17,15 +17,15 @@ never commit on `main` directly.
    was for.
 2. The log the payload names: full output, exit code, the failing command. A result tail is
    2,000 characters; the log is complete.
-3. `git log main..task/<n>` and `git diff main...task/<n>` in the Coworld's `code/` folder,
-   read-only, to see what the branch changes and what moved on `main` since it branched.
+3. In the Coworld's `code/` folder, read-only: `git log main..task/<n>` and `git diff main...task/<n>`
+   for what the branch changes, and `git log task/<n>..main` for what moved on `main` since it branched.
 
 ## Outcome 1: resolve it yourself
 
 For a conflict you can judge (both sides touched the same file; a dependency pin; a renamed
 function):
 
-1. `workspace.worktree_open {name}` gives `worktrees/orch-<n>/` on branch `orch/<n>` from
+1. `workspace.worktree_open` gives `worktrees/orch-<n>/` on branch `orch/<n>` from
    `main`. Work there.
 2. Merge the Task branch into your worktree branch, resolve each conflict keeping the intent of
    both changes, and run the mixin's `check` command from `MIXIN.md` (game-specific checks: see

@@ -172,7 +172,7 @@ def _task_prompt(situation: Situation) -> str:
 def _claim_exchange(situation: Situation, schemas: harness.SchemaSet) -> list[dict]:
     """The ``task.claim`` already made, with the type's real instructions in its result."""
     result = usability_reads.claim_result(situation, load_task_type(situation.task_type).body)
-    args = {"action": "claim", "task": TASK_ID, "operation_id": "claim-t-21"}
+    args = {"action": "claim", "task": TASK_ID}
     return [
         _assistant_call("call_claim", situation.role, "task", args, schemas),
         {"role": "tool", "tool_call_id": "call_claim", "content": json.dumps(result)},
@@ -190,6 +190,12 @@ def first_user_message(situation: Situation) -> str:
     return situation.text
 
 
+def session_kind(situation: Situation) -> str:
+    if situation.role == "researcher":
+        return "task"
+    return "wake" if situation.wake else "chat"
+
+
 def messages_for(situation: Situation, schemas: harness.SchemaSet) -> list[dict]:
     your_task = ""
     if situation.role == "researcher":
@@ -203,6 +209,7 @@ def messages_for(situation: Situation, schemas: harness.SchemaSet) -> list[dict]
         declared=situation.declared,
         capabilities=situation.capabilities,
         has_coworld=situation.has_coworld,
+        kind=session_kind(situation),
     )
     history = [
         {"role": "system", "content": system},
@@ -216,6 +223,8 @@ def messages_for(situation: Situation, schemas: harness.SchemaSet) -> list[dict]
             _assistant_call(call_id, situation.role, prior.tool, prior.args, schemas),
             {"role": "tool", "tool_call_id": call_id, "content": prior.result},
         ]
+    if situation.after_prior:
+        history.append({"role": "user", "content": situation.after_prior})
     return history
 
 
@@ -274,11 +283,6 @@ def args_hold(wanted: dict[str, str | None], args: dict) -> bool:
     return True
 
 
-def _with_checklist(args: dict) -> dict:
-    """``task.complete`` takes its deliverables flat or under ``checklist``, which wins there."""
-    return {**args, **(args.get("checklist") or {})}
-
-
 def _is_ide_tool(situation: Situation, name: str) -> bool:
     return any(spec.name == name for spec in catalog.tools_for(situation.role))
 
@@ -319,7 +323,7 @@ def _handle_call(
                 return None
             run.outcome, run.act, run.act_args = "right", label, args
             if situation.args is not None:
-                run.args_right = args_hold(situation.args, _with_checklist(args or {}))
+                run.args_right = args_hold(situation.args, args or {})
             return None
         return _answer(situation, run, call, schemas, problems)
     if problems or is_preparation(call.name, args) or call.name == "skills_list":

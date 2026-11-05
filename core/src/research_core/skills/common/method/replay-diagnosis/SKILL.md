@@ -32,7 +32,7 @@ Each inspected replay becomes evidence on a claim (`writing-claims`):
 - the body gives the before metric, the tick, the cause and what would change your mind;
 - one replay is an anecdote, say so; a pattern across several replays supports a mechanism; tag the policy version, the lever and the Goal.
 
-An existing claim on the same behaviour gets `claim.add_evidence` instead of a twin; a contradicted one is retired with the killing replay (`claim.retire {status: refuted, type: replay, ref, note}`).
+An existing claim on the same behaviour gets `claim.add_evidence` instead of a twin; a contradicted one is retired with the killing replay (`claim.retire {claim, status: refuted, type: replay, ref, note}`).
 
 ## When the replay cannot show the cause
 

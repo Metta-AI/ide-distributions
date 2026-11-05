@@ -97,6 +97,13 @@ frozen, no session is touched and the cache stays valid.
   turn, and since the hash is already recorded, it stays on them until a later release changes
   the hash. Both were measured with the pinned Hermes.
 
+Between releases the prompt stays frozen too, including its briefing and session context, so
+agents are told the briefing is a snapshot and when it was written. A compaction inside a live
+agent's turn renders those sections again; the gateway's compaction between turns keeps the stored
+text (`_retain_seeded_system_prompt` in Hermes). So a Researcher already running does not see a new
+directive: a Task started later gets it in its briefing, and `directive.add` and `directive.update`
+name the session Coworld's Tasks in progress so the Orchestrator can tell them with `task.message`.
+
 The Hermes behaviour this depends on is listed in the module's docstring and exercised by
 `core/tests/hermes/test_frozen_sessions_real.py`, which CI runs against the pinned image.
 
@@ -125,7 +132,10 @@ The Hermes behaviour this depends on is listed in the module's docstring and exe
   `has_work` from `research serve`'s `/status` and starts `research workspace sleep` after fifteen
   minutes without work. *How* it goes to sleep and wakes is the cycle that follows.
 - Container health stays as it is: the watcher reports through its heartbeat and
-  `workspace.doctor`, never through container liveness, so a broken tool cannot crash-loop.
+  `workspace.doctor`, never through container liveness, so a broken tool cannot crash-loop. A tool
+  module that does not import takes its profile's plugin down, not the gateway: chats still run,
+  without the research tools and hooks, and the gateway log says `Failed to load plugin`. CI fails
+  on it first (`tools/build_prompts.py --check`, the tests).
 
 ### Coordinator and pause
 

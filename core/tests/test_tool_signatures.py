@@ -13,8 +13,7 @@ The prompts, skills, task types and wake prompts show calls in this short form, 
 
 The rules: the tool and action must exist, and for the role that reads the file; every named field
 and key must exist on that action; and a complete signature names every field and key the action
-requires. ``KNOWN_INCOMPLETE`` lists the signatures that break the last rule today; the test fails
-when an entry is no longer needed, so the list only shrinks.
+requires.
 
 A dotted name in backticks before a brace is always read as a call, so a misspelt tool is found. A
 bare name is read only when it is a tool, because skills also write ``methods {a, b}`` for a field.
@@ -56,49 +55,6 @@ READER_ROLES = {
     "prompts/orchestrator": "orchestrator",
     "prompts/researcher": "researcher",
     "task_types": "researcher",
-}
-
-# Signatures with no closing ``...`` that leave out a required field: (file, tool.action, fields).
-KNOWN_INCOMPLETE = {
-    (
-        "skills/common/method/analyze-opponents/SKILL.md",
-        "xp.request",
-        "opponents: [<policy version id>]",
-    ),
-    (
-        "skills/common/method/analyze-opponents/SKILL.md",
-        "task.propose",
-        "type: improvement, experiment: X-n",
-    ),
-    (
-        "skills/common/method/candidate/SKILL.md",
-        "task.wait",
-        'kind: process, ref: <pid>, detail: "build of <commit>"',
-    ),
-    ("skills/common/method/candidate/SKILL.md", "version.create", "resume: <token>"),
-    ("skills/common/method/candidate/SKILL.md", "version.create", "resume"),
-    ("skills/common/method/experiment/SKILL.md", "task.wait", "kind: xp, ref: [<request ids>]"),
-    ("skills/common/method/experiment/SKILL.md", "task.wait", "kind: credits"),
-    ("skills/common/method/experiment/SKILL.md", "task.wait", "kind: process, ref: <pid>"),
-    ("skills/common/method/experiment/SKILL.md", "experiment.abandon", "reason"),
-    (
-        "skills/common/method/replay-diagnosis/SKILL.md",
-        "claim.retire",
-        "status: refuted, type: replay, ref, note",
-    ),
-    ("skills/common/method/run-eval/SKILL.md", "task.wait", "kind: xp, ref: [<request ids>]"),
-    ("skills/common/method/scouting/SKILL.md", "claim.retire", "status: superseded, superseded_by"),
-    ("skills/common/ops/repair/SKILL.md", "task.complete", "outcome: failed, failure"),
-    ("skills/common/platform/submission/SKILL.md", "task.wait", "kind: submission"),
-    ("skills/researcher/proposing/SKILL.md", "task.complete", 'proposed_tasks: ["T-7", "T-8"]'),
-    ("skills/researcher/proposing/SKILL.md", "platform.active_policies", "exclude_player: true"),
-    ("task_types/ideation.md", "platform.active_policies", "exclude_player: true"),
-    ("task_types/ideation.md", "task.complete", 'outcome: "failed", failure'),
-    ("task_types/improvement.md", "task.wait", 'kind: "xp", ref: [...]'),
-    ("task_types/improvement.md", "task.complete", 'outcome: "failed", failure'),
-    ("task_types/maintenance.md", "task.complete", 'outcome: "failed", failure'),
-    ("task_types/research.md", "task.complete", 'outcome: "failed", failure'),
-    ("watcher/wakes/review.md", "task.review", "accept, merge, reason"),
 }
 
 
@@ -250,12 +206,8 @@ def test_complete_signatures_name_every_required_field():
     for signature in shipped_signatures():
         omitted = problems_with(signature)[1]
         if omitted:
-            key = (signature.source, signature.label, signature.body)
-            incomplete[key] = omitted
-    new = {key: omitted for key, omitted in incomplete.items() if key not in KNOWN_INCOMPLETE}
-    stale = KNOWN_INCOMPLETE - set(incomplete)
-    assert not new, f"signatures leaving out required fields (name them or end with ...): {new}"
-    assert not stale, f"no longer incomplete, remove from KNOWN_INCOMPLETE: {sorted(stale)}"
+            incomplete[(signature.source, signature.label, signature.body)] = omitted
+    assert not incomplete, f"name the required fields or end with ...: {incomplete}"
 
 
 # --- the reader itself ------------------------------------------------------------------------
@@ -288,7 +240,7 @@ def test_an_action_that_does_not_exist_is_found():
 
 
 def test_commas_in_quoted_examples_do_not_split_fields():
-    signature = only('`task.wait {task, kind: credits, detail: "XP: 3 requests, about 2 credits"}`')
+    signature = only('`task.wait {task, kind: credits, detail: "XP: need 2 credits"}`')
     assert problems_with(signature)[0] == []
 
 
@@ -401,3 +353,29 @@ def test_an_action_the_role_cannot_call_is_found():
 def test_a_closing_ellipsis_allows_leaving_out_required_fields(body):
     omitted = problems_with(only(f"`experiment.abandon {{{body}}}`"))[1]
     assert (omitted == []) is body.endswith("...")
+
+
+def enum_problems(signature: Signature) -> list[str]:
+    """Example values in a signature that the field's enum would refuse. A value in angle brackets
+    or with an alternative (``yes|no``, ``"yes" or "no"``) is a description, not an example."""
+    spec = catalog.TOOLS.get(signature.tool)
+    if spec is None:
+        return []
+    action = spec.action(signature.action) if signature.action else None
+    properties = spec.accepted(action)
+    problems = []
+    for item in top_level_items(signature.body):
+        match = ITEM.fullmatch(item)
+        if match is None or match[2] is None:
+            continue
+        name, value = match[1].rstrip("?"), match[2].strip().strip('"')
+        allowed = properties.get(name, {}).get("enum")
+        if allowed is None or "<" in value or "|" in value or " or " in value:
+            continue
+        if value not in allowed:
+            problems.append(f"{signature.source}: {signature.label} {name}: {value!r}")
+    return problems
+
+
+def test_every_example_value_is_one_the_field_accepts():
+    assert [p for signature in shipped_signatures() for p in enum_problems(signature)] == []

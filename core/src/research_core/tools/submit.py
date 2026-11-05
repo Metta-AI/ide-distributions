@@ -244,8 +244,9 @@ SPEC = tool(
             "version": version_tool.VERSION,
             "league": a.string("The league id (or its name)."),
             "auto_champion": a.string(
-                "always (default), never or lineage: whether the platform makes this the"
-                " Player's champion once placed.",
+                "Whether the platform makes this the Player's champion when it starts competing."
+                " always (default): unless the champion is a later upload. never: it does not."
+                " lineage: only if the champion is an earlier version of the same policy.",
                 enum=list(AUTO_CHAMPION),
             ),
             "reason": a.string("Why this Version is submitted now (kept on the champion record)."),

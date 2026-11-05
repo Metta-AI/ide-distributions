@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 import research_core
+from research_core.store.settings import SETTINGS
 from research_core.tools.catalog import ROLES, TOOL_MODULES, tools_for
 
 COMMON = Path(research_core.__file__).resolve().parent / "skills" / "common"
@@ -29,7 +30,7 @@ EXPECTED = {
         "scouting",
         "analyze-opponents",
     },
-    "records": {"writing-claims", "task"},
+    "records": {"writing-claims"},
     "platform": {
         "submission",
         "credits",
@@ -141,7 +142,8 @@ def test_tool_actions_exist(skill: Path):
     problems: list[str] = []
     for file in sorted(skill.rglob("*.md")):
         for tool, action in TOOL_ACTION.findall(file.read_text()):
-            if action not in known.get(tool, set()):
+            is_setting = f"{tool}.{action}" in SETTINGS  # xp.ask_above_requests_per_experiment
+            if action not in known.get(tool, set()) and not is_setting:
                 problems.append(f"{file.name}: {tool}.{action}")
     assert not problems, problems
 

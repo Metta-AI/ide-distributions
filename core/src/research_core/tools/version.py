@@ -135,7 +135,7 @@ def handle_create(call: ToolCall) -> dict:
     commit = gitops.rev_parse(tree, "HEAD")
     result = run_build(call, loaded, tree, coworld.documents / "logs")
     if not result.finished:
-        return background_result(result)
+        return background_result(ctx.role, result)
     if result.exit_code != 0:
         raise build_failure(ctx, result, f"exit code {result.exit_code}")
     artifact_file = tree / artifact_path
@@ -314,7 +314,18 @@ def run_build(
     return mixin.run_command(loaded, "build", cwd=tree, log_dir=log_dir, budget_s=BUILD_BUDGET_S)
 
 
-def background_result(result: mixin.CommandResult) -> dict:
+def background_result(role: str, result: mixin.CommandResult) -> dict:
+    if role == "researcher":
+        next_step = (
+            f"the build is still running: task.wait {{task, kind: process, ref: {result.pid},"
+            " detail: 'the build'}} and end this run. Only after the watcher resumes you, call"
+            " version.create with the same arguments plus resume: <background.resume>"
+        )
+    else:
+        next_step = (
+            f"the build is still running as pid {result.pid}: when it has ended, call"
+            " version.create again with the same arguments plus resume: <background.resume>"
+        )
     return {
         "ok": True,
         "background": {
@@ -323,11 +334,7 @@ def background_result(result: mixin.CommandResult) -> dict:
             "resume": result.resume_token,
         },
         "output_tail": result.output_tail,
-        "next": (
-            "the build is still running: call version.create again with the same arguments"
-            " plus resume=<background.resume> when it ends, or task.wait {kind: process, ref:"
-            f" {result.pid}}} and end this run"
-        ),
+        "next": next_step,
     }
 
 
@@ -494,7 +501,7 @@ SPEC = tool(
             ActionSpec(
                 "adopt",
                 "Record a policy version the user uploaded elsewhere as an adopted Version"
-                " (already uploaded; submit accepts it).",
+                " (already uploaded; submit accepts it). Give policy_version or label.",
                 {
                     "policy_version": a.string("The platform's policy version id."),
                     "label": a.string("Or its label, name:vN."),

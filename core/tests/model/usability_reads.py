@@ -27,6 +27,7 @@ from research_core.stats import decision_rule, ingest
 from research_core.store import settings
 from research_core.tools import experiment as experiment_tool
 from research_core.tools.base import error_payload
+from research_core.tools.directive import running_tasks_note
 from research_core.tools.settings import describe
 from tests.fixtures.fakegame_repo import fixture_files
 from tests.model import usability_context
@@ -168,6 +169,19 @@ def _directives(situation: Situation) -> list[dict]:
         }
         for directive_id, text, scope in rows
     ]
+
+
+def directive_added(situation: Situation, args: dict) -> dict:
+    """``directive.add`` with T-8 in progress, as the fixture's briefing has it."""
+    record = {
+        "id": "W-2",
+        "scope": "workspace",
+        "text": args.get("text"),
+        "status": "active",
+        "source": args.get("source"),
+        **_timestamps(),
+    }
+    return {"record": record, "next": running_tasks_note(["T-8"])}
 
 
 def directive_list(situation: Situation, args: dict) -> dict:
@@ -512,7 +526,7 @@ def claim_written(situation: Situation, args: dict) -> dict:
 VERSIONS = {
     "V-7": ("Baseline with resource cap fix", "champion"),
     "V-11": ("Retreat when outnumbered", "uploaded"),
-    "V-12": ("Earlier scouting in the opening", "built"),
+    "V-12": ("Lower retreat threshold", "built"),
 }
 
 
@@ -789,9 +803,8 @@ def _x3() -> dict:
 
 
 def _x6() -> dict:
-    return _experiment(
-        "X-6", "Does earlier scouting raise the win rate?", "proposed", "V-11", "V-12", [], {}
-    )
+    question = "Does a lower retreat threshold raise the win rate?"
+    return _experiment("X-6", question, "proposed", "V-11", "V-12", [], {})
 
 
 def _experiment_for(situation: Situation, experiment_id: str) -> dict | None:
@@ -1347,6 +1360,7 @@ ACTIONS: dict[str, Callable[[Situation, dict], dict]] = {
     "goal.read": goal_read,
     "goal.list": goal_list,
     "directive.list": directive_list,
+    "directive.add": directive_added,
     "settings.read": settings_read,
     "task.read": task_read,
     "task.list": task_list,

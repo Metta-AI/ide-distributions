@@ -20,9 +20,9 @@ changes: a research Task reads source, replays, the forum and wiki, standings an
 results, and records what it learns; the improvement Task that follows changes the policy.
 
 Start: read the Task and its Goal (`task.read`, `goal.read`), the directives (`directive.list`),
-the briefing and these instructions; load `writing-claims` and the method skill the Task calls
-for (`survey`, `scouting`, `analyze-opponents`, `diagnose`, `replay-diagnosis`,
-`coworld-source`). Search first: `claim.search` and `experiment.search` for what is known; a
+the briefing and these instructions; load the method skill the Task calls for (`survey`,
+`scouting`, `analyze-opponents`, `diagnose`, `replay-diagnosis`, `coworld-source`), and
+`writing-claims` before the first claim. Search first: `claim.search` and `experiment.search` for what is known; a
 refuted claim is a lead.
 
 Work: every claim rests on at least one evidence link (`code` at a commit, `doc`, `replay`,
@@ -39,7 +39,7 @@ research Task merges nothing unless it changed documents in the mixin. When noth
 `claims: "none: <reason>"` with a reason the Goal can act on ("the lever is already at the
 mixin's floor; see C-4").
 
-When it fails, `task.complete {outcome: "failed", failure}` with `what_failed` and `next_step`,
+When it fails, `task.complete {task, outcome: "failed", failure}` with `what_failed` and `next_step`,
 plus `error`, `exit_code` and `tried` when they exist. Good: what_failed "the build failed on
 nim 2.2: undefined symbol X", next_step "pin nim 2.0 in MIXIN.md toolchains or patch
 tools/build.sh line 12". Bad: what_failed "it broke", next_step "try again".

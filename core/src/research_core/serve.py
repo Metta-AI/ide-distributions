@@ -1098,7 +1098,7 @@ class SeamServer:
 
     @staticmethod
     def _ask_conversation(wstore: Store, session_id: str, ask_id: str) -> str:
-        """Where the ask lives (A3.5): the chat's own conversation, else ``workspace``."""
+        """Where the ask lives (A3.5): the chat's own conversation, else its Coworld's shared."""
         session = sessions.read(wstore, session_id)
         shared = coworld_conversation(session["coworld_id"] if session else None)
         for conversation in (session_id, shared):

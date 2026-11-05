@@ -59,6 +59,12 @@ def test_wake_and_unregistered_sessions_write_under_workspace(call, ctx_factory,
     assert ui_state.get(ctx_factory().wstore, "w1")["version"] == 0
 
 
+def test_a_wake_is_not_told_to_ask_in_chat(call, register_session):
+    register_session("w1", "wake")
+    asked = call("ui", {"action": "ask", "question": "Submit V-7?"}, session_id="w1")
+    assert asked["ok"] is True and "in chat" not in asked["next"] and "end the run" in asked["next"]
+
+
 def test_show_needs_exactly_one_of_ref_or_view(call):
     neither = call("ui", {"action": "show"})
     assert neither["ok"] is False and "ref" in neither["error"] and "view" in neither["error"]

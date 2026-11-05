@@ -4,7 +4,7 @@ import pytest
 
 from research_core.store.actors import Actor
 from research_core.store.errors import StoreError
-from research_core.tools import base, catalog
+from research_core.tools import _args, base, catalog
 from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolError, ToolSpec
 
 
@@ -249,3 +249,14 @@ def test_tool_telemetry_outcomes_and_payload_privacy(
         "action": action,
         "outcome": outcome,
     }
+
+
+def test_a_refusal_example_shows_the_format_without_a_value_that_could_be_taken_as_real():
+    catalog._load_tool_modules()
+    task = catalog.TOOLS["task"]
+    example = base.usage(task, "orchestrator", "answer")["example"]
+    assert example == {"action": "answer", "task": "<such as T-3>", "text": "<text>"}
+    linked = base.usage(task, "orchestrator", "link")["example"]
+    assert linked["depends_on"] == ["<such as T-1>"]
+    with pytest.raises(ToolError):
+        _args.record_number(example["task"], "task", "task")

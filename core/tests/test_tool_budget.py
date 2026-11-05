@@ -4,6 +4,8 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from research_core.tools import catalog
 
 CORE_SRC = Path(__file__).resolve().parents[1] / "src"
@@ -35,9 +37,14 @@ def names(role):
     return {spec.name for spec in catalog.tools_for(role)}
 
 
-def test_no_tool_module_failed_to_import():
-    catalog.tools_for("orchestrator")
-    assert catalog.LOAD_ERRORS == {}, catalog.LOAD_ERRORS
+def test_a_broken_tool_module_fails_loudly(tmp_path, monkeypatch):
+    (tmp_path / "broken_tool_module.py").write_text("def f():\n        x = 1\n    y = 2\n")
+    monkeypatch.syspath_prepend(tmp_path)
+    monkeypatch.setattr(catalog, "TOOL_MODULES", ("broken_tool_module",))
+    monkeypatch.setattr(catalog, "_loaded", False)
+    with pytest.raises(IndentationError):
+        catalog.tools_for("orchestrator")
+    assert catalog._loaded is False
 
 
 def test_tool_counts_match_the_design():
@@ -76,7 +83,6 @@ def test_in_process_imports_are_stdlib_only():
         "    def register_system_prompt_section(self, *a, **k): pass\n"
         "for role in ('orchestrator', 'researcher'):\n"
         "    research_core.plugin.register.make_register(role)(Ctx())\n"
-        "assert not c.LOAD_ERRORS, c.LOAD_ERRORS\n"
         "third = sorted(m for m in sys.modules if m.split('.')[0] in "
         "{'yaml','numpy','coworld','softmax_client','softmax','httpx','pydantic','jsonschema'})\n"
         "assert not third, third\n"

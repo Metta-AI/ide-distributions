@@ -79,3 +79,29 @@ def test_bad_scope_and_role(call):
     assert bad["ok"] is False and "scope must be" in bad["error"]
     denied = call("directive", {"action": "add", "text": "x", "source": "m"}, role="researcher")
     assert denied["ok"] is False
+
+
+def test_adding_names_the_tasks_in_progress_that_would_not_see_it(call, ctx_factory):
+    ctx = ctx_factory()
+    add = {"action": "add", "text": "Never touch the book", "source": "m-1"}
+    assert "next" not in call("directive", add)
+    for title in ("one", "two"):
+        goal = call("goal", {"action": "create", "title": title, "end_state": "e", "reason": "r"})
+        call(
+            "task",
+            {
+                "action": "create",
+                "goal": goal["record"]["id"],
+                "type": "research",
+                "title": title,
+                "description": "d",
+            },
+        )
+    with ctx.store.tx(ctx.actor) as tx:
+        tx.execute("UPDATE tasks SET status='in-progress'")
+    assert call("directive", add)["next"].startswith("T-1, T-2 in progress")
+    goal_scoped = call("directive", {**add, "scope": "G-2"})
+    assert goal_scoped["next"].startswith("T-2 in progress")
+    assert "task.message" in goal_scoped["next"]
+    updated = call("directive", {"action": "update", "directive": "W-1", "text": "Other words"})
+    assert updated["next"].startswith("T-1, T-2 in progress")

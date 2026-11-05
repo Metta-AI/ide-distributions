@@ -578,3 +578,20 @@ def test_close_a_proposed_experiment_is_refused(call, two_versions):
 def test_results_never_show_a_store_path(call, running):
     text = str(call("experiment", {"action": "read", "experiment": "X-1"}))
     assert ".state/" not in text and "store.db" not in text
+
+
+def test_update_run_takes_the_runs_own_experiment_and_refuses_another(call, running):
+    run = call(
+        "experiment",
+        {
+            "action": "add_run",
+            "experiment": 1,
+            "kind": "xp",
+            "platform_request_id": "xreq_1",
+            "arm": "baseline",
+        },
+    )["record"]["id"]
+    args = {"action": "update_run", "run": run, "validity": "invalid: wrong seat"}
+    assert call("experiment", {**args, "experiment": "X-1"})["ok"] is True
+    refused = call("experiment", {**args, "experiment": "X-2"})
+    assert refused["ok"] is False and "belongs to X-1" in refused["error"]

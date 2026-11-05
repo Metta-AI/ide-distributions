@@ -12,18 +12,16 @@ import pytest
 import yaml
 
 from research_core.prompts import build
-from research_core.tools.catalog import ROLES, TOOL_MODULES, tools_for
+from research_core.tools.catalog import ROLES, tools_for
 
 REPO = Path(__file__).resolve().parents[2]
 BUILD_PROMPTS = REPO / "tools" / "build_prompts.py"
 SUMMARY_LINE = "If this conversation is summarised, keep the user's instructions word for word."
 FORBIDDEN = ("promotion", "kanban", "coordinator", ".state", "store.db")
 
-# Every tool name the catalog knows, including modules not built yet, so a backticked
-# `name` or `name.action` in a SOUL is checked against the role's real catalog.
-KNOWN_TOOLS = {spec.name for role in ROLES for spec in tools_for(role)} | {
-    module.rsplit(".", 1)[1] for module in TOOL_MODULES
-}
+# Every tool name the catalog knows, so a backticked `name` or `name.action` in a SOUL is checked
+# against the role's real catalog.
+KNOWN_TOOLS = {spec.name for role in ROLES for spec in tools_for(role)}
 TOOL_REFERENCE = re.compile(r"`([a-z_]+)(?:\.([a-z_]+))?[^`]*`")
 
 

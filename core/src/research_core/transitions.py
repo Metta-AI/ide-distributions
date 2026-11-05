@@ -22,6 +22,10 @@ from research_core.store.db import Store
 from research_core.store.errors import StoreError
 from research_core.tools.base import ToolCall, ToolContext, ToolError, ToolSpec, tool
 
+NOT_THE_HOLDER = (
+    "This run no longer holds the Task: it was stopped, released or given to another run. "
+    "Nothing was changed; end your run."
+)
 REQUEST_WAIT_SECONDS = 15
 # How long Hermes waits for a tool thread after an interrupt before it abandons the call and,
 # later, clears the interrupt (agent/tool_executor.py).
@@ -274,7 +278,7 @@ def _accept(tx, ctx: ToolContext, tool: str, args: dict, command_id: str, payloa
             or assignment["state"] != "held"
             or assignment["status"] not in {"queued", "running"}
         ):
-            raise ToolError("This worker execution no longer has task transition authority")
+            raise ToolError(NOT_THE_HOLDER)
         issuer_attempt_id = assignment["current_attempt_id"]
     tx.execute(
         "INSERT INTO transition_commands(id,tool,args,role,actor,actor_epoch,"

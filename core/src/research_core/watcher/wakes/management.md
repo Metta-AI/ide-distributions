@@ -15,7 +15,7 @@ Read the records the event names first (`task.read`, `goal.read`, `experiment.re
 `workspace.doctor`), then act by event kind and end the run:
 
 - `task.asked`: answer with `task.answer`; `ui.ask` the user only when they alone know.
-- `task.proposed`: `task.approve` it, or `task.reject` it with a reason.
+- `task.proposed`: `task.approve` it, or `task.reject` it with what to do instead.
 - `task.proposed_submission`: apply the `submissions.*` settings and the quality bar; `submit`
   when they allow it, `ui.ask` when the mode is `ask`, otherwise tell the Researcher why not
   with `task.message`.

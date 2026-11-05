@@ -11,7 +11,10 @@ decisions is `docs/plans/ide-profile-refactor/`.
   profile puts `core/src` on `sys.path`, from the path `prepare.py` records). Everything the plugin
   touches in process must import without third-party packages: `layout`, `refs`, `store/*`,
   `plugin/*`, `tools/base.py` and the in-process tools (`goal`, `task`, `directive`, `claim`,
-  `settings`, `ui`). `core/tests/test_tool_budget.py` enforces it.
+  `settings`, `ui`). `core/tests/test_tool_budget.py` enforces it. The catalog imports every tool
+  module, and a module that fails to import stops whatever asked for the tools: the prompt build,
+  the tests or, on a gateway, the plugin (`test_broken_tool_module_real.py`: Hermes logs "Failed to
+  load plugin" and serves on, with none of that profile's tools or hooks).
 - **The workspace environment** (`$IDE_WORKSPACE/tools/venv`, built by `prepare.py` from the
   repository root `pyproject.toml` and `uv.lock`) has the `platform` extra: the official `coworld`
   and `softmax-cli` clients, PyYAML and numpy. The `research` CLI, the watcher and every tool
@@ -109,8 +112,8 @@ nowhere.
   caller-defined keys such as a JSON body) and a field of several types uses `any_of`, because
   Hermes's sanitizers turn a bare object into an empty one and an untyped field into a string.
   In a multi-action tool a field shared by actions keeps one shape, and `ToolSpec.properties`
-  adds which actions require or take it; `core/tests/tools/test_tool_schemas.py` checks all
-  of this.
+  adds which actions require or take it, and lists each action with its required fields in the
+  `action` description; `core/tests/tools/test_tool_schemas.py` checks all of this.
 - **Record:** a migration (`store/migrations/<kind>/NNNN_*.sql`), a module under `store/`, a
   `RecordSpec` in `store/registry.py`, its event kinds in `store/events.py`, and a tool action.
 - **Skill:** `skills/<root>/<category>/<name>/SKILL.md` with `name` equal to the directory and a
@@ -118,4 +121,4 @@ nowhere.
 - **A call shown in a prompt, skill, task type or wake:** write it as
   `tool.action {a, b: value, c?, d | e, f {g, h}}`, in backticks. Every name must exist on that action,
   and the signature must name every required field and key; end it with `...` when it shows only
-  part of the call on purpose. `core/tests/test_tool_signatures.py` checks this and says the rules in full.
+  part of the call on purpose. `core/tests/test_tool_signatures.py` checks this, and that example values fit a field's enum, and says the rules in full.

@@ -17,6 +17,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from research_core import contract
+from research_core.plugin.session_context import OPENING_GOAL
 from research_core.tools.catalog import Role
 
 log = logging.getLogger(__name__)
@@ -77,6 +78,8 @@ def render_context_block(parsed: dict) -> str | None:
     for key in ("league", "coworld", "opening_goal", "parent_session"):
         if kept.get(key):
             lines.append(f"{key}: {kept[key]}")
+    if kept.get("opening_goal"):
+        lines.append(OPENING_GOAL)
     if kept.get("policy"):
         lines.append(f"policy: {kept['policy']}")
     if kept.get("view"):

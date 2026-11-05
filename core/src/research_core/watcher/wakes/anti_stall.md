@@ -3,7 +3,7 @@
 Daily check at the configured hour (event `{event_kind}`, subject `{subject}`, Coworld
 `{coworld_id}`). Nothing is known to be wrong; decide whether anything should be moving and is
 not. This is a background Session: never write into a user conversation; `ui.notify` is the
-only channel to the user.
+channel for news and `ui.ask` for a question only the user can answer.
 
 Payload:
 

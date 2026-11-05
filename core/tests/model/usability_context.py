@@ -39,7 +39,7 @@ from pathlib import Path
 import yaml
 
 import research_core
-from research_core.plugin.session_context import AUTHORITY
+from research_core.plugin.session_context import AUTHORITY, OPENING_GOAL, no_client_text
 from research_core.prompts import build
 from research_core.tools.catalog import Role
 from tests.model import harness
@@ -48,7 +48,8 @@ HERMES = json.loads(Path(__file__).with_name("usability_hermes.json").read_text(
 SKILLS_DIR = Path(research_core.__file__).parent / "skills"
 COWORLD = "cow_cogs"
 TASK_ID = "T-21"
-COWORLD_CODE = f"/opt/data/workspace/{COWORLD}/code"
+COWORLD_ROOT = f"/opt/data/workspace/{COWORLD}"
+COWORLD_CODE = f"{COWORLD_ROOT}/code"
 BINDINGS = ("ab", "diagnosis", "eval-design", "replay-inspection", "survey")
 
 
@@ -137,7 +138,13 @@ def skills_list_result(role: Role) -> str:
 
 # A made-up workspace in the format ``plugin/briefing.py`` renders. The ids here are the ones the
 # situations name, so a model reading the briefing finds the records a situation talks about.
-BRIEFING = """[briefing]
+BRIEFING_HEADING = (
+    "[briefing] Written 2026-11-04 18:00 UTC and not updated in this Session: read the record when "
+    "the current state matters."
+)
+BRIEFING = (
+    BRIEFING_HEADING
+    + """
 Workspace: Coworld cow_cogs; paused: no; watcher heartbeat just now; credits: 840.0
 Capability check: 4 minutes ago; 7 of 7 ok
 User identity: available
@@ -145,7 +152,7 @@ Directives (2 active, the user's standing instructions):
 - W-1 (workspace): "keep replies short"
 - D-3 (G-1): "never touch the opening book"
 Champion in league_cogs_main: V-7 (competing since 2026-10-30)
-V-12 built: "Earlier scouting in the opening" (2026-11-04)
+V-12 built: "Lower retreat threshold" (2026-11-04)
 V-11 uploaded: "Retreat when outnumbered" (2026-11-03)
 V-7 champion: "Baseline with resource cap fix" (2026-10-28)
 {your_task}Active Goals (2):
@@ -154,12 +161,16 @@ V-7 champion: "Baseline with resource cap fix" (2026-10-28)
 Recent claims on active Goals:
 - C-5 (G-1): V-7 loses 60% of late fights after over-extending; 4 of 5 replays, n=5
 - C-2 (G-1): Earlier scouting does not change the win rate against the champion (n=40)"""
+)
 
-NO_COWORLD_BRIEFING = """[briefing]
+NO_COWORLD_BRIEFING = (
+    BRIEFING_HEADING
+    + """
 Workspace: Coworld none; the frontend must open a session for a Coworld; paused: no; watcher heartbeat just now; credits: unknown
 User identity: available
 Directives: none active
 No session Coworld: open a Coworld session to access game work."""
+)
 
 
 def _plugin_section(name: str, text: str) -> str:
@@ -170,17 +181,24 @@ def _plugin_section(name: str, text: str) -> str:
 
 
 def session_context_section(
-    declared: dict | None, capabilities: dict | None, *, has_coworld: bool
+    declared: dict | None,
+    capabilities: dict | None,
+    *,
+    has_coworld: bool,
+    role: Role = "orchestrator",
+    kind: str = "chat",
 ) -> str:
     """The ``[session context]`` text as ``plugin/session_context.py`` renders it."""
     parts = ["[session context]", AUTHORITY]
     if declared:
         parts.append("Declared at session open: " + json.dumps(declared, sort_keys=True))
-    else:
+        if declared.get("opening_goal"):
+            parts.append(OPENING_GOAL)
+    elif kind == "chat":
         parts.append("No session context was declared; the client did not say what it shows.")
     if has_coworld:
         parts.append(
-            f"Work only in {COWORLD_CODE}. "
+            f"Work only in {COWORLD_ROOT}. "
             f"This session belongs to {COWORLD}; do not change its Coworld."
         )
         parts.append(
@@ -189,14 +207,14 @@ def session_context_section(
             "Custom research tools already carry this session's binding."
         )
         paths = [f"{COWORLD_CODE}/mixin/skills/cogs-{name}/SKILL.md" for name in BINDINGS]
-        parts.append("Read the relevant game skill directly before using it:\n" + "\n".join(paths))
+        parts.append(
+            "Game skills are files, not in skill_view. Read the one you need with read_file:\n"
+            + "\n".join(paths)
+        )
     if capabilities:
         parts.append("Attached clients can show: " + json.dumps(capabilities, sort_keys=True))
     else:
-        parts.append(
-            "No client capabilities are known: use ui.notify for news and ask in chat when only "
-            "the user can answer."
-        )
+        parts.append(no_client_text(role, kind))
     return "\n\n".join(parts)
 
 
@@ -207,13 +225,16 @@ def system_prompt(
     declared: dict | None = None,
     capabilities: dict | None = None,
     has_coworld: bool = True,
+    kind: str = "chat",
 ) -> str:
     """The whole system prompt of a session, in the order Hermes assembles it.
 
-    ``your_task`` is the briefing's Task line and ``declared`` and ``capabilities`` the client's
-    session context."""
+    ``your_task`` is the briefing's Task line, ``declared`` and ``capabilities`` the client's
+    session context and ``kind`` the session's kind in the store (chat, task or wake)."""
     briefing = BRIEFING.format(your_task=your_task) if has_coworld else NO_COWORLD_BRIEFING
-    context = session_context_section(declared, capabilities, has_coworld=has_coworld)
+    context = session_context_section(
+        declared, capabilities, has_coworld=has_coworld, role=role, kind=kind
+    )
     return "\n\n".join(
         [
             build.render(role).strip(),

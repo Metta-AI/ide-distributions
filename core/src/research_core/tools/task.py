@@ -18,7 +18,7 @@ from research_core.store import admissions, sessions, tasks
 from research_core.store.registry import TASK_STATUSES, TASK_TYPES, WAIT_KINDS
 from research_core.tools import _args as a
 from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolError, ToolSpec
-from research_core.transitions import durable_tool, read_command, submit
+from research_core.transitions import NOT_THE_HOLDER, durable_tool, read_command, submit
 from research_core.watcher.context import workers
 
 ORCHESTRATOR = frozenset({"orchestrator"})
@@ -28,7 +28,7 @@ BOTH = frozenset({"orchestrator", "researcher"})
 TASK = a.string("The Task, such as T-3.")
 YES_NO = ["yes", "no"]
 EXPERIMENT = a.string("The Experiment the Task runs, such as X-2.")
-# Flat convenience arguments of ``complete`` that stand for checklist entries of the same name
+# Arguments of ``complete`` that are the checklist entries of the same name
 # (the keys of the Task types' checklists, task_types/*.md, besides commit and
 # submission_candidate, which are fields of their own).
 CHECKLIST_FIELDS = {
@@ -42,7 +42,6 @@ CHECKLIST_FIELDS = {
     "submission_reason": a.string("Why a Version is or is not a submission candidate."),
     "capability": a.string("The capability a repair Task restored."),
 }
-CHECKLIST_ARGS = tuple(CHECKLIST_FIELDS)
 
 FAILURE = a.obj(
     "",
@@ -185,12 +184,12 @@ def handle_claim(call: ToolCall) -> dict:
 
 
 def handle_complete(call: ToolCall) -> dict:
-    """Finish the Task. The checklist is the ``checklist`` object plus the flat convenience
-    arguments; a ``commit`` must be reachable from the Task branch."""
+    """Finish the Task. The checklist is the flat arguments of that name; a ``commit`` must be
+    reachable from the Task branch."""
     ctx, store = call.ctx, call.ctx.store
     n = a.record_number(call.get("task"), "task", "task")
     checklist = dict(call.get("checklist") or {})
-    for key in CHECKLIST_ARGS:
+    for key in CHECKLIST_FIELDS:
         if call.get(key) is not None:
             checklist.setdefault(key, call.get(key))
     commit = call.get("commit")
@@ -299,7 +298,7 @@ def execute(call: ToolCall) -> dict:
             if accepted_attempt
             else assignment["status"] not in {"queued", "running"}
         ):
-            raise ToolError("This worker execution no longer has task transition authority")
+            raise ToolError(NOT_THE_HOLDER)
     if call.action == "workers":
         return {"kind": "available_workers", "workers": workers(call.ctx.env)}
     if call.action == "assign":
@@ -350,8 +349,8 @@ SPEC = durable_tool(
     ToolSpec(
         name="task",
         description=(
-            "Tasks: units of work under a Goal with a type checklist, a lease held by one "
-            "Researcher Session, waits and messages. Goals and Tasks are the plan."
+            "Tasks: units of work under a Goal with a type checklist, held by one Researcher "
+            "Session, with waits and messages. Goals and Tasks are the plan."
         ),
         handler=dispatch,
         roles=BOTH,
@@ -373,7 +372,7 @@ SPEC = durable_tool(
             ),
             ActionSpec(
                 "assign",
-                "Reserve an approved dependency-ready Task for the chosen worker once.",
+                "Give an accepted Task whose dependencies are done to the chosen worker.",
                 {
                     "task": TASK,
                     "profile": a.string(
@@ -407,7 +406,7 @@ SPEC = durable_tool(
             ),
             ActionSpec(
                 "approve",
-                "Accept a proposed Task so the watcher can dispatch it.",
+                "Accept a proposed Task so it can be assigned.",
                 {"task": TASK, "cites": CITES},
                 ("task",),
                 ORCHESTRATOR,
@@ -432,7 +431,8 @@ SPEC = durable_tool(
             ),
             ActionSpec(
                 "message",
-                "Send the Researcher a note; the watcher delivers it.",
+                "Send the Researcher a note: the watcher delivers it to a live run, or when its "
+                "wait resolves.",
                 {"task": TASK, "text": a.string("The note.")},
                 ("task", "text"),
                 ORCHESTRATOR,
@@ -481,7 +481,8 @@ SPEC = durable_tool(
                     "kind": a.string("What kind of thing it waits on.", enum=list(WAIT_KINDS)),
                     "detail": a.string("What exactly it waits for."),
                     "ref": a.any_of(
-                        "A pid, a request id or a list of request ids to watch.",
+                        "What to watch: a pid (process), request ids (xp), a policy version id "
+                        "(submission), a route (permit), a setting or Task (user).",
                         a.STRING,
                         a.INTEGER,
                         a.STRINGS,
@@ -503,11 +504,6 @@ SPEC = durable_tool(
                 {
                     "task": TASK,
                     "outcome": a.string("Default succeeded.", enum=["succeeded", "failed"]),
-                    "checklist": a.obj(
-                        "The type's deliverables by key; the flat fields of the same names "
-                        "count too and are simpler.",
-                        CHECKLIST_FIELDS,
-                    ),
                     **CHECKLIST_FIELDS,
                     "commit": a.string("The commit to merge; it must be on the Task branch."),
                     "submission_candidate": a.string(
@@ -523,11 +519,15 @@ SPEC = durable_tool(
                 },
                 ("task",),
                 RESEARCHER,
+                # A command accepted before the release that removed it replays with it.
+                hidden_params={"checklist": {"type": "object"}},
             ),
             ActionSpec(
                 "release",
-                "Request release; ownership stays reserved until execution is proven stopped.",
-                {"task": TASK, "reason": a.string("Why it is given back.")},
+                "Give the Task back unfinished because you must not continue, such as when a "
+                "directive forbids the only path; your run is stopped, then it goes back to "
+                "scheduling. If you tried and it did not work, use complete with outcome failed.",
+                {"task": TASK, "reason": a.string("Why you must not continue.")},
                 ("task", "reason"),
                 RESEARCHER,
             ),

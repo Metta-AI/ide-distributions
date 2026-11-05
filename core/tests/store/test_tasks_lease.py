@@ -37,7 +37,7 @@ def test_second_claim_gets_lease_error_while_the_lease_is_fresh(coworld_store, h
             claim(other_connection, SECOND, held["id"], n=2)
         assert info.value.problems == [
             f"{held['id']} is held by session:{FIRST.id}; "
-            "lease age cannot release execution ownership"
+            "only that Session can work on it until the watcher releases it"
         ]
     finally:
         other_connection.close()

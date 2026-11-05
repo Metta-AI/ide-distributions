@@ -3,7 +3,7 @@
 Event `{event_kind}` on `{subject}` (Coworld `{coworld_id}`). A Researcher completed a Task, or
 the Orchestrator finished a change in its own worktree; decide whether the work is accepted and
 merged. This is a background Session: never write into a user conversation; `ui.notify` is the
-only channel to the user.
+channel for news and `ui.ask` for a question only the user can answer.
 
 Payload:
 
@@ -17,7 +17,7 @@ Do this, then end the run:
    claims (`claim.read`) and the Researcher's answers recorded on the Task. Judge the evidence,
    not the summary: the results against the champion, the decision rule, the replays named as
    evidence, whether the deliverables the checklist names exist.
-2. Call `task.review {accept, merge, reason}`. Accept and merge when the work is sound and
+2. Call `task.review {task, accept, merge, reason}`. Accept and merge when the work is sound and
    `main` stays healthy; accept without merge when the result is a finding, not a change;
    reject with a specific, actionable reason when something must be redone, and the same
    Researcher Session resumes with your reason.

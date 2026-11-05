@@ -23,6 +23,9 @@ from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolErro
 ORCHESTRATOR = frozenset({"orchestrator"})
 WORKSPACE_CONVERSATION = "workspace"
 ANSWER_NOTE = "the answer arrives as a UI action; if no client can answer, ask in chat"
+ANSWER_NOTE_NO_CHAT = (
+    "nobody reads this Session: the answer arrives later as a UI action; end the run"
+)
 
 
 def _panel_kinds() -> list[str]:
@@ -43,7 +46,7 @@ def coworld_conversation(coworld_id: str | None) -> str:
 
 
 def conversation_for(ctx: ToolContext) -> str:
-    """A3.5: a chat Session's own id; ``workspace`` for a wake or an unregistered Session."""
+    """A3.5: a chat Session's own id; the shared conversation of its Coworld for any other."""
     session_id = ctx.hermes_session_id()
     row = sessions.read(ctx.wstore, session_id) if session_id else None
     if row is not None and row["kind"] == "chat":
@@ -96,7 +99,7 @@ def handle(call: ToolCall) -> dict:
             "ask_id": ask_id,
             "ask": value,
             "version": record["version"],
-            "next": ANSWER_NOTE,
+            "next": ANSWER_NOTE if conversation == ctx.hermes_session_id() else ANSWER_NOTE_NO_CHAT,
         }
     raise AssertionError(call.action)
 
@@ -149,8 +152,8 @@ SPEC = tool(
         name="ui",
         description=(
             "What the user sees: bring a record or view into view, set a panel, send a notice, "
-            "or ask a question the UI answers. Writes UI state; never waits on a client. A "
-            "notice is the only channel a wake has to the user."
+            "or ask a question the UI answers. Writes UI state; never waits on a client. Nobody "
+            "reads a wake's chat, so a wake reports with a notice."
         ),
         handler=handle,
         roles=ORCHESTRATOR,
@@ -158,7 +161,7 @@ SPEC = tool(
         actions=(
             ActionSpec(
                 "show",
-                "Bring a record (ref) or a client view (view) into view.",
+                "Bring a record (ref) or a client view (view) into view; give exactly one.",
                 {
                     "ref": a.string("A record such as T-3, a platform id or a platform URL."),
                     "view": a.string("A client view id, such as leaderboard."),
