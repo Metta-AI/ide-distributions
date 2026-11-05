@@ -108,6 +108,16 @@ def test_a_read_of_the_tool_comes_first_and_the_write_is_judged(script):
     assert answered["role"] == "tool" and answered["content"] == write_actions.RESULT
 
 
+def test_taking_the_task_first_is_not_judged_as_the_write(script):
+    case = Case("researcher", "task", "ask", "Ask about T-5.")
+    fake = script(
+        reply(("task", {"action": "claim", "task": "T-5"})),
+        reply(("task", {"action": "ask", "task": "T-5", "question": "Which division?"})),
+    )
+    assert len(run(case).detours) == 1
+    assert len(fake.requests) == 2
+
+
 def test_a_call_production_refuses_is_answered_with_the_tools_refusal(script):
     fake = script(reply(("task", {"action": "read"})), reply(("claim", GOOD_CLAIM)))
     assert run().outcome == "valid"
@@ -144,6 +154,98 @@ def test_a_recovery_history_holds_the_refused_call_and_the_tools_refusal(script)
     sent = json.loads(assistant["tool_calls"][0]["function"]["arguments"])
     assert sent == write_actions.INCIDENT_CLAIM_ARGS
     assert "summary is required for write" in json.loads(tool_result["content"])["error"]
+
+
+def test_a_deeper_recovery_history_repeats_the_call_with_the_short_refusal(script):
+    fake = script(reply(("claim", GOOD_CLAIM)))
+    case = next(c for c in write_actions.RECOVERY if c.refusals == 3 and c.tool == "claim")
+    assert case.label.endswith("(after 3 refused)")
+    assert run(case).outcome == "valid"
+    history = fake.requests[0][2:]
+    assert [m["role"] for m in history] == ["assistant", "tool"] * 3
+    results = [json.loads(m["content"]) for m in history if m["role"] == "tool"]
+    assert "usage" in results[0]
+    assert all(
+        "This exact call was refused" in r["error"] and r["ok"] is False for r in results[1:]
+    )
+    assert "refused 3 times" in results[2]["error"]
+
+
+def test_every_recovery_case_starts_from_a_call_the_tool_refuses():
+    for case in write_actions.RECOVERY:
+        history = write_actions.refused_history(case, harness.ShippedSchemas())
+        assert json.loads(history[1]["content"])["ok"] is False, case.id
+
+
+def test_a_captured_context_replaces_the_stand_ins(script, monkeypatch, tmp_path):
+    capture = tmp_path / "context.json"
+    hermes_tool = {"type": "function", "function": {"name": "hermes_only", "parameters": {}}}
+    capture.write_text(
+        json.dumps(
+            {
+                "orchestrator": {"system": "The real prompt.", "hermes_tools": [hermes_tool]},
+                "researcher": {"system": "The other prompt.", "hermes_tools": []},
+            }
+        )
+    )
+    monkeypatch.setenv("IDE_TOOL_CALL_CONTEXT", str(capture))
+    fake = script(reply(("claim", GOOD_CLAIM)))
+    assert run().outcome == "valid"
+    assert fake.requests[0][0] == {"role": "system", "content": "The real prompt."}
+
+
+# --- what the summary reports --------------------------------------------------------------------
+
+
+def test_reasoning_naming_an_omitted_field_is_reported(script):
+    good = reply(("claim", {**GOOD_CLAIM}))
+    good.reasoning = "I must add the summary, the tags and see_also, and a body."
+    script(good)
+    assert run().reasoning_gaps == ["see_also"]
+    without_tags = {k: v for k, v in GOOD_CLAIM.items() if k != "tags"}
+    bad = reply(("claim", without_tags))
+    bad.reasoning = "The write needs tags."
+    script(bad)
+    result = run()
+    assert result.outcome == "invalid" and result.reasoning_gaps == ["tags (required)"]
+
+
+def test_a_field_name_inside_another_word_is_not_a_gap():
+    assert harness.reasoning_gaps(["tag"], [], {}, "I will add tags later") == []
+
+
+def test_reasoning_field_is_read_from_either_key():
+    assert harness.reasoning_of({"reasoning": "a"}) == "a"
+    assert harness.reasoning_of({"reasoning_content": "b"}) == "b"
+    assert harness.reasoning_of({}) == ""
+
+
+@pytest.mark.parametrize(
+    ("successes", "total", "low", "high"),
+    [(5, 10, 0.24, 0.76), (10, 10, 0.72, 1.0), (0, 12, 0.0, 0.24), (45, 50, 0.79, 0.96)],
+)
+def test_wilson_interval_matches_known_values(successes, total, low, high):
+    found = harness.wilson_interval(successes, total)
+    assert found == pytest.approx((low, high), abs=0.01)
+
+
+@pytest.mark.parametrize(
+    ("successes", "total", "below"),
+    [(17, 20, True), (18, 20, False), (49, 55, True), (50, 55, False), (55, 55, False)],
+)
+def test_only_a_rate_clearly_under_the_floor_counts_as_below(successes, total, below):
+    assert harness.clearly_below(successes, total, 0.95) is below
+
+
+def test_the_summary_shows_sample_size_and_interval(script, monkeypatch):
+    monkeypatch.setattr(harness, "RESULTS", harness.Results(schemas="shipped"))
+    for valid in (True, True, False):
+        script(reply(("claim", GOOD_CLAIM if valid else {})))
+        harness.RESULTS.items.append(run())
+    table = "\n".join(harness.summary())
+    rows = {line.split("  ")[0]: line for line in table.splitlines()}
+    assert "2/3 67% [21-94]" in rows["first-try valid"]
+    assert "2/3" in rows[CLAIM_WRITE.label]
 
 
 # --- what production refuses (finding B) ------------------------------------------------------
@@ -229,7 +331,7 @@ def test_a_rejected_request_counts_and_a_host_error_does_not(script, monkeypatch
     assert "REJ" in table and "ERR" in table
     rows = {line.split("  ")[0]: line for line in table.splitlines()}
     assert "1/2 50%" in rows["valid, all cases"]  # the rejection counts, the 503 does not
-    assert "0/0" not in rows["recovery valid"] and "-" in rows["recovery valid"]
+    assert "0/0" not in rows["after 1 refusal"] and "-" in rows["after 1 refusal"]
 
 
 # --- the request (finding C) ------------------------------------------------------------------

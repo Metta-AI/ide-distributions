@@ -8,12 +8,15 @@ tools' argument check) and, for the actions whose store checks need no records, 
 too (``RECORD_CHECKS``). Calls before it get the answer production would give: the tool's own
 refusal when the argument check refuses them, otherwise a plausible result (``RESULT``). A model
 that has not called the tool within ``MAX_REQUESTS`` requests fails the case. A recovery case
-starts from a history holding one refused call and the refusal the tool returns today.
+starts from a history holding one or three refused calls: the first answered with the refusal
+the tool returns today, a repeat with the shorter one the repeat hook puts in its place. The
+rate fell to 5/10 after three refusals when this was first measured on a real context, so both
+depths are measured.
 
 Which write actions are covered. One case per write action, of the record tools (claim, goal,
 task, experiment, directive, settings, ui), that has at least two required fields, so the model
 has to compose arguments rather than pass one reference; plus ``ui.notify``, the incident wake's
-other write. Left out, to keep a full run near $1.60 (2026-11-02):
+other write. Left out, to keep a run small:
   - actions with the same shape as a covered one: task.propose, task.message and task.reject
     for the Orchestrator (task.create, task.answer), task.link (two references), and the
     Researcher's claim.retire and experiment.abandon (covered for the Orchestrator);
@@ -30,6 +33,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
+from research_core.plugin.repeats import firmer_refusal
 from research_core.store import claims, experiments, tasks
 from research_core.tools import catalog
 from research_core.tools.base import validate_args
@@ -47,11 +51,13 @@ MEASUREMENT: dict[str, list[str]] = {
     "minimax/minimax-m3": ["minimax", "deepinfra"],
 }
 MAX_REQUESTS = 3
+# The real prompt tells a model to read the relevant skill first, which the stand-in does not.
+MAX_REQUESTS_REAL_CONTEXT = 8
 # Actions that only read: a call to the expected tool with one of these is a look before the
 # write, answered and not judged.
 READ_ACTIONS = frozenset(
     {"read", "list", "search", "inspect_evidence", "status", "doctor", "capabilities"}
-    | {"environment_guide"}
+    | {"environment_guide", "command", "workers"}
 )
 # The answer to a call production would accept (reads, mostly): it confirms rather than
 # contradicts the instruction, so a cautious model is not sent looking for missing records.
@@ -69,18 +75,19 @@ class Case:
     tool: str
     action: str
     instruction: str
-    # Recovery: the arguments of an earlier call that the tool refused. The history holds that
-    # call and the tool's refusal, and the model's next call is judged.
+    # Recovery: the arguments of an earlier call that the tool refused, ``refusals`` times. The
+    # history holds those calls and their refusals, and the model's next call is judged.
     refused: dict | None = None
+    refusals: int = 1
 
     @property
     def id(self) -> str:
-        suffix = "-recovery" if self.refused is not None else ""
+        suffix = f"-recovery{self.refusals}" if self.refused is not None else ""
         return f"{self.role}-{self.tool}.{self.action}{suffix}"
 
     @property
     def label(self) -> str:
-        suffix = " (recovery)" if self.refused is not None else ""
+        suffix = f" (after {self.refusals} refused)" if self.refused is not None else ""
         return f"{self.role} {self.tool}.{self.action}{suffix}"
 
 
@@ -101,6 +108,9 @@ TASK_CREATE = (
     "Create a research Task for Goal G-1 titled 'Why do we lose early fights?': study 20 "
     "replays of lost games and report the three most common causes."
 )
+# "Send a notice", not "tell the user": in a chat, answering in text is a correct way to tell them,
+# which measured 3/5 on correct behaviour.
+UI_NOTIFY = "Send the user a notice that pv-42 is the new champion of league L-7."
 ORCHESTRATOR = [
     Case("orchestrator", "claim", "write", CHAMPION_CLAIM),
     Case(
@@ -168,7 +178,7 @@ ORCHESTRATOR = [
         "orchestrator",
         "ui",
         "notify",
-        "Tell the user that pv-42 is the new champion of league L-7.",
+        UI_NOTIFY,
     ),
     Case(
         "orchestrator",
@@ -234,16 +244,24 @@ INCIDENT_CLAIM_ARGS = {
     "status": "superseded",
     "superseded_by": "pv-42",
 }
+TASK_MESSAGE = "Tell the Researcher on Task T-6: use league L-7's practice division."
+RECOVERY_DEPTHS = (1, 3)
 RECOVERY = [
-    Case("orchestrator", "claim", "write", CHAMPION_CLAIM, refused=INCIDENT_CLAIM_ARGS),
-    Case("researcher", "claim", "write", CHAMPION_CLAIM, refused=INCIDENT_CLAIM_ARGS),
-    Case(
-        "orchestrator",
-        "task",
-        "create",
-        TASK_CREATE,
-        refused={"action": "create", "title": "Why do we lose early fights?", "goal": "G-1"},
-    ),
+    Case(role, tool, action, instruction, refused=refused, refusals=refusals)
+    for role, tool, action, instruction, refused in (
+        ("orchestrator", "claim", "write", CHAMPION_CLAIM, INCIDENT_CLAIM_ARGS),
+        ("researcher", "claim", "write", CHAMPION_CLAIM, INCIDENT_CLAIM_ARGS),
+        (
+            "orchestrator",
+            "task",
+            "create",
+            TASK_CREATE,
+            {"action": "create", "title": "Why do we lose early fights?", "goal": "G-1"},
+        ),
+        # The Nov 4 chat's call: refused for a field it left out, again and again.
+        ("orchestrator", "task", "message", TASK_MESSAGE, {"action": "message", "task": "T-6"}),
+    )
+    for refusals in RECOVERY_DEPTHS
 ]
 CASES = [*ORCHESTRATOR, *RESEARCHER, *RECOVERY]
 
@@ -301,37 +319,57 @@ RECORD_CHECKS = {
 # --- running and judging one case -------------------------------------------------------------
 
 
-def messages(case: Case, schemas: harness.SchemaSet) -> list[dict]:
-    history = [
-        {"role": "system", "content": SYSTEM.format(role=case.role)},
-        {"role": "user", "content": case.instruction},
-    ]
-    if case.refused is None:
-        return history
+def system_prompt(role: str) -> str:
+    captured = harness.session_context(role)
+    return captured.system if captured is not None else SYSTEM.format(role=role)
+
+
+def refused_history(case: Case, schemas: harness.SchemaSet) -> list[dict]:
+    """The assistant calls and tool results of a recovery case's refused calls."""
     name, args = schemas.outgoing(case.role, case.tool, case.refused)
     refusal = schemas.refusal(case.role, case.tool, case.refused)
-    assert json.loads(refusal)["ok"] is False, refusal
-    call_id = "call_refused_1"
-    return [
-        *history,
-        {
-            "role": "assistant",
-            "content": "",
-            "tool_calls": [
-                {
-                    "id": call_id,
-                    "type": "function",
-                    "function": {"name": name, "arguments": json.dumps(args)},
-                }
-            ],
-        },
-        {"role": "tool", "tool_call_id": call_id, "content": refusal},
+    parsed = json.loads(refusal)
+    assert parsed["ok"] is False, refusal
+    history: list[dict] = []
+    for count in range(1, case.refusals + 1):
+        call_id = f"call_refused_{count}"
+        history += [
+            {
+                "role": "assistant",
+                "content": "",
+                "tool_calls": [
+                    {
+                        "id": call_id,
+                        "type": "function",
+                        "function": {"name": name, "arguments": json.dumps(args)},
+                    }
+                ],
+            },
+            {
+                "role": "tool",
+                "tool_call_id": call_id,
+                "content": (
+                    refusal if count == 1 else firmer_refusal(case.role, name, parsed, count)
+                ),
+            },
+        ]
+    return history
+
+
+def messages(case: Case, schemas: harness.SchemaSet) -> list[dict]:
+    history = [
+        {"role": "system", "content": system_prompt(case.role)},
+        {"role": "user", "content": case.instruction},
     ]
+    return history if case.refused is None else [*history, *refused_history(case, schemas)]
 
 
 def is_judged(case: Case, tool: str, args: dict) -> bool:
-    """A call to the expected tool counts unless it is a read: no action, or a write action."""
-    return tool == case.tool and args.get("action") not in READ_ACTIONS
+    """A call to the expected tool counts unless it is a read, or a Researcher's first step of
+    taking the Task: no action, or a write action."""
+    action = args.get("action")
+    taking_the_task = (tool, action) == ("task", "claim")
+    return tool == case.tool and action not in READ_ACTIONS and not taking_the_task
 
 
 def judge(case: Case, call: harness.Call, args: dict) -> tuple[str, str]:
@@ -354,6 +392,16 @@ def judge(case: Case, call: harness.Call, args: dict) -> tuple[str, str]:
     return "valid", ""
 
 
+def gaps_in_reasoning(case: Case, args: dict, reasoning: str) -> list[str]:
+    """Fields of the case's action that the judged call's reasoning names and its arguments omit."""
+    spec = next(s for s in catalog.tools_for(case.role) if s.name == case.tool)
+    action = spec.action(case.action)
+    accepted = spec.accepted(action)
+    required = [*action.required, *spec.required]
+    optional = [name for name in accepted if name not in required]
+    return harness.reasoning_gaps(required, optional, args, reasoning)
+
+
 def answer(case: Case, schemas: harness.SchemaSet, tool: str, args: dict | None) -> str:
     """What production returns for a call before the judged one: the tool's refusal when its
     argument check refuses the call, else RESULT (Hermes's own tools always get RESULT)."""
@@ -372,7 +420,8 @@ def run_case(model: str, host: str, case: Case, schemas: harness.SchemaSet) -> h
     result = harness.Result(model, host, case.label, "wrong_tool")
     history = messages(case, schemas)
     tools = harness.full_toolset(case.role, schemas, model)
-    for _ in range(MAX_REQUESTS):
+    real_context = harness.session_context(case.role) is not None
+    for _ in range(MAX_REQUESTS_REAL_CONTEXT if real_context else MAX_REQUESTS):
         try:
             reply = harness.complete(
                 model,
@@ -395,6 +444,7 @@ def run_case(model: str, host: str, case: Case, schemas: harness.SchemaSet) -> h
             tool, args = schemas.canonical(case.role, call.name, call.arguments or {})
             if is_judged(case, tool, args):
                 result.outcome, result.detail = judge(case, call, args)
+                result.reasoning_gaps = gaps_in_reasoning(case, args, reply.reasoning)
                 return result
             result.detours.append(f"{call.name} {call.raw[:120]}")
             content = answer(case, schemas, tool, None if call.arguments is None else args)

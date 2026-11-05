@@ -7,14 +7,18 @@ a table of results per model and host (``harness.summary``), printed by this fol
 ``conftest.py``.
 
 Environment, all optional but the first:
-  IDE_HERMES_SRC         a Hermes v0.21.6 source tree, for its schema sanitizers (required)
+  IDE_HERMES_SRC         a Hermes source tree, for its schema sanitizers (required)
   IDE_TOOL_CALL_MODELS   comma-separated models (default: MEASUREMENT's models)
   IDE_TOOL_CALL_HOSTS    comma-separated host labels for every model (default: MEASUREMENT's,
                          else ``shipped``); see ``harness.provider_for``
   IDE_TOOL_CALL_CASES    comma-separated substrings; only cases whose id contains one run
-                         (ids look like ``orchestrator-claim.write``, ``...-recovery``)
-  IDE_TOOL_CALL_REPEATS  calls per case (default 1)
+                         (ids look like ``orchestrator-claim.write``, ``...-recovery3``)
+  IDE_TOOL_CALL_REPEATS  calls per case (default 5: one call per case makes a shift of a few
+                         cases noise; the summary gives each rate its interval)
+  IDE_TOOL_CALL_PARALLEL calls at a time (default 4)
   IDE_TOOL_CALL_SCHEMAS  ``module:attribute`` naming another ``harness.SchemaSet``
+  IDE_TOOL_CALL_CONTEXT  a capture from ``test_real_session.py``: send the real system prompt and
+                         Hermes tool list in place of the stand-ins
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ pytestmark = [
     pytest.mark.model,
     pytest.mark.skipif(not harness.KEY, reason="OPENROUTER_API_KEY is not set"),
 ]
+DEFAULT_REPEATS = 5
 
 
 def selected() -> list[tuple[str, str, Case]]:
@@ -37,7 +42,7 @@ def selected() -> list[tuple[str, str, Case]]:
     hosts = harness.env_list("IDE_TOOL_CALL_HOSTS")
     wanted = harness.env_list("IDE_TOOL_CALL_CASES")
     cases = [c for c in CASES if not wanted or any(w in c.id for w in wanted)]
-    repeats = int(os.environ.get("IDE_TOOL_CALL_REPEATS") or 1)
+    repeats = int(os.environ.get("IDE_TOOL_CALL_REPEATS") or DEFAULT_REPEATS)
     return [
         (model, host, case)
         for model in models
@@ -47,16 +52,24 @@ def selected() -> list[tuple[str, str, Case]]:
     ]
 
 
+def call_model(model: str, host: str, case: Case) -> harness.Result:
+    return run_case(model, host, case, harness.schema_set())
+
+
+@pytest.fixture(scope="module")
+def calls(request):
+    harness.hermes_sanitizers()  # fails loudly without IDE_HERMES_SRC
+    harness.RESULTS.schemas = harness.schema_set().label
+    return harness.start_calls(request.session, test_write_action_first_call_is_valid, call_model)
+
+
 @pytest.mark.parametrize(
     ("model", "host", "case"),
     selected(),
     ids=lambda value: value.id if isinstance(value, Case) else str(value).rsplit("/", 1)[-1],
 )
-def test_write_action_first_call_is_valid(model: str, host: str, case: Case):
-    harness.hermes_sanitizers()  # fails loudly without IDE_HERMES_SRC
-    schemas = harness.schema_set()
-    harness.RESULTS.schemas = schemas.label
-    result = run_case(model, host, case, schemas)
+def test_write_action_first_call_is_valid(model: str, host: str, case: Case, calls, request):
+    result = calls[request.node.nodeid].result()
     harness.RESULTS.items.append(result)
     if result.outcome == "host_error":
         pytest.skip(f"{model} on {host}: {result.detail}")
