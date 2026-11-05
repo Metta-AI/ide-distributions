@@ -23,7 +23,7 @@ import pytest
 
 from research_core.tools import catalog
 from tests.model import harness
-from tests.model.real_session import CASES, RealGateway, hermes_bin_from_env
+from tests.model.real_session import CASES, HOST_LABEL, RealGateway, hermes_bin_from_env
 from tests.model.write_actions import RECOVERY_DEPTHS, Case
 
 pytestmark = [
@@ -62,11 +62,13 @@ def gateway(tmp_path_factory):
         openrouter_key=harness.KEY,
         model=MODEL,
     )
-    real.start()
-    harness.RESULTS.schemas = "shipped, through a real Session"
-    print(f"\ngateway log: {real.host.log}\nworkspace: {real.host.workspace}")
-    yield real
-    real.stop()
+    try:
+        real.start()
+        harness.RESULTS.schemas = "shipped, through a real Session"
+        print(f"\ngateway log: {real.host.log}\nworkspace: {real.host.workspace}")
+        yield real
+    finally:
+        real.stop()
 
 
 @pytest.fixture(scope="module")
@@ -117,7 +119,10 @@ def calls(request, gateway):
     def run_one(case: Case) -> harness.Result:
         return gateway.run_case(MODEL, case)
 
-    return harness.start_calls(request.session, test_write_action_through_a_real_session, run_one)
+    with harness.started_calls(
+        request.session, test_write_action_through_a_real_session, run_one
+    ) as futures:
+        yield futures
 
 
 @pytest.mark.parametrize("case", selected(), ids=lambda case: case.id)
@@ -134,14 +139,22 @@ def test_write_action_through_a_real_session(case: Case, calls, request):
 def test_the_agreed_rate(refusals: int):
     """The parent task's done-when: the model tests pass at an agreed rate through a real session.
 
-    Fails when the share of valid calls is below ``AGREED_RATE``, at each refusal depth.
+    Fails when the share of valid calls is below ``AGREED_RATE``, at each refusal depth, and when
+    too few runs reached a verdict to decide. Only a run narrowed to some cases may skip it.
     """
-    results = [r for r in harness.RESULTS.items if harness.refusals_in(r.case) == refusals]
+    results = [
+        r
+        for r in harness.RESULTS.items
+        if r.host == HOST_LABEL and harness.refusals_in(r.case) == refusals
+    ]
     valid, total = harness.judged_rate(results)
-    if total < MIN_SAMPLE:
-        pytest.skip(
-            f"{total} judged calls after {refusals} refusals; a decision needs {MIN_SAMPLE}"
-        )
+    if total < MIN_SAMPLE and harness.env_list("IDE_TOOL_CALL_CASES"):
+        pytest.skip(f"narrowed run: {total} judged calls, a decision needs {MIN_SAMPLE}")
+    assert total >= MIN_SAMPLE, f"after {refusals} refusals: only {total} judged calls"
+    assert total / len(results) >= AGREED_RATE, (
+        f"after {refusals} refusals: {len(results) - total} of {len(results)} runs ended without a "
+        "verdict (ERR in the table), too many to trust the rate"
+    )
     assert valid / total >= AGREED_RATE, (
         f"after {refusals} refusals: {valid}/{total}, agreed rate {AGREED_RATE}"
     )

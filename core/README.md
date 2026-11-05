@@ -100,5 +100,5 @@ it is not used for recovery. Fake faults: `lookup=503|403|unavailable|not_found`
   one-sentence `description` of at most 60 characters; `tools/check_prompts.py` checks it.
 - **A call shown in a prompt, skill, task type or wake:** write it as
   `tool.action {a, b: value, c?, d | e, f {g, h}}`, in backticks. Every name must exist on that action,
-  and the signature must name every required field; end it with `...` when it shows only part of
-  the call on purpose. `core/tests/test_tool_signatures.py` checks this and says the rules in full.
+  and the signature must name every required field and key; end it with `...` when it shows only
+  part of the call on purpose. `core/tests/test_tool_signatures.py` checks this and says the rules in full.

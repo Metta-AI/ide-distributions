@@ -47,8 +47,8 @@ def record_note(**extra_properties: dict) -> dict:
     }
 
 
-def ticket_sent(model: str, tool: dict) -> tuple[harness.Reply | None, bool, str]:
-    """The reply, whether its call carried ``ticket``, and any problem with the request."""
+def expected(model: str, case: str, tool: dict, expect_ticket: bool) -> harness.Result:
+    """Valid when the reply makes a call whose arguments hold ``ticket`` exactly as expected."""
     try:
         reply = harness.complete(
             model,
@@ -58,17 +58,19 @@ def ticket_sent(model: str, tool: dict) -> tuple[harness.Reply | None, bool, str
             provider=harness.provider_for(model, harness.SHIPPED),
         )
     except harness.HostError as error:
-        return None, False, str(error)
-    return reply, bool(reply.calls and "ticket" in (reply.calls[0].arguments or {})), ""
-
-
-def expected(model: str, case: str, tool: dict, expect_ticket: bool) -> harness.Result:
-    reply, sent, problem = ticket_sent(model, tool)
-    if reply is None:
-        return harness.Result(model, harness.SHIPPED, case, "host_error", problem)
+        outcome = "rejected" if error.rejected else "host_error"
+        return harness.Result(model, harness.SHIPPED, case, outcome, str(error))
+    if not reply.calls:
+        detail = f"text: {reply.text[:150]!r}"
+        return harness.Result(model, harness.SHIPPED, case, "no_call", detail, replies=[reply])
+    call = reply.calls[0]
+    if call.arguments is None:
+        detail = f"arguments are not a JSON object: {call.raw[:150]}"
+        return harness.Result(model, harness.SHIPPED, case, "invalid", detail, replies=[reply])
+    sent = "ticket" in call.arguments
     outcome = "valid" if sent == expect_ticket else "invalid"
-    detail = f"ticket {'sent' if sent else 'left out'}: {reply.calls[0].raw if reply.calls else ''}"
-    return harness.Result(model, harness.SHIPPED, case, outcome, detail[:200], replies=[reply])
+    detail = f"ticket {'sent' if sent else 'left out'}: {call.raw}"[:200]
+    return harness.Result(model, harness.SHIPPED, case, outcome, detail, replies=[reply])
 
 
 CALLS = [

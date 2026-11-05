@@ -61,6 +61,14 @@ def free_port() -> int:
         return sock.getsockname()[1]
 
 
+class SecretEnv(dict):
+    """A child process's environment. pytest prints the arguments of every frame of a failure, and
+    these hold the OpenRouter key and the API key."""
+
+    def __repr__(self) -> str:
+        return f"<environment of {len(self)} variables>"
+
+
 def run(argv, env, timeout=120):
     return subprocess.run(
         [str(part) for part in argv], env=env, capture_output=True, text=True, timeout=timeout
@@ -88,27 +96,29 @@ class Host:
     timings: dict[str, float] = field(default_factory=dict)
     # Written after the defaults into the host's and every profile's ``.env``: the acceptance
     # harness puts the platform choice, the Player and the Researcher profiles here.
-    dotenv_extra: dict[str, str] = field(default_factory=dict)
+    dotenv_extra: dict[str, str] = field(default_factory=dict, repr=False)
 
     def profile(self, role: str) -> Path:
         return self.home / "profiles" / role
 
     def base_env(self) -> dict[str, str]:
-        return {
-            **os.environ,
-            "HERMES_HOME": str(self.home),
-            "HERMES_REAL_HOME": str(self.home),
-            "IDE_WORKSPACE": str(self.workspace),
-            "OPENROUTER_API_KEY": self.openrouter_key,
-            "API_SERVER_ENABLED": "true",
-            "API_SERVER_HOST": "127.0.0.1",
-            "API_SERVER_PORT": str(self.port),
-            "API_SERVER_KEY": self.key,
-            "GATEWAY_MULTIPLEX_PROFILES": "true",
-        }
+        return SecretEnv(
+            {
+                **os.environ,
+                "HERMES_HOME": str(self.home),
+                "HERMES_REAL_HOME": str(self.home),
+                "IDE_WORKSPACE": str(self.workspace),
+                "OPENROUTER_API_KEY": self.openrouter_key,
+                "API_SERVER_ENABLED": "true",
+                "API_SERVER_HOST": "127.0.0.1",
+                "API_SERVER_PORT": str(self.port),
+                "API_SERVER_KEY": self.key,
+                "GATEWAY_MULTIPLEX_PROFILES": "true",
+            }
+        )
 
     def profile_env(self, role: str) -> dict[str, str]:
-        return {**self.base_env(), "HERMES_HOME": str(self.profile(role))}
+        return SecretEnv({**self.base_env(), "HERMES_HOME": str(self.profile(role))})
 
     def write_host_dotenv(self) -> None:
         """The host home's ``.env``: the gateway enables its API server from the default home's

@@ -60,7 +60,10 @@ def call_model(model: str, host: str, case: Case) -> harness.Result:
 def calls(request):
     harness.hermes_sanitizers()  # fails loudly without IDE_HERMES_SRC
     harness.RESULTS.schemas = harness.schema_set().label
-    return harness.start_calls(request.session, test_write_action_first_call_is_valid, call_model)
+    with harness.started_calls(
+        request.session, test_write_action_first_call_is_valid, call_model
+    ) as futures:
+        yield futures
 
 
 @pytest.mark.parametrize(

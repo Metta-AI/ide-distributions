@@ -12,6 +12,7 @@ from pathlib import Path
 
 import pytest
 
+from research_core.watcher.hermes_api import RunStatus
 from tests.hermes.test_spike_s1 import Host
 from tests.model import harness, write_actions
 from tests.model.real_session import RealGateway
@@ -74,6 +75,11 @@ def script(monkeypatch):
 
 def run(case: Case = CLAIM_WRITE) -> harness.Result:
     return run_case("m/model", "host", case, harness.ShippedSchemas())
+
+
+def run_case_of(script, case: Case, args: dict) -> harness.Result:
+    script(reply((case.tool, args)))
+    return run(case)
 
 
 # --- which call is judged (finding A) ---------------------------------------------------------
@@ -243,11 +249,60 @@ def test_the_summary_shows_sample_size_and_interval(script, monkeypatch):
     assert "2/3" in rows[CLAIM_WRITE.label]
 
 
-def test_the_gateway_and_host_keep_the_key_out_of_their_repr():
+def test_the_gateway_host_and_child_environments_keep_the_key_out_of_their_repr():
     key = "sk-or-secret"
     host = Host(Path("h"), Path("/"), Path("/"), 1, "api-secret", key, Path("l"))
     gateway = RealGateway(Path("/"), Path("h"), key, "m", host=host)
-    assert key not in repr(gateway) and key not in repr(host) and "api-secret" not in repr(host)
+    for shown in (gateway, host, host.base_env(), host.profile_env("researcher"), gateway.env()):
+        assert key not in repr(shown) and "api-secret" not in repr(shown)
+    assert host.base_env()["OPENROUTER_API_KEY"] == key
+
+
+def test_stopping_the_gateway_removes_the_key_files(tmp_path):
+    host = Host(Path("h"), tmp_path, tmp_path, 1, "a", "k", tmp_path / "log")
+    gateway = RealGateway(tmp_path, Path("h"), "k", "m", host=host)
+    profile = host.profile("researcher")
+    profile.mkdir(parents=True)
+    host.write_host_dotenv()
+    host.write_dotenv("researcher")
+    gateway.stop()
+    assert not (tmp_path / ".env").exists() and not (profile / ".env").exists()
+
+
+class FinishedRun:
+    """The runs API of a run that has already ended, holding one call to ``claim``."""
+
+    def __init__(self, status: str, args: dict):
+        self.ended = RunStatus("r", status, "s", None, None, terminal=True)
+        self.stored = [
+            {
+                "role": "assistant",
+                "tool_calls": [{"id": "c", "function": {"name": "claim", "arguments": ""}}],
+            }
+        ]
+        self.stored[0]["tool_calls"][0]["function"]["arguments"] = json.dumps(args)
+
+    def start(self, **_) -> str:
+        return "r"
+
+    def status(self, run_id, profile):
+        return self.ended
+
+    def session_messages(self, session_id, profile):
+        return self.stored
+
+
+@pytest.mark.parametrize("status", ["completed", "failed"])
+def test_a_valid_call_stays_valid_when_the_run_has_already_ended(status, monkeypatch):
+    gateway = RealGateway(Path("/"), Path("h"), "k", "m", runs=FinishedRun(status, GOOD_CLAIM))
+    monkeypatch.setattr(gateway, "open_session", lambda role: "s")
+    monkeypatch.setattr(gateway, "_billed_replies", lambda *_: [])
+    assert gateway.run_case("m", CLAIM_WRITE).outcome == "valid"
+
+
+def test_an_orchestrators_task_claim_is_judged_not_excused(script):
+    case = Case("orchestrator", "task", "create", "Create a Task.")
+    assert run_case_of(script, case, {"action": "claim", "task": "T-5"}).outcome == "invalid"
 
 
 # --- what production refuses (finding B) ------------------------------------------------------

@@ -6,14 +6,19 @@ The prompts, skills, task types and wake prompts show calls in this short form, 
 
 - ``a`` is a field; ``b: value`` a field with an example value; ``c?`` an optional field.
 - ``d | e`` means one of the two.
-- ``f {g, h}`` or ``f: {g, h}`` lists the keys of an object field.
+- ``f {g, h}``, ``f: {g, h}`` or ``f: [{g, h}]`` lists the keys of an object field or a list of
+  objects, by the same rules.
 - A closing ``...`` marks a fragment: the signature shows what this step is about and leaves other
   required fields out on purpose. Without it the signature is complete.
 
-The rules: every named field and key must exist on that action, and a complete signature names
-every field the action requires. A field the caller generates rather than decides (see
-``is_generated``) never has to be named. ``KNOWN_INCOMPLETE`` lists the signatures that break the
-second rule today; the test fails when an entry is no longer needed, so the list only shrinks.
+The rules: the tool and action must exist, and for the role that reads the file; every named field
+and key must exist on that action; and a complete signature names every field and key the action
+requires. A field the caller generates rather than decides (see ``is_generated``) never has to be
+named. ``KNOWN_INCOMPLETE`` lists the signatures that break the last rule today; the test fails
+when an entry is no longer needed, so the list only shrinks.
+
+A dotted name in backticks before a brace is always read as a call, so a misspelt tool is found. A
+bare name is read only when it is a tool, because skills also write ``methods {a, b}`` for a field.
 """
 
 from __future__ import annotations
@@ -32,9 +37,20 @@ CORE = Path(research_core.__file__).parent
 SOURCES = ("prompts", "skills", "task_types", "watcher/wakes")
 
 catalog._load_tool_modules()
-OPENING = re.compile(r"`(" + "|".join(sorted(catalog.TOOLS)) + r")(?:\.([a-z_]+))? ?\{")
-ITEM = re.compile(r"([a-z_]+)\??(?:\s*\|\s*([a-z_]+)\??)?\s*:?\s*(\{.*\})?", re.DOTALL)
+OPENING = re.compile(r"`([a-z_]+)(?:\.([a-z_]+))? ?\{")
+# Names (one field, or alternatives joined by ``|``), then a ``: value`` or a ``{keys}``.
+ITEM = re.compile(r"([a-z_]+\??(?:\s*\|\s*[a-z_]+\??)*)\s*(?::\s*(.*)|(\{.*\}))?", re.DOTALL)
+NAME = re.compile(r"[a-z_]+")
+OBJECT_VALUE = re.compile(r"\[?\s*\{(.*)\}\s*\]?", re.DOTALL)
 FRAGMENT = "..."
+# The role that reads each folder; a folder not listed here is read by both.
+FOLDER_ROLES = {
+    "skills/orchestrator": "orchestrator",
+    "skills/researcher": "researcher",
+    "prompts/orchestrator": "orchestrator",
+    "prompts/researcher": "researcher",
+    "task_types": "researcher",
+}
 
 # Signatures with no closing ``...`` that leave out a required field: (file, tool.action, fields).
 KNOWN_INCOMPLETE = {
@@ -111,6 +127,8 @@ def closing_brace(text: str, start: int) -> int:
 def signatures_in(source: str, text: str) -> list[Signature]:
     found = []
     for match in OPENING.finditer(text):
+        if match[2] is None and match[1] not in catalog.TOOLS:
+            continue
         body = text[match.end() : closing_brace(text, match.end())]
         found.append(Signature(source, match[1], match[2], " ".join(body.split())))
     return found
@@ -149,52 +167,57 @@ def is_generated(schema: dict) -> bool:
     return "intent ID" in schema.get("description", "")
 
 
-def _key_problems(label: str, keys_text: str, schema: dict) -> list[str]:
-    """Keys listed for an object field, against the keys its schema declares."""
-    schema = schema.get("items") or schema
-    declared = schema.get("properties")
-    if not declared:
-        return []
-    problems = []
-    for item in top_level_items(keys_text):
-        match = ITEM.match(item)
-        name = match[1] if match else item
-        if item != FRAGMENT and name not in declared:
-            problems.append(f"{label}: no key {name!r}")
-    return problems
+def _field_problems(label: str, body: str, properties: dict, required) -> tuple[list, list]:
+    """(names ``body`` has that ``properties`` lacks, required names it leaves out), going into the
+    keys listed for any field. A closing ``...`` means leaving names out is intended, here."""
+    unknown: list[str] = []
+    omitted: list[str] = []
+    named: set[str] = set()
+    items = top_level_items(body)
+    for item in items:
+        if item == FRAGMENT:
+            continue
+        match = ITEM.fullmatch(item)
+        if match is None:
+            unknown.append(f"{label}: cannot read {item!r}")
+            continue
+        for name in NAME.findall(match[1]):
+            named.add(name)
+            if name not in properties:
+                unknown.append(f"{label}: no field {name!r}")
+                continue
+            value = OBJECT_VALUE.fullmatch((match[2] or match[3] or "").strip())
+            schema = properties[name].get("items") or properties[name]
+            if value and schema.get("properties"):
+                inner = _field_problems(
+                    f"{label}: {name}", value[1], schema["properties"], schema.get("required", ())
+                )
+                unknown += inner[0]
+                omitted += [f"{name}.{key}" for key in inner[1]]
+    if items and items[-1] == FRAGMENT:
+        return unknown, []
+    omitted += [f for f in required if f not in named and not is_generated(properties[f])]
+    return unknown, omitted
 
 
 def problems_with(signature: Signature) -> tuple[list[str], list[str]]:
-    """(fields or keys that do not exist, required fields a complete signature leaves out)."""
-    spec: ToolSpec = catalog.TOOLS[signature.tool]
+    """(names that do not exist, required fields and keys a complete signature leaves out)."""
     label = f"{signature.source}: {signature.label} {{{signature.body}}}"
+    spec: ToolSpec | None = catalog.TOOLS.get(signature.tool)
+    if spec is None:
+        return [f"{label}: no tool {signature.tool!r}"], []
     action = spec.action(signature.action) if signature.action else None
     if spec.actions is not None and action is None:
         return [f"{label}: {signature.tool} has no action {signature.action!r}"], []
     if spec.actions is None and signature.action:
         return [f"{label}: {signature.tool} has no actions"], []
-    accepted = spec.accepted(action)
-    unknown: list[str] = []
-    named: set[str] = set()
-    items = top_level_items(signature.body)
-    for item in items:
-        if item == FRAGMENT:
-            continue
-        match = ITEM.match(item)
-        if match is None:
-            unknown.append(f"{label}: cannot read {item!r}")
-            continue
-        for name in filter(None, (match[1], match[2])):
-            named.add(name)
-            if name not in accepted:
-                unknown.append(f"{label}: no field {name!r}")
-            elif match[3]:
-                unknown.extend(_key_problems(f"{label}: {name}", match[3][1:-1], accepted[name]))
-    if items and items[-1] == FRAGMENT:
-        return unknown, []
+    role = next((r for f, r in FOLDER_ROLES.items() if signature.source.startswith(f + "/")), None)
+    if role is not None and (
+        spec not in catalog.tools_for(role) or (action and action not in spec.actions_for(role))
+    ):
+        return [f"{label}: the {role} cannot call this"], []
     required = [*(action.required if action else ()), *spec.required]
-    omitted = [f for f in required if f not in named and not is_generated(accepted[f])]
-    return unknown, omitted
+    return _field_problems(label, signature.body, spec.accepted(action), required)
 
 
 def test_every_signature_names_only_fields_the_action_has():
@@ -259,7 +282,52 @@ def test_the_keys_of_an_object_field_are_checked():
     good = "`task.abandon {task, failure: {what_failed, next_step}}`"
     assert problems_with(only(good))[0] == []
     bad = "`task.abandon {task, failure: {what_went_wrong}}`"
-    assert "no key 'what_went_wrong'" in problems_with(only(bad))[0][0]
+    assert "no field 'what_went_wrong'" in problems_with(only(bad))[0][0]
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "`claim.search {query2}`",  # a name with more after it is not the name
+        "`claim.search {query other}`",
+        "`claim.search {query | tags | nope}`",  # every alternative counts
+    ],
+)
+def test_a_field_is_read_whole(text):
+    assert problems_with(only(text))[0] != []
+
+
+def test_a_misspelt_tool_is_found():
+    assert "no tool 'cliam'" in problems_with(only("`cliam.write {summary}`"))[0][0]
+
+
+def test_a_bare_name_that_is_not_a_tool_is_not_a_call():
+    assert signatures_in("test.md", "`methods {baseline, candidate}`") == []
+
+
+def test_the_keys_of_a_list_of_objects_are_checked():
+    good = "`claim.write {summary, body, tags, evidence: [{type, ref, stance}]}`"
+    assert problems_with(only(good)) == ([], [])
+    bad = "`claim.write {summary, body, tags, evidence: [{typo, ref, stance}]}`"
+    assert "no field 'typo'" in problems_with(only(bad))[0][0]
+
+
+def test_a_required_key_left_out_is_found():
+    omitted = problems_with(only("`task.abandon {task, failure: {what_failed}}`"))[1]
+    assert omitted == ["failure.next_step"]
+    fragment = "`task.abandon {task, failure: {what_failed, ...}}`"
+    assert problems_with(only(fragment)) == ([], [])
+
+
+def test_an_action_the_role_cannot_call_is_found():
+    signature = Signature(
+        "skills/researcher/x/SKILL.md", "goal", "create", "title, end_state, reason"
+    )
+    assert "the researcher cannot call this" in problems_with(signature)[0][0]
+    other = Signature(
+        "skills/orchestrator/x/SKILL.md", "goal", "create", "title, end_state, reason"
+    )
+    assert problems_with(other) == ([], [])
 
 
 @pytest.mark.parametrize("body", ["reason", "reason, ..."])

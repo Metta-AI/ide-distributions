@@ -5,7 +5,9 @@ Hermes, so the request is the real one: the stored system prompt, the frozen too
 own request shaping, the plugin's hooks, the real tools answering on the fake platform. The
 judging is the same (``write_actions.is_judged`` and ``judge``), read from the Session's stored
 messages. A run is stopped as soon as the judged call is seen, so a case costs what it took to
-get there. ``test_real_session.py`` runs the cases.
+get there, and what is judged is the call a model composes, not what the real tool then answered:
+that also depends on the seeded records (a Researcher's Session holds its Task but has no worker
+execution, so the real ``task.ask`` refuses it). ``test_real_session.py`` runs the cases.
 
 A recovery case needs refused calls already in the history, and the runs API takes only text
 history, so those rows are written into the profile's ``state.db`` before the first run, in the
@@ -44,7 +46,7 @@ from research_core.store.db import Store
 from research_core.tools import catalog
 from research_core.watcher.hermes_api import HermesRuns, mint_session_id
 from tests.fixtures.fakegame_repo import COWORLD_ID, make_fakegame_repo
-from tests.hermes.test_spike_s1 import REPO, Host, free_port, hermes_python, run
+from tests.hermes.test_spike_s1 import REPO, Host, SecretEnv, free_port, hermes_python, run
 from tests.model import harness, write_actions
 from tests.model.write_actions import Case
 
@@ -201,14 +203,14 @@ class RealGateway:
             dotenv.unlink()
 
     def env(self, role: str = "orchestrator") -> dict[str, str]:
-        return {**self.host.profile_env(role), **self.host.dotenv_extra}
+        return SecretEnv({**self.host.profile_env(role), **self.host.dotenv_extra})
 
     def state_db(self, role: str) -> Path:
         return self.host.profile(role) / "state.db"
 
     def _install(self, role: str) -> None:
         hermes = self.hermes_bin
-        install_env = {**os.environ, "HERMES_HOME": str(self.host.home)}
+        install_env = SecretEnv({**os.environ, "HERMES_HOME": str(self.host.home)})
         result = run(
             [hermes, "profile", "install", REPO / role, "--name", role, "--yes"], install_env
         )
@@ -256,7 +258,8 @@ class RealGateway:
         coworld = ws.coworld(coworld_id)
         coworld.ensure_dirs()
         with Store.open(coworld.store_path, kind="coworld") as store:
-            seed_records(store, actor)
+            holder = session_id if role == "researcher" else "another-session"
+            seed_records(store, actor, holder)
         self.runs.create_session(session_id, profile=role)
         return session_id
 
@@ -334,13 +337,14 @@ class RealGateway:
         while time.monotonic() - started < RUN_TIMEOUT_S:
             status = self.runs.status(run_id, profile=case.role)
             stored = self.runs.session_messages(session_id, profile=case.role)
-            if self._judge_new_calls(case, stored[seeded:], result) or status.terminal:
+            if self._judge_new_calls(case, stored[seeded:], result):
+                break
+            if status.terminal:
+                self._judge_end(status, stored[seeded:], result)
                 break
             time.sleep(POLL_S)
         else:
             result.outcome, result.detail = "host_error", f"no judged call in {RUN_TIMEOUT_S} s"
-        if status.terminal and not result.detail:
-            self._judge_end(status, stored[seeded:], result)
         self._stop_and_wait(case.role, run_id)
         result.replies = self._billed_replies(case.role, session_id, time.monotonic() - started)
         return result
@@ -416,8 +420,9 @@ class RealGateway:
         ]
 
 
-def seed_records(store: Store, actor: Actor) -> None:
-    """The records the instructions name: Goal G-1, Tasks T-1 and T-2, claim C-1."""
+def seed_records(store: Store, actor: Actor, holder: str) -> None:
+    """The records the instructions name: Goal G-1, Tasks T-1 and T-2 (held by the Session
+    ``holder``), claim C-1."""
     goals.create(
         store,
         actor,
@@ -442,9 +447,7 @@ def seed_records(store: Store, actor: Actor) -> None:
         goal_id=GOAL,
     )
     # Held, so a Researcher's cases find their Task in progress instead of first claiming it.
-    tasks.claim(
-        store, Actor.session("seeded-holder"), HELD_TASK, run_id=None, worktree="w", branch="b"
-    )
+    tasks.claim(store, Actor.session(holder), HELD_TASK, run_id=None, worktree="w", branch="b")
     claims.write(
         store,
         actor,

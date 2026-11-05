@@ -378,7 +378,7 @@ def is_judged(case: Case, tool: str, args: dict) -> bool:
     """A call to the expected tool counts unless it is a read, or a Researcher's first step of
     taking the Task: no action, or a write action."""
     action = args.get("action")
-    taking_the_task = (tool, action) == ("task", "claim")
+    taking_the_task = case.role == "researcher" and (tool, action) == ("task", "claim")
     return tool == case.tool and action not in READ_ACTIONS and not taking_the_task
 
 

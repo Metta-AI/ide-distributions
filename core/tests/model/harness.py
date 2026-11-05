@@ -51,8 +51,9 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
 from concurrent.futures import Future, ThreadPoolExecutor
+from contextlib import contextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
 from types import ModuleType
@@ -375,18 +376,23 @@ class Results:
 RESULTS = Results()
 
 
-def start_calls(
+@contextmanager
+def started_calls(
     session: Any, test_function: Callable, run_one: Callable[..., Result]
-) -> dict[str, Future]:
+) -> Iterator[dict[str, Future]]:
     """Start the model calls of every collected test of ``test_function`` at once, keyed by test
     id, ``IDE_TOOL_CALL_PARALLEL`` at a time (default 4): with repeats a run is hundreds of calls
-    that spend most of their time waiting for the host. Each test then waits for its own."""
+    that spend most of their time waiting for the host. Each test then waits for its own. Calls
+    not yet started are dropped on exit, so stopping pytest early stops the spending."""
     pool = ThreadPoolExecutor(int(os.environ.get("IDE_TOOL_CALL_PARALLEL") or 4))
-    return {
-        item.nodeid: pool.submit(run_one, **item.callspec.params)
-        for item in session.items
-        if getattr(item, "function", None) is test_function
-    }
+    try:
+        yield {
+            item.nodeid: pool.submit(run_one, **item.callspec.params)
+            for item in session.items
+            if getattr(item, "function", None) is test_function
+        }
+    finally:
+        pool.shutdown(cancel_futures=True)
 
 
 OUTCOME_CELL = {
@@ -519,8 +525,8 @@ def summary() -> list[str]:
         "host refused the request (4xx); ERR = transport error or 5xx (not counted). +N = N "
         "other calls first, answered as the tools would (refusal or plausible result). "
         "Prompt tokens: mean of each case's first request. With repeats a cell is valid/judged "
-        "and a rate is valid/judged, percent and [95% Wilson interval]: two rates differ only "
-        "if their intervals do not overlap; anything less is noise at this sample size.",
+        "and a rate is valid/judged, percent and [95% Wilson interval]. Intervals that do not "
+        "overlap show a real difference; overlapping ones show none at this sample size.",
         "",
         *rendered,
         "",

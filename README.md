@@ -81,7 +81,8 @@ It sends one write action with required fields per case (claims, Goals, Tasks, e
 directives, settings, notices), for both roles, offering the role's whole tool list as a Hermes
 session does, plus cases that start after one and after three refused calls. Each case runs 5
 times by default, and the closing table gives every rate its sample size and 95% Wilson interval:
-two rates differ only if their intervals do not overlap. It also lists calls whose reasoning names
+intervals that do not overlap show a real difference, and overlapping ones show none at this
+sample size. It also lists calls whose reasoning names
 a field the arguments omit. `core/tests/model/write_actions.py` says which write actions are
 covered and how a call is judged. `IDE_TOOL_CALL_MODELS`, `IDE_TOOL_CALL_HOSTS`,
 `IDE_TOOL_CALL_CASES`, `IDE_TOOL_CALL_REPEATS`, `IDE_TOOL_CALL_PARALLEL`, `IDE_TOOL_CALL_SCHEMAS`
