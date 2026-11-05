@@ -399,3 +399,24 @@ def test_released_unique_session_orphans_reclaim_slots_without_evicting_a_live_t
     )
     finish(hooks, monkeypatch)
     assert records(capsys)[-1]["accounting_complete"]
+
+
+def test_turn_boundary_includes_its_own_lease_audit_overhead(monkeypatch, capsys):
+    monkeypatch.setattr(timing.time, "time", lambda: 100)
+
+    def lease_audit(current):
+        monkeypatch.setattr(timing.time, "time", lambda: 103)
+        return {current}
+
+    monkeypatch.setattr(timing, "active_native_turns", lease_audit)
+    hooks = timing.make_hooks("orchestrator")
+    hooks["pre_llm_call"](
+        session_id="s1",
+        task_id="s1",
+        turn_id="turn-1",
+        is_first_turn=False,
+    )
+    finish(hooks, monkeypatch, end=110)
+    (event,) = records(capsys)
+    assert event["started_at"] == 100 and event["elapsed_ms"] == 10000
+    assert event["unaccounted_ms"] == 10000

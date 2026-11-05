@@ -295,6 +295,7 @@ def make_hooks(role: Role) -> dict[str, Callable[..., None]]:
     def pre_llm_call(
         *, session_id: str, task_id: str, turn_id: str, is_first_turn: bool, **_: Any
     ) -> None:
+        observed_start = time.time()
         with lock:
             # A leased turn can be between calls or in backoff. Only authoritative
             # lease release/expiry proves another session's orphan is no longer live.
@@ -306,7 +307,7 @@ def make_hooks(role: Role) -> dict[str, Callable[..., None]]:
             if len(turns) >= MAX_TRACKED_TURNS:
                 missing(turn_id, session_id, "tracking_capacity", "pre_llm_call")
                 return
-            turns[turn_id] = Turn(session_id, task_id, time.time(), is_first_turn)
+            turns[turn_id] = Turn(session_id, task_id, observed_start, is_first_turn)
 
     def pre_api_request(
         *,
@@ -422,11 +423,12 @@ def make_hooks(role: Role) -> dict[str, Callable[..., None]]:
         model_done(**kwargs, failed=True)
 
     def pre_tool_call(*, turn_id: str, tool_call_id: str, **_: Any) -> None:
+        observed_start = time.time()
         with lock:
             turn = retained(turn_id, "pre_tool_call")
             if isinstance(turn, MissingTiming):
                 return
-            turn.tool_starts[tool_call_id] = time.time()
+            turn.tool_starts[tool_call_id] = observed_start
 
     def post_tool_call(
         *,
@@ -438,6 +440,7 @@ def make_hooks(role: Role) -> dict[str, Callable[..., None]]:
         status: str,
         **_: Any,
     ) -> None:
+        observed_end = time.time()
         with lock:
             turn = retained(turn_id, "post_tool_call")
             if isinstance(turn, MissingTiming):
@@ -447,7 +450,7 @@ def make_hooks(role: Role) -> dict[str, Callable[..., None]]:
             if tool_call_id in turn.tool_ids:
                 return
             turn.tool_ids.add(tool_call_id)
-            end = time.time()
+            end = observed_end
             start = turn.tool_starts.pop(tool_call_id, None)
             if start is None:
                 turn.unpaired_tool_callbacks += 1
@@ -476,12 +479,13 @@ def make_hooks(role: Role) -> dict[str, Callable[..., None]]:
     def on_session_end(
         *, turn_id: str, completed: bool, failed: bool, interrupted: bool, **_: Any
     ) -> None:
+        observed_end = time.time()
         with lock:
             turn = retained(turn_id, "on_session_end")
             if isinstance(turn, MissingTiming):
                 return
             del turns[turn_id]
-            end = time.time()
+            end = observed_end
             if turn.admission is not None:
                 turn.admission = read_admission(
                     session_id=turn.session_id, op_id=turn.admission.op_id
