@@ -9,7 +9,7 @@ page (``tools/ui_dev.py``) share it, which is why it lives in the package and no
 What it does with each run:
 
 * a chat run whose text contains :data:`REQUEST` ("Submit the starter as my champion.")
-  switches to the fake Coworld with the request pending;
+  sets up the session's Coworld with the request pending; a session with no Coworld is told so;
 * a setup wake carries the pending request out: create the Version, upload, submit, notify;
 * every other wake completes with "Nothing to do.";
 * any other chat run renders its turn (what the plugin's hook would show the model), answers
@@ -19,7 +19,7 @@ What it does with each run:
   ==========  ====================================================================
   ``ask me``  opens a question with two options through ``ui.ask``
   ``notify``  sends a notice through ``ui.notify``
-  ``goal``    creates a Goal through the ``goal`` tool (needs an active Coworld), brings
+  ``goal``    creates a Goal through the ``goal`` tool (needs a session Coworld), brings
               it into view through ``ui.show`` and writes a markdown panel about it
   ==========  ====================================================================
 
@@ -46,7 +46,7 @@ NOTED_CHARS = 80
 TRIGGERS = {
     "ask me": "opens a question with two options (answer it in Asks)",
     "notify": "sends a notice",
-    "goal": "creates a Goal (once a Coworld is active), shows it and sets a markdown panel",
+    "goal": "creates a Goal (needs the Coworld), shows it and sets a markdown panel",
 }
 
 
@@ -105,6 +105,11 @@ class ScriptedAgent:
         return result
 
     def chat_request(self, run: FakeRun, ctx: ToolContext) -> None:
+        if ctx.coworld_or_none() is None:
+            self.hermes.complete(
+                run.run_id, f"This session has no Coworld; open one on {self.coworld_id}."
+            )
+            return
         self.call(
             ctx,
             "workspace",

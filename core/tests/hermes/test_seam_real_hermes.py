@@ -1,5 +1,4 @@
-"""The acceptance scenario on a real Hermes gateway with a real model (plan Task 6.4, the
-local stand-in for the release canary).
+"""The acceptance scenario on a real Hermes gateway with a real model (plan Task 6.4).
 
 Both profiles are installed into a temporary home and prepared; ``hermes gateway run`` serves
 them with one API key; the fake platform's manifest for ``cow_fake`` points at the fakegame
@@ -346,6 +345,7 @@ def banner(
                 "op_id": str(uuid4()),
                 "client": {"id": "curl", "kind": "web-ide"},
                 "actor": "user:local",
+                "session_context": {"contract_version": 1, "scope": "workspace"},
             }
         )
         + "'",
