@@ -5,23 +5,22 @@ requests. Every call it makes before that is answered as a session would answer 
 
 - ``skill_view`` and ``skills_list`` return the real skill text or list, and count as opening;
 - a preparation (a read, a terminal command, an edit: :func:`is_preparation`) gets the tool's own
-  refusal when the argument check refuses it, else ``write_actions.RESULT``;
+  refusal when the argument check refuses it, else what ``usability_reads`` holds for it;
 - a call named in ``situation.acts`` is judged by ``write_actions.judge``. Valid ends the run as
   ``right``; invalid gets the refusal and the model may try again, which is how recovery shows;
 - ``situation.before`` names writes that may sensibly come first; they are answered and the run
   goes on;
-- any other call that changes something ends the run as ``wrong_act``: production would have
-  acted on it.
+- any other call that passes the checks and changes something ends the run as ``wrong_act``:
+  production would have acted on it. One the checks refuse changes nothing, so it gets the refusal
+  and the run goes on.
 
 Outcomes: ``right`` (also words alone when ``"text"`` is in ``situation.acts``), ``wrong_act``,
 ``text`` (answered in words where a call was wanted, with or without earlier calls),
 ``limit`` (still preparing after ``MAX_REQUESTS``), ``rejected`` (the host refused the request),
 ``host_error`` (transport, 5xx, or account limit; not counted in any rate).
 
-Known limit: every read gets the same placeholder text, so an experiment or Task the model looks up
-never shows any state, and the model notices (one run ended with a ``task.complete`` saying "All
-record tools return the same stub response"). Long Researcher runs and some ``wrong_act`` outcomes
-come from this; ``docs/reports/tool-usability-baseline-2026-11-04.md`` marks which.
+The baseline in ``usability_baseline.json`` predates ``usability_reads``: every read in it got one
+placeholder line, and ``docs/reports/tool-usability-baseline-2026-11-04.md`` marks what that did.
 """
 
 from __future__ import annotations
@@ -34,14 +33,15 @@ from dataclasses import asdict, dataclass, field
 from research_core.plugin.turn import render_context_block
 from research_core.task_types import load as load_task_type
 from research_core.tools import catalog
+from research_core.tools.base import error_payload
 from research_core.watcher import dispatch
 from research_core.watcher.wakes import TEMPLATES_DIR
-from tests.model import harness, usability_context, write_actions
+from tests.model import harness, usability_context, usability_reads, write_actions
 from tests.model.usability_situations import Situation
 
 MAX_REQUESTS = 8
 HOST_RETRIES = 3
-TASK_ID = "T-21"
+TASK_ID = usability_context.TASK_ID
 # Hermes's tools that change nothing the session cannot redo; an edit is how work starts, and
 # models use execute_code to look around (every case seen on 2026-11-04 was a read).
 PREPARATION_BUILTINS = frozenset(
@@ -165,13 +165,8 @@ def _task_prompt(situation: Situation) -> str:
 
 
 def _claim_exchange(situation: Situation) -> list[dict]:
-    """The ``task.claim`` already made, with the type's real instructions as its result."""
-    result = {
-        "ok": True,
-        "task": {"id": TASK_ID, "title": situation.title, "type": situation.task_type},
-        "instructions": load_task_type(situation.task_type).body,
-        "messages": [],
-    }
+    """The ``task.claim`` already made, with the type's real instructions in its result."""
+    result = usability_reads.claim_result(situation, load_task_type(situation.task_type).body)
     args = {"action": "claim", "task": TASK_ID, "operation_id": "claim-t-21"}
     return [
         _assistant_call("call_claim", "task", args),
@@ -232,7 +227,9 @@ def _problems(situation: Situation, call: harness.Call) -> str:
     return "" if outcome == "valid" else detail
 
 
-def _answer(situation: Situation, call: harness.Call, schemas: harness.SchemaSet) -> str:
+def _answer(
+    situation: Situation, call: harness.Call, schemas: harness.SchemaSet, problems: str = ""
+) -> str:
     if call.name == "skill_view":
         return usability_context.skill_view_result(
             situation.role, str((call.arguments or {}).get("name"))
@@ -241,7 +238,12 @@ def _answer(situation: Situation, call: harness.Call, schemas: harness.SchemaSet
         return usability_context.skills_list_result(situation.role)
     args = call.arguments
     case = write_actions.Case(situation.role, call.name, "", situation.text)
-    return write_actions.answer(case, schemas, call.name, args)
+    answer = write_actions.answer(case, schemas, call.name, args)
+    if answer != write_actions.RESULT:
+        return answer  # the tool's argument check refused it
+    if problems:  # only a store check refused it, which production reports the same way
+        return json.dumps(error_payload([problems], {"tool": call.name}))
+    return usability_reads.result(situation, label_of(call.name, args), args)
 
 
 def args_hold(wanted: dict[str, str | None], args: dict) -> bool:
@@ -288,8 +290,10 @@ def _handle_call(
             if situation.args is not None:
                 run.args_right = args_hold(situation.args, args or {})
             return None
-        return _answer(situation, call, schemas)
-    if is_preparation(call.name, args) or call.name == "skills_list" or label in situation.before:
+        return _answer(situation, call, schemas, problems)
+    if problems or is_preparation(call.name, args) or call.name == "skills_list":
+        return _answer(situation, call, schemas, problems)
+    if label in situation.before:
         return _answer(situation, call, schemas)
     run.outcome, run.act, run.act_args = "wrong_act", label, args
     run.detail = call.raw[:300]

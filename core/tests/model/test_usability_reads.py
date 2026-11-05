@@ -1,0 +1,383 @@
+"""The fixture world against the real tools, with no model and no key: what a usability run answers
+must have the keys the real tool gives, or the run measures a world the model never meets."""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from research_core.platform import fake
+from research_core.platform.errors import CreditsRefused
+from research_core.store import experiments, goals, sessions, tasks, versions
+from research_core.store.actors import Actor
+from research_core.tools import catalog
+from research_core.tools.xp import _credits_refused
+from tests.model import harness, usability_context, usability_probe, usability_reads, write_actions
+from tests.model.usability_situations import (
+    BUILD_BACKGROUND,
+    CREDITS_REFUSAL,
+    SITUATIONS,
+    XP_ACCEPTED,
+)
+from tests.tools.conftest import COWORLD, call, ctx_factory, workspace_env  # noqa: F401
+
+SITUATION = next(s for s in SITUATIONS if s.id == "r-experiment-close")
+ARTIFACT = {"kind": "file", "path": "build/policy.json", "digest": "d" * 64, "size": 1}
+HYPOTHESIS = {
+    "statement": "More patience wins more",
+    "if_true": "score rises",
+    "if_false": "score stays within noise",
+    "motivation": "patience is untested",
+}
+METHODS = {
+    "baseline": "V-1",
+    "candidate": "V-2",
+    "procedure": "one episode per seed per arm",
+    "metrics": [{"name": "score", "direction": "up", "role": "primary", "min_effect": 1.0}],
+    "decision_rule": {"text": "score up by 1 with the CI above zero", "n_min": 2},
+}
+EVIDENCE = [{"type": "replay", "ref": "episode:ereq_1 xp:none", "stance": "supports", "note": "n"}]
+
+
+def differences(real, fixture, path: str = "") -> list[str]:
+    """Where ``fixture`` does not have the shape of ``real``: keys on both sides, recursively,
+    where both hold a value. An empty list or a null says nothing about the shape."""
+    if isinstance(real, dict) and isinstance(fixture, dict):
+        found = [f"{path}.{key}: missing" for key in real.keys() - fixture.keys()]
+        found += [f"{path}.{key}: not in the real tool" for key in fixture.keys() - real.keys()]
+        for key in real.keys() & fixture.keys():
+            found += differences(real[key], fixture[key], f"{path}.{key}")
+        return found
+    if isinstance(real, list) and isinstance(fixture, list) and real and fixture:
+        return differences(real[0], fixture[0], f"{path}[0]")
+    return []
+
+
+@pytest.fixture
+def world(ctx_factory, call):  # noqa: F811
+    """A real store and fake platform holding a record of every kind a run can read."""
+    ctx = ctx_factory()
+    platform = ctx.platform()
+    goals.create(ctx.store, ctx.actor, title="g", end_state="e", reason="r")
+    assert call(
+        "claim",
+        {"action": "write", "summary": "s", "body": "b", "tags": ["G-1"], "evidence": EVIDENCE},
+    )["ok"]
+    assert call(
+        "directive", {"action": "add", "text": "keep it short", "scope": "workspace", "source": "m"}
+    )["ok"]
+    task = tasks.create(
+        ctx.store, ctx.actor, type="improvement", title="t", description="d", goal_id=1
+    )
+    holder = Actor.session("r1")
+    tasks.claim(ctx.store, holder, task["id"], run_id="r", worktree="/w/task-1", branch="t/1")
+    sessions.register(
+        ctx.wstore,
+        holder,
+        coworld_id=COWORLD,
+        session_id="r1",
+        profile="researcher",
+        kind="task",
+        task_id=1,
+    )
+    for number in (1, 2):
+        versions.create(
+            ctx.store,
+            ctx.actor,
+            summary=f"policy {number}",
+            commit_sha=f"{number:040x}",
+            branch="main",
+            artifact=ARTIFACT,
+            based_on=[],
+        )
+        uploaded = platform.upload_file_policy(name=f"policy-{number}", content=b"{}")
+        versions.mark_uploaded(
+            ctx.store,
+            ctx.actor,
+            number,
+            policy_version_id=uploaded.id,
+            at=uploaded.created_at,
+            digest_checked=True,
+        )
+    platform.submit(league_id=fake.LEAGUE_ID, policy_version_id=uploaded.id)
+    experiments.create(
+        ctx.store,
+        ctx.actor,
+        summary="Does patience raise the score?",
+        hypothesis=HYPOTHESIS,
+        methods=METHODS,
+    )
+    experiments.start(ctx.store, ctx.actor, "X-1")
+    return {
+        "ctx": ctx,
+        "platform": platform,
+        "policy_version": uploaded.id,
+    }
+
+
+def test_offline_every_call_a_run_can_answer_has_a_read():
+    """A preparation or a write a situation allows must not reach a missing entry mid-run."""
+    for role in catalog.ROLES:
+        for spec in catalog.tools_for(role):
+            for action in spec.actions_for(role) if spec.actions else [spec]:
+                args = {"action": action.name} if spec.actions else {"method": "GET"}
+                label = usability_probe.label_of(spec.name, args)
+                if spec.actions and usability_probe.is_preparation(spec.name, args):
+                    assert label in usability_reads.ACTIONS, label
+    for name in usability_probe.PREPARATION_BUILTINS:
+        assert name in usability_reads.ACTIONS, name
+    for situation in SITUATIONS:
+        for label in situation.before:
+            assert label in usability_reads.ACTIONS, (situation.id, label)
+    assert "softmax_api" in usability_reads.ACTIONS
+
+
+def test_offline_every_situation_opens_and_answers_its_reads():
+    """Each situation builds its opening messages, and every read of the records it can name works
+    for its role, so a paid run does not stop on a fixture's own error."""
+    reads = [
+        ("goal.read", {"goal": "G-1"}),
+        ("goal.list", {}),
+        ("task.read", {"task": "T-21"}),
+        ("task.read", {"task": 8}),
+        ("task.list", {}),
+        ("claim.read", {"claim": "C-99"}),
+        ("claim.search", {"query": "scouting"}),
+        ("directive.list", {}),
+        ("settings.read", {"key": "no_such_setting"}),
+        ("version.read", {"version": "V-12"}),
+        ("experiment.read", {"experiment": 5, "section": "results"}),
+        ("experiment.search", {"query": "retreat"}),
+        ("xp.status", {"experiment": "X-5"}),
+        ("workspace.doctor", {}),
+        ("platform.standings", {"league": "league_cogs_main"}),
+        ("terminal", {"command": "git log"}),
+        ("read_file", {"path": "documents/logs/build.log"}),
+    ]
+    for situation in SITUATIONS:
+        assert usability_probe.messages_for(situation), situation.id
+        for label, args in reads:
+            assert json.loads(usability_reads.result(situation, label, args)), (situation.id, label)
+
+
+def _read(label: str, args: dict, situation=SITUATION) -> dict:
+    return json.loads(usability_reads.result(situation, label, args))
+
+
+@pytest.mark.parametrize(
+    ("tool", "args", "fixture_args"),
+    [
+        ("goal", {"action": "read", "goal": "G-1"}, None),
+        ("goal", {"action": "list"}, None),
+        ("task", {"action": "read", "task": "T-1"}, {"action": "read", "task": "T-8"}),
+        ("task", {"action": "list"}, None),
+        ("task", {"action": "workers"}, None),
+        ("directive", {"action": "list"}, None),
+        ("settings", {"action": "read"}, None),
+        ("claim", {"action": "read", "claim": "C-1"}, None),
+        ("claim", {"action": "search", "query": "s"}, {"action": "search", "query": "scouting"}),
+        ("claim", {"action": "inspect_evidence", "claim": "C-1"}, None),
+        ("version", {"action": "read", "version": "V-1"}, None),
+        ("version", {"action": "list"}, None),
+        ("experiment", {"action": "read", "experiment": "X-1"}, None),
+        ("experiment", {"action": "read", "experiment": "X-1", "section": "results"}, None),
+        ("experiment", {"action": "read", "experiment": "X-1", "section": "methods"}, None),
+        (
+            "experiment",
+            {"action": "search", "query": "patience"},
+            {"action": "search", "query": "retreat"},
+        ),
+        ("workspace", {"action": "capabilities"}, None),
+        ("workspace", {"action": "environment_guide"}, None),
+        ("ui", {"action": "notify", "text": "x"}, None),
+        ("ui", {"action": "show", "ref": "G-1"}, None),
+        ("softmax_api", {"method": "GET", "path": "/v2/leagues"}, None),
+        ("platform", {"action": "leagues"}, None),
+        ("platform", {"action": "league", "league": fake.LEAGUE_ID}, None),
+        ("platform", {"action": "divisions", "league": fake.LEAGUE_ID}, None),
+        ("platform", {"action": "standings", "league": fake.LEAGUE_ID}, None),
+        ("platform", {"action": "active_policies", "league": fake.LEAGUE_ID}, None),
+        ("platform", {"action": "policy_versions"}, None),
+        ("platform", {"action": "results"}, None),
+        ("platform", {"action": "credits"}, None),
+        ("platform", {"action": "champion", "league": fake.LEAGUE_ID}, None),
+        ("platform", {"action": "coworld", "coworld": fake.COWORLD_ID}, None),
+    ],
+)
+def test_offline_a_read_has_the_real_keys(world, call, tool, args, fixture_args):  # noqa: F811
+    real = call(tool, args)
+    assert real["ok"], real
+    label = usability_probe.label_of(tool, args)
+    assert differences(real, _read(label, fixture_args or args)) == []
+
+
+@pytest.mark.parametrize("episode_args", [{"league": fake.LEAGUE_ID}, {"policy_version": "pv"}])
+def test_offline_episodes_have_the_real_keys(world, call, episode_args):  # noqa: F811
+    if "policy_version" in episode_args:
+        episode_args = {"policy_version": world["policy_version"]}
+    args = {"action": "episodes", **episode_args}
+    real = call("platform", args)
+    assert real["episodes"], real
+    assert differences(real, _read("platform.episodes", args)) == []
+    one = {"action": "episode", "episode": real["episodes"][0]["id"]}
+    assert differences(call("platform", one), _read("platform.episode", one)) == []
+
+
+def test_offline_forum_and_wiki_have_the_real_keys(world, call):  # noqa: F811
+    post = call("forum_post", {"action": "post", "title": "Scouting", "body": "Scout early."})
+    assert post["ok"], post
+    wiki = {"wiki": "cogs", "page": "opening-book"}
+    assert call("wiki_edit", {**wiki, "title": "Opening", "body": "Scouts."})["ok"]
+    page = call("platform", {"action": "wiki_read", **wiki})
+    for args in (
+        {"action": "forum_list"},
+        {"action": "forum_search", "query": "scouting"},
+        {"action": "wiki_read", **wiki},
+        {"action": "wiki_search", "wiki": "cogs", "query": "scouts"},
+        {"action": "wiki_history", "page_id": page["page"]["page_id"]},
+    ):
+        real = call("platform", args)
+        assert real["ok"], real
+        assert differences(real, _read(f"platform.{args['action']}", args)) == [], args
+
+
+def test_offline_the_credits_refusal_is_the_real_one(world):
+    """The first wrong mock: a Researcher's refusal carries the wait to make, with its detail."""
+    ctx = world["ctx"]
+    ctx = type(ctx).from_env("researcher", ctx.env)
+    error = CreditsRefused("not enough credits", balance=4.0, held=36.0, next_refill_at="soon")
+    record = {"id": "X-1"}
+    real = _credits_refused(ctx, record, error, [], [], {"episodes": 2})
+    fixture = json.loads(CREDITS_REFUSAL)
+    assert differences(real, fixture) == []
+    assert real["next"].replace("X-1", "X-5") == fixture["next"]
+
+
+def test_offline_the_claim_result_is_the_real_one():
+    """The second wrong mock: ``task.claim`` returns the record, the worktree and the branch."""
+    task_situation = next(s for s in SITUATIONS if s.id == "r-claim-finding")
+    exchange = usability_probe.messages_for(task_situation)
+    claimed = json.loads(
+        next(m for m in exchange if m.get("tool_call_id") == "call_claim")["content"]
+    )
+    assert set(claimed) == {
+        "ok",
+        "record",
+        "worktree",
+        "branch",
+        "instructions",
+        "pending_messages",
+    }
+    assert claimed["record"]["id"] == "T-21"
+    assert claimed["record"]["title"] == task_situation.title
+    assert claimed["record"]["status"] == "in-progress"
+
+
+def test_offline_the_fixtures_for_earlier_calls_have_the_real_keys(world, call):  # noqa: F811
+    """What ``xp.request`` returns, and the forum and wait results a situation starts from."""
+    ctx = world["ctx"]
+    assert call("xp", {"action": "status", "experiment": "X-1"})["ok"]
+    real = call("xp", {"action": "request", "experiment": "X-1", "seeds": [1], "opponents": ["p"]})
+    assert real["ok"], real
+    assert differences(real, json.loads(XP_ACCEPTED)) == []
+    background = json.loads(BUILD_BACKGROUND)
+    assert set(background["background"]) == {"pid", "log", "resume"}
+    assert ctx.platform().snapshot()["counts"]["xp_create"] > 0
+
+
+def test_offline_a_run_finds_its_own_task_and_the_state_of_x5():
+    own = next(s for s in SITUATIONS if s.id == "r-expert")
+    record = _read("task.read", {"task": "T-21"}, own)["record"]
+    assert record["title"] == own.title
+    assert record["description"] == own.text
+    assert len(record["messages"]) == 2
+    states = {
+        "r-candidate": ("proposed", ""),
+        "r-experiment-start": ("proposed", "V-12"),
+        "r-run-eval": ("running", "V-12"),
+        "r-propose-submission": ("confirmed", "V-12"),
+    }
+    for situation_id, (status, candidate) in states.items():
+        situation = next(s for s in SITUATIONS if s.id == situation_id)
+        x5 = _read("experiment.read", {"experiment": "X-5"}, situation)["record"]
+        assert (x5["status"], x5["methods"]["candidate"]) == (status, candidate), situation_id
+    absent = next(s for s in SITUATIONS if s.id == "r-experiment-create")
+    assert _read("experiment.read", {"experiment": "X-5"}, absent)["ok"] is False
+
+
+def test_offline_reads_differ_and_searches_can_come_back_empty():
+    """The whole point: no two kinds of read give the same text, and nothing matches everything."""
+    answers = {
+        usability_reads.result(SITUATION, "goal.read", {"goal": "G-1"}),
+        usability_reads.result(SITUATION, "task.read", {"task": "T-21"}),
+        usability_reads.result(SITUATION, "claim.read", {"claim": "C-5"}),
+        usability_reads.result(SITUATION, "experiment.read", {"experiment": "X-5"}),
+        usability_reads.result(SITUATION, "terminal", {"command": "git log"}),
+    }
+    assert len(answers) == 5
+    assert write_actions.RESULT not in answers
+    assert _read("claim.search", {"query": "zzz nothing here"})["records"] == []
+    assert _read("claim.search", {"query": "late fights"})["records"][0]["id"] == "C-5"
+
+
+def test_offline_read_file_serves_the_binding_skills_a_session_lists():
+    prompt = usability_context.session_context_section(None, None, has_coworld=True)
+    paths = [line for line in prompt.splitlines() if line.endswith("/SKILL.md")]
+    assert len(paths) == len(usability_context.BINDINGS)
+    for path in paths:
+        assert "content" in _read("read_file", {"path": path}), path
+    assert "fakegame" not in _read("read_file", {"path": "mixin/MIXIN.md"})["content"]
+    assert _read("read_file", {"path": "/nowhere"})["not_found"] is True
+
+
+def _call(name: str, args: dict) -> harness.Call:
+    return harness.Call("c1", name, args, json.dumps(args))
+
+
+def _handle(situation_id: str, name: str, args: dict) -> tuple[usability_probe.Run, str | None]:
+    situation = next(s for s in SITUATIONS if s.id == situation_id)
+    run = usability_probe.Run(situation.id, 0)
+    answer = usability_probe._handle_call(
+        situation, run, _call(name, args), harness.ShippedSchemas()
+    )
+    return run, answer
+
+
+def test_offline_a_written_claim_has_the_real_keys(world, call):  # noqa: F811
+    args = {"action": "write", "summary": "s2", "body": "b", "tags": ["G-1"], "evidence": EVIDENCE}
+    assert differences(call("claim", args), _read("claim.write", args)) == []
+
+
+def test_offline_a_refused_call_that_was_not_wanted_changes_nothing():
+    """Production refuses it, so the run goes on; it is no ``wrong_act``."""
+    run, answer = _handle("r-candidate", "experiment", {"action": "create", "summary": "s"})
+    assert run.outcome == "limit"
+    assert json.loads(answer)["ok"] is False
+    assert run.problems
+
+
+def test_offline_a_valid_call_that_was_not_wanted_ends_the_run():
+    run, answer = _handle(
+        "r-candidate",
+        "task",
+        {"action": "ask", "task": "T-21", "question": "q", "operation_id": "o"},
+    )
+    assert run.outcome == "wrong_act"
+    assert answer is None
+
+
+def test_offline_a_store_check_refusal_is_answered_as_a_refusal():
+    """A call past ``validate_args`` that the store refuses must not read as a success."""
+    run, answer = _handle("o-claim-write", "claim", {"action": "write", "summary": "s", "tags": []})
+    assert run.act_valid is False
+    assert json.loads(answer)["ok"] is False
+
+
+def test_offline_a_read_is_answered_from_the_world():
+    run, answer = _handle(
+        "r-experiment-close", "experiment", {"action": "read", "experiment": "X-5"}
+    )
+    assert run.outcome == "limit"
+    assert json.loads(answer)["record"]["id"] == "X-5"
+    assert run.calls == ["experiment.read"]

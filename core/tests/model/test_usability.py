@@ -1,9 +1,11 @@
 """How easy the research tools and skills are to find, read and use, for the model that uses them.
 
-Costs real money when a key is set, so everything here runs only with ``-m model``; the offline
-tests (``-k offline``) need no key and check that the situations still match the shipped tools and
-skills. The measurement writes its raw runs to ``USABILITY_RUN_DIR``, ends by printing a comparison
-with ``usability_baseline.json``, and replaces that file only when ``USABILITY_WRITE_BASELINE=1``.
+The measurement costs real money, so it runs only with ``-m model`` and a key. The offline tests
+here and in ``test_usability_reads.py`` need neither and run in the default ``pytest``: they check
+that the situations still match the shipped tools and skills, how a run is judged, and that what a
+run answers has the real tools' shape. The measurement writes its raw runs to
+``USABILITY_RUN_DIR``, ends by printing a comparison with ``usability_baseline.json``, and replaces
+that file only when ``USABILITY_WRITE_BASELINE=1``.
 A run that is cut short resumes from the same ``USABILITY_RUN_DIR``. The report on a run belongs in
 ``docs/reports/``; the first is ``tool-usability-baseline-2026-11-04.md``.
 
@@ -24,6 +26,7 @@ Environment, all optional but the first:
 from __future__ import annotations
 
 import concurrent.futures
+import dataclasses
 import json
 import os
 import subprocess
@@ -42,11 +45,10 @@ from tests.model import (
     usability_context,
     usability_probe,
     usability_readability,
+    usability_reads,
     usability_results,
 )
 from tests.model.usability_situations import SITUATIONS, Situation
-
-pytestmark = pytest.mark.model
 
 BASELINE = Path(__file__).with_name("usability_baseline.json")
 MODEL = "moonshotai/kimi-k3.1-pro"
@@ -261,6 +263,7 @@ def build_results(
             "schemas": schemas_label,
             "served_by": sorted({run["provider"] for run in runs if run["provider"]}),
             "max_requests": usability_probe.MAX_REQUESTS,
+            "reads": usability_reads.READS_HASH,
             "runs": len(runs),
             "requests": sum(run["requests"] for run in runs),
             "cost_findability": round(sum(run["cost"] for run in runs), 2),
@@ -409,7 +412,22 @@ class FakeReplies:
             [],
         ),
         # Another write ends the run: production would have done it.
-        ([[("task", {"action": "message", "task": "T-1", "text": "x"})]], "wrong_act", None, []),
+        (
+            [[("task", {"action": "message", "task": "T-1", "text": "x", "operation_id": "o"})]],
+            "wrong_act",
+            None,
+            [],
+        ),
+        # Without a required field it is refused: nothing happened, and the run goes on.
+        (
+            [
+                [("task", {"action": "message", "task": "T-1", "text": "x"})],
+                [],
+            ],
+            "text",
+            None,
+            [],
+        ),
         # Words instead of a call.
         ([[]], "text", None, []),
     ],
@@ -432,11 +450,65 @@ def test_offline_the_baseline_compares_clean_with_itself():
     assert len(usability_results.compare(baseline, baseline)) == headline_lines
 
 
+def test_offline_the_baseline_keeps_what_compare_needs():
+    """Every count ``compare`` tests survives ``baseline_text``, so a later run compares clean."""
+    results = _results_of_two_runs()
+    saved = json.loads(usability_results.baseline_text(results))
+    assert len(usability_results.compare(saved, saved)) == 6
+
+
+def test_offline_compare_says_so_when_the_baseline_had_other_reads():
+    saved = json.loads(usability_results.baseline_text(_results_of_two_runs()))
+    older = json.loads(json.dumps(saved))
+    older["meta"]["reads"] = "placeholder"
+    lines = usability_results.compare(older, saved)
+    assert any("not comparable as a change in the tools" in line for line in lines)
+
+
+def test_offline_a_change_in_any_field_of_a_situation_changes_its_hash():
+    situation = SITUATIONS[0]
+    assert usability_results.situation_hash(situation) != usability_results.situation_hash(
+        dataclasses.replace(situation, x5="confirmed")
+    )
+
+
+def test_offline_first_try_validity_of_a_single_situation_is_compared():
+    """Finding 1 of the report: ``o-review`` going from 0/5 to 5/5 must be reported."""
+    saved = json.loads(usability_results.baseline_text(_results_of_two_runs()))
+    later = json.loads(json.dumps(saved))
+    saved["situations"]["o-review"] |= {"attempted": 5, "act_valid_first_try": 0}
+    later["situations"]["o-review"] |= {"attempted": 5, "act_valid_first_try": 5}
+    lines = usability_results.compare(saved, later)
+    assert any("o-review act_valid_first_try: 0/5 -> 5/5" in line for line in lines)
+
+
+def _results_of_two_runs() -> dict:
+    """``build_results`` on two made-up runs, one right and one wrong, with nothing else."""
+
+    def run(repeat: int, outcome: str) -> dict:
+        row = usability_probe.Run("o-review", repeat, outcome, ["task.review"]).to_dict()
+        row |= {"act": "task.review", "act_valid": outcome == "right", "act_attempts": 1}
+        return row
+
+    sizes = {"skill:review": {"hash": "abc", "bytes": 10, "tokens": 3}}
+    return build_results(
+        MODEL,
+        harness.SHIPPED,
+        "shipped",
+        [run(0, "right"), run(1, "wrong_act")],
+        sizes,
+        [],
+        [],
+        0.0,
+    )
+
+
 def test_offline_fisher_separates_only_what_five_repeats_can():
     assert usability_results.fisher_p(0, 5, 5, 5) < 0.01
     assert usability_results.fisher_p(3, 5, 5, 5) > 0.4
 
 
+@pytest.mark.model
 @pytest.mark.skipif(not harness.KEY, reason="OPENROUTER_API_KEY is not set")
 def test_measure_usability(capsys):
     harness.hermes_sanitizers()  # fails loudly without IDE_HERMES_SRC
