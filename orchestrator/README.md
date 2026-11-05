@@ -26,7 +26,9 @@ Hermes distribution shell:
 Seventeen tools, each with actions: `goal`, `task`, `directive`, `claim`, `experiment`,
 `version`, `upload`, `submit`, `settings`, `ui`, `workspace`, `xp`, `platform`, `forum_post`,
 `wiki_edit`, `softmax_api`, `github`. `SOUL.md` lists their actions; the
-`briefing` prompt section shows the state of the active Coworld at the start of every turn.
+`briefing` prompt section is a snapshot of the active Coworld's state, written when Hermes builds
+the Session's prompt and then replayed with it (`core/src/research_core/plugin/briefing.py` says
+what renders it again).
 
 ## Install
 

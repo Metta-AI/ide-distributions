@@ -286,6 +286,18 @@ def test_workspace_status_capabilities_champion_and_window(tmp_path):
     assert "User identity: available" in briefing.render(with_user, "c", role="orchestrator")
 
 
+def test_the_player_id_comes_from_the_environment_or_the_login_check(tmp_path):
+    ctx = make_ctx(tmp_path)
+    assert "Your Player: id not known yet; platform.results gives it" in briefing.render(
+        ctx, "chat1", now=NOW
+    )
+    ctx.wstore.set_meta("player_id", "ply_checked")
+    assert "Your Player: id ply_checked\n" in briefing.render(ctx, "chat1", now=NOW)
+
+    ctx = make_ctx(tmp_path, SOFTMAX_PLAYER_ID="ply_env")
+    assert "Your Player: id ply_env\n" in briefing.render(ctx, "chat1", now=NOW)
+
+
 def test_no_active_coworld_renders_the_workspace_status_only(tmp_path):
     ctx = make_ctx(tmp_path, coworld=False)
     text = briefing.render(ctx, "chat1", role="orchestrator", now=NOW)

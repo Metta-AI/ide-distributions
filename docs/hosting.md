@@ -114,7 +114,8 @@ The Hermes behaviour this depends on is listed in the module's docstring and exe
 | `IDE_WORKSPACE` | hosting | The one workspace root of the sandbox, identical for every profile. It holds the workspace environment, the stores and one folder per Coworld; it must live on the durable, backed-up volume. |
 | `IDE_WORKSPACE_ENV` | hosting (optional) | A prebuilt workspace environment. |
 | `IDE_RESEARCHER_PROFILES` | hosting | Comma-separated Researcher profile names (`researcher`, or `researcher-1,researcher-2`). |
-| `SOFTMAX_PLAYER_ID`, `SOFTMAX_PLAYER_CREDENTIAL` | hosting | The Player the workspace acts as, selected at workspace creation, and its credential. Both profiles read them. |
+| `SOFTMAX_PLAYER_CREDENTIAL` | hosting | The credential of the Player the workspace acts as, selected at workspace creation. Both profiles read it. |
+| `SOFTMAX_PLAYER_ID` | optional; `image/runtime.py` does not set it | That Player's id. Without it, the tools ask the platform (`GET /whoami`), and the watcher's login check stores the answer for the briefing and the environment guide. |
 | `SOFTMAX_USER_CREDENTIAL` | hosting, Orchestrator only | The user's User identity token (design B.16). Optional until provisioned; without it User-identity reads and writes are reported unavailable. It is deliberately not passed to terminal commands. |
 | `COGAMES_API_URL` | hosting | Softmax API server. |
 | `API_SERVER_KEY`, `API_SERVER_HOST`, `API_SERVER_PORT` | hosting | The Hermes API server. The watcher reads them from the Orchestrator profile's `.env`. **Every profile must carry the same `API_SERVER_KEY`**: Hermes authenticates `/p/<profile>/v1/runs` with that profile's key. |

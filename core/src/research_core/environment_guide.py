@@ -51,7 +51,7 @@ def render(ctx: ToolContext) -> str:
     lines += _commits(env, checkout)
     lines += _environments(ws.venv_python, ws.tools)
     lines += _paths(checkout, coworld)
-    lines += _credentials(env)
+    lines += _credentials(env, ctx.player_id())
     lines += _clis(ws.venv)
     lines += _reaching_the_user(ctx.role)
     lines += _sleep_and_wake()
@@ -74,7 +74,9 @@ def _where_you_are(root: Path, coworld) -> list[str]:
             "  - `code/`: the policy repository (git; `main` holds the policy and `mixin/`).",
             "  - `source/`: the Coworld's public repository at the release-pinned commit.",
             "  - `worktrees/task-<n>/` and `worktrees/orch-<n>/`: one worktree per piece of work.",
-            "  - `documents/`: your own notes and files (command logs under `documents/logs/`).",
+            "  - `documents/`: your own notes and files (command logs under `documents/logs/`). "
+            "It is in no git repository, so nothing there is committed; it stays through sleep "
+            "and restarts.",
         ]
     lines.append("")
     return lines
@@ -123,6 +125,14 @@ def _paths(checkout: Path | None, coworld) -> list[str]:
         f"- Read-only: the profile source checkout `{checkout or '(unknown)'}` (plugin, store "
         "library and schema, tools, prompts, cron definitions). Report a bug there instead of "
         "patching it; `config.yaml` is writable but `prepare.py` re-applies the protected keys.",
+        "- Shipped skills live in that checkout, whatever Hermes's skill index says about "
+        "fixing them. Where it is read-only, as in hosting, `skill_manage` `patch`, `write_file` "
+        "and `delete` on one fail with a file system error and change nothing. On a writable "
+        "checkout (a local install) they change the shipped files for every profile using it: "
+        "do not. `create` under a shipped name is refused. Record a fix as a claim tagged "
+        "`lesson` and report the fault; game steps go in a mixin skill, committed on a branch. "
+        "`create` with a new name makes a skill in this profile's folder only, which `patch` "
+        "can change; it stays through sleep, restarts and releases.",
         "- Records (Goals, Tasks, Claims, Experiments, Versions, settings) live in the store and "
         "change only through the record tools. Direct edits are detected and reported.",
         "",
@@ -130,15 +140,15 @@ def _paths(checkout: Path | None, coworld) -> list[str]:
     return lines
 
 
-def _credentials(env: Mapping[str, str]) -> list[str]:
-    player_id = env.get("SOFTMAX_PLAYER_ID") or "unknown"
+def _credentials(env: Mapping[str, str], player_id: str | None) -> list[str]:
     player = "present" if env.get("SOFTMAX_PLAYER_CREDENTIAL") else "absent"
     user = "provisioned" if env.get("SOFTMAX_USER_CREDENTIAL") else "not provisioned"
     api = env.get("COGAMES_API_URL") or "https://softmax.com/api"
     return [
         "## Credentials and identities (names only; values are never shown)",
         "",
-        f"- Player identity: `{player_id}` (the workspace's Player); credential {player}.",
+        f"- Player identity: `{player_id or 'unknown'}` (the workspace's Player); "
+        f"credential {player}.",
         f"- User identity (the user's own account, Orchestrator only): {user}."
         + (
             ""

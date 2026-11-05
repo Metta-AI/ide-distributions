@@ -72,6 +72,15 @@ def test_doctor_compares_api_keys_across_profiles(tmp_path, workspace_env, ctx_f
     assert "key-one" not in json.dumps(result) and "key-two" not in json.dumps(result)
 
 
+def test_environment_guide_falls_back_to_the_player_id_the_login_check_stored(
+    workspace_env, ctx_factory
+):
+    ctx = ctx_factory()
+    assert "Player identity: `unknown`" in environment_guide.render(ctx)
+    ctx.wstore.set_meta("player_id", "ply_checked")
+    assert "Player identity: `ply_checked`" in environment_guide.render(ctx)
+
+
 def test_environment_guide_names_the_workspace_and_player_but_no_secret(workspace_env, ctx_factory):
     ctx_factory()
     env = {
@@ -97,6 +106,8 @@ def test_environment_guide_names_the_workspace_and_player_but_no_secret(workspac
     )
     assert "every 60 seconds" in text and "/scratch/tmp" in text
     assert "No capability check is recorded yet" in text
+    assert "in no git repository" in text and "`skill_manage` `patch`" in text
+
 
     result = json.loads(run_tool("workspace", {"action": "environment_guide"}, ctx))
     assert result["ok"] is True and str(ctx.workspace.root) in result["guide"]

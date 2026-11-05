@@ -269,6 +269,10 @@ def tool(spec: ToolSpec) -> ToolSpec:
     return register(spec)
 
 
+# Where the watcher's login check keeps the Player id (workspace store meta).
+PLAYER_ID_META = "player_id"
+
+
 @dataclass
 class ToolContext:
     role: Role
@@ -292,6 +296,12 @@ class ToolContext:
         from research_core.store.db import Store
 
         return Store.open(self.workspace.store_path, kind="workspace")
+
+    def player_id(self) -> str | None:
+        """The workspace's Player id: ``SOFTMAX_PLAYER_ID`` when set, else what the last login
+        check stored. The hosted image does not set the variable, and code in Hermes's
+        interpreter cannot ask the platform."""
+        return self.env.get("SOFTMAX_PLAYER_ID") or self.wstore.get_meta(PLAYER_ID_META)
 
     def coworld(self) -> Coworld:
         from research_core.store import sessions
