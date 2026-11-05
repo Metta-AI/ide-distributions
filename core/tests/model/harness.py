@@ -2,7 +2,7 @@
 
 The tests call OpenRouter directly, never through Hermes, so they measure what a model and an
 OpenRouter host make of the tool schemas, not Hermes's own parsing of the reply. The request is
-shaped as Hermes v0.21.6 shapes it on its OpenRouter provider profile: no ``temperature``
+shaped as Hermes v0.22.6 shapes it on its OpenRouter provider profile: no ``temperature``
 (``agent/transports/chat_completions.py`` ``_base_kwargs`` sends one only for a profile's fixed
 temperature, and OpenRouter's has none), and ``reasoning: {enabled: true, effort: medium}`` for a
 model whose OpenRouter catalog entry lists ``reasoning`` among its supported parameters when the
@@ -272,7 +272,7 @@ def hermes_sanitizers() -> tuple[ModuleType, ModuleType]:
     if not source:
         raise RuntimeError(
             "IDE_HERMES_SRC is not set: full-toolset mode sends schemas through Hermes's own "
-            "sanitizers; point it at a Hermes v0.21.6 source tree"
+            "sanitizers; point it at the source tree of the Hermes that image/Dockerfile pins"
         )
     root = Path(source)
     return (

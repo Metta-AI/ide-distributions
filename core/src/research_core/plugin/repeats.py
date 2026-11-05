@@ -1,13 +1,14 @@
 """Repeated failures inside one turn: a firmer refusal, and a notice when Hermes halts the turn.
 
 Hermes's loop guard (``tool_loop_guardrails``, hard stop on in the shipped configs) ends a turn
-with ``turn_exit_reason = "guardrail_halt"``. In Hermes v0.21.6 the hard stop halts after 5
-failures of one tool (``same_tool_failure``; never for the failure-tolerant tools below), blocks
-after 5 identical failing calls (Hermes's default ``exact_failure``), and halts after 10
-identical calls with identical results or 10 laps of an identical call cycle, for any tool but
-pollers (``idempotent_no_progress``, raised from Hermes's 5). So a halt does not always mean a
-tool failed. The runs API reports such a run ``completed``, and nobody reads a wake's final
-reply, so two hooks fill the gaps:
+with ``turn_exit_reason = "guardrail_halt"``. In Hermes v0.22.6 the shipped hard stop halts after
+5 failures of one tool (``same_tool_failure``, lowered from Hermes's 8; never for the
+failure-tolerant tools below), blocks after 5 identical failing calls (Hermes's default
+``exact_failure``), and halts after 10 identical calls with identical results or 10 laps of an
+identical call cycle, for any tool but pollers (``idempotent_no_progress``, raised from Hermes's
+5). A block ends the turn too, and so does Hermes's per-turn cap of 50 ``web_search`` calls or
+subagent spawns. So a halt does not always mean a tool failed. The runs API reports such a run
+``completed``, and nobody reads a wake's final reply, so two hooks fill the gaps:
 
 * ``transform_tool_result``: the second time the same call (tool and arguments) is refused in a
   turn, its result is replaced by a short refusal that names what to supply and how to get out
@@ -41,7 +42,7 @@ log = logging.getLogger(__name__)
 
 HALT_REASON = "guardrail_halt"
 # Tools whose failures Hermes's same_tool_failure halt never counts (a red test run is normal
-# work). Copied from Hermes v0.21.6 agent/tool_guardrails.py FAILURE_TOLERANT_TOOL_NAMES: the
+# work). Copied from Hermes v0.22.6 agent/tool_guardrails.py FAILURE_TOLERANT_TOOL_NAMES: the
 # plugin cannot import Hermes.
 FAILURE_TOLERANT_TOOL_NAMES = frozenset(
     {"terminal", "execute_code", "process_manage", "process", "browser_navigate", "web_extract"}

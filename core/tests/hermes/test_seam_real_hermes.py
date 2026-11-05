@@ -19,13 +19,13 @@ The same harness is the local end-to-end setup of ``docs/local-end-to-end.md``. 
 off by default so CI is unchanged:
 
 * ``IDE_E2E_KEEP=1`` keeps the gateway and the seam server up after the scenario (pass or
-  fail), prints the URLs and ready-to-paste ``curl`` lines, ticks the watcher every minute as
-  the cron job would, and stops both on Ctrl-C;
+  fail), prints the URLs and ready-to-paste ``curl`` lines, prints the coordinator's health every
+  minute, and stops both on Ctrl-C;
 * ``IDE_E2E_SCENARIO=0`` sends no request (with ``IDE_E2E_KEEP=1``: an empty workspace to talk
   to);
 * ``IDE_E2E_PLATFORM=real`` runs against the real Softmax platform with the caller's
   ``SOFTMAX_PLAYER_ID``, ``SOFTMAX_PLAYER_CREDENTIAL``, ``COGAMES_API_URL`` and
-  ``IDE_DEFAULT_COWORLD`` written into every ``.env``; the scenario then waits for a submission
+  ``IDE_E2E_COWORLD`` written into every ``.env``; the scenario then waits for a submission
   by that Player that did not exist when it started;
 * ``IDE_E2E_TIMEOUT_S`` replaces the scenario timeout (a real build takes longer than the fake).
 """

@@ -57,7 +57,7 @@ uv run python tools/build_prompts.py --check && uv run python tools/check_prompt
 
 The fake platform (`IDE_PLATFORM=fake`) needs no network; the `hermes`-marked tests install the
 profiles into a temporary Hermes home; the dispatch spike and the real acceptance run also need
-an OpenRouter key. Hermes v0.21.6 needs Python 3.14 for its own dependencies, so a local
+an OpenRouter key. The pinned Hermes (v0.22.6) runs on Python 3.14 in the image, so a local
 `HERMES_BIN` is easiest to get from an isolated environment of the Hermes checkout
 (`UV_PROJECT_ENVIRONMENT=<somewhere> uv sync --frozen --no-dev --extra messaging`, then
 `<somewhere>/bin/hermes`); the `messaging` extra brings `aiohttp`, without which the gateway
@@ -88,7 +88,7 @@ it is not used for recovery. Fake faults: `lookup=503|403|unavailable|not_found`
 
 - **Tool:** a module under `tools/` with `SPEC = tool(ToolSpec(...))`, listed in
   `catalog.TOOL_MODULES`; in-process tools stay stdlib only; `core/tests/test_tool_budget.py`
-  pins the role sets (18 Orchestrator, 14 Researcher) and the executor table; run
+  pins the role sets (17 Orchestrator, 14 Researcher) and the executor table; run
   `uv run python tools/build_prompts.py --write --manifests`. Describe the tool, every field
   and every key, shortly: every request carries the whole list. Build field schemas with
   `tools/_args.py`: an object field lists its keys (`obj`, `objects`; `free_object` only for

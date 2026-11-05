@@ -60,7 +60,7 @@ CATALOG = [
 
 class FakeHermesConfig:
     """``hermes config set <key> <value>`` against ``$HERMES_HOME/config.yaml``, as Hermes
-    v0.21.6 does it: a JSON list or mapping literal is parsed, any other text kept verbatim."""
+    v0.22.6 does it: a JSON list or mapping literal is parsed, any other text kept verbatim."""
 
     def __init__(self, fail_on: str | None = None) -> None:
         self.calls: list[list[str]] = []
