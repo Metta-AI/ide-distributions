@@ -254,7 +254,7 @@ registered distribution tools. Do not add their counts to `workspace_tool` count
 `workspace_turn.elapsed_ms` spans `pre_llm_hook_to_session_end`, after session/prompt setup.
 Model and tool busy fields are clipped interval unions. `accounted_busy_ms` is their combined
 union; `overlap_ms` records double coverage; `unaccounted_ms` is the remaining wall time.
-`accounted_busy_ms + unaccounted_ms = elapsed_ms`, within millisecond rounding. Incomplete
+`accounted_busy_ms + unaccounted_ms = elapsed_ms`, within independent 0.001 ms rounding. Incomplete
 callback pairs set `accounting_complete: false` and explicit missing counts. Exclude those
 component estimates from complete-accounting distributions.
 

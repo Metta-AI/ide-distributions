@@ -10,6 +10,7 @@ import os
 import subprocess
 import sys
 from dataclasses import dataclass
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -568,6 +569,10 @@ finally:
     assert tools[0]["started_at"] is not None
     assert turns[0]["accounting_complete"]
     assert turns[0]["model_count"] == 3 and turns[0]["tool_count"] == 1
-    assert turns[0]["elapsed_ms"] == pytest.approx(
-        turns[0]["accounted_busy_ms"] + turns[0]["unaccounted_ms"], abs=0.001
-    )
+    # Each field is independently rounded to 0.001 ms. Compare the serialized
+    # decimals exactly: binary addition can put an allowed 0.001 delta above its bound.
+    assert abs(
+        Decimal(str(turns[0]["elapsed_ms"]))
+        - Decimal(str(turns[0]["accounted_busy_ms"]))
+        - Decimal(str(turns[0]["unaccounted_ms"]))
+    ) <= Decimal("0.001")
