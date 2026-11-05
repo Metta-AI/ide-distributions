@@ -329,9 +329,9 @@ uv run python tools/local_stack.py down               # stop the services and th
 uv run python tools/local_stack.py down --reset       # also remove the container and the volume
 ```
 
-`up` on an existing container stops the seam and the gateway, runs `prepare.py` for both profiles
-and starts them again (36 to 39 seconds). It does not reinstall the profiles, so a changed
-`SOUL.md` or profile file needs `up --reset`, which starts over. `--platform`, `--seam-port` (default 8650) and `--gateway-port` (default 8642, all given
+`up` on an existing container stops the seam and the gateway, runs `hermes profile update` and
+`prepare.py` for both profiles, as a boot of the image does, and starts them again; `up --reset`
+starts over. `--platform`, `--seam-port` (default 8650) and `--gateway-port` (default 8642, all given
 after `up`) and `--name` (default `ide-local`, given before the command; the volume is
 `<name>-stack`) are fixed when the container is created and read back from its labels afterwards.
 The scenario is written for a new workspace: run it once per volume, or `up --reset` first.
@@ -347,7 +347,7 @@ exec`:
 | Step inside the container (`/opt/data/local_stack/bootstrap.sh up`) | In hosting |
 |---|---|
 | Install `uv` into `/opt/data/.local/bin` (the image ships none, CI uses `astral-sh/setup-uv`), which is on the Hermes user's login-shell `PATH`; mark `/src` safe for git (it belongs to your Mac user) | The image has `uv` |
-| Stop any running seam and gateway. `hermes profile install /src/<role> --name <role> --yes` into `HERMES_HOME=/opt/data/host` for both roles; skipped when the profile exists | `hermes profile install`, or `hermes profile update` when the profile exists, from the release checkout |
+| Stop any running seam and gateway. `hermes profile install /src/<role> --name <role> --yes` into `HERMES_HOME=/opt/data/host` for both roles, or `hermes profile update` when the profile exists | The same, from the release checkout |
 | Write `/opt/data/host/.env` and both profiles' `.env`: one random `API_SERVER_KEY` per volume (kept in `/opt/data/local_stack/api_key`), `API_SERVER_HOST=0.0.0.0` in the host home (the gateway binds from there, so the published port reaches it) and `127.0.0.1` in the profiles (where the watcher and the seam read the gateway's address), `GATEWAY_MULTIPLEX_PROFILES=true`, `IDE_WORKSPACE=/opt/data/workspace`, `IDE_PLATFORM`, `IDE_RESEARCHER_PROFILES=researcher`, `SOFTMAX_PLAYER_ID` (`ply_canary` for the fake), `OPENROUTER_API_KEY`, and for the real platform the Player credential, `COGAMES_API_URL` and `IDE_DEFAULT_COWORLD` | The per-profile `.env` hosting writes |
 | `prepare.py --source /src/<role> --hermes /opt/hermes/.venv/bin/hermes` with the image's Python, each with `HERMES_HOME=<profile home>` and that profile's `.env` exported (`as-profile.sh`); the first run builds the workspace environment with `uv sync` into `/opt/data/workspace/tools/venv` (uv's cache and the CPython 3.12 it fetches stay on the volume) | The same script; the environment is prebuilt at image build |
 | Fake platform: build the fakegame fixture repository at `/opt/data/upstream/fakegame_repo` and point the fake's manifest at it (`tools/local_stack/configure_fake_platform.py`, as the real-Hermes test does) | n/a |
@@ -356,7 +356,7 @@ exec`:
 
 Timings on November 4, 2026 (Apple silicon), fresh volume: both profile installs 3 s, the two
 preparations 4 s including the `uv sync`, fixture under a second, gateway ready 4 s after start,
-seam 1 s: 12 s in all. A re-`up` took 36 to 39 seconds.
+seam 1 s: 12 s in all. A re-`up` took 10 to 39 seconds.
 
 ### Where things live in the volume (`ide-local-stack`, mounted at `/opt/data`)
 
@@ -472,9 +472,8 @@ On the real platform `up` never runs the submission scenario on its own, and `sc
 without `--really`, because the scenario uploads and submits the starter policy to a real
 league as your Player. Ask the Orchestrator for what you want through the seam instead; it
 finds Coworlds with `platform.leagues` and `platform.coworld`, and a switch clones the
-Coworld's source repository from the manifest (or from a `source` URL you name). With
-`IDE_DEFAULT_COWORLD=cow_...` in the environment, `prepare.py` registers and activates that
-Coworld on the fresh workspace before the first chat.
+Coworld's source repository from the manifest (or from a `source` URL you name). A Session opened
+with `session_context.coworld` registers that Coworld (`POST /session-open`).
 
 ### What still differs from production
 

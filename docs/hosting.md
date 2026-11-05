@@ -56,8 +56,6 @@ when you call the script). With `IDE_WORKSPACE` unset the workspace defaults to
 6. builds the workspace environment with `uv sync --frozen --no-dev --project <checkout>` into
    `$IDE_WORKSPACE/tools/venv`, or verifies a prebuilt one named by `IDE_WORKSPACE_ENV` against
    the lock's sha256;
-7. on a fresh Orchestrator workspace with `IDE_DEFAULT_COWORLD` set, registers and activates that
-   Coworld so its setup wake runs before the first chat.
 
 `--check` prints what it would change and writes nothing. A first `uv sync` takes minutes, so
 it belongs at image build: `image/Dockerfile` does that and sets `IDE_WORKSPACE_ENV`.
@@ -72,7 +70,7 @@ compaction by the gateway left both stale. A chat could then keep a schema the d
 refuse.
 
 `prepare.py` closes this (`core/src/research_core/frozen_sessions.py`). It hashes what the release
-freezes into a session: the role's tool schemas, `SOUL.md`, the plugin code behind the two prompt
+freezes into a session: the role's tool schemas, the profile's installed `SOUL.md`, the plugin code behind the two prompt
 sections and, for each shipped `SKILL.md`, its path and frontmatter (the prompt's skill index reads nothing
 else, so editing a skill's body does not count). The hash is kept in the profile's `state.db` (`state_meta`, key
 `ide_distribution.agent_surface`). When the hash differs, it runs `hermes sessions refresh-prompts`
@@ -91,10 +89,11 @@ frozen, no session is touched and the cache stays valid.
 - A failed refresh does not stop the boot. `prepare.py`'s summary line says what failed, and the
   next boot tries again. Conversations and stored tools stay as they were; a prompt rebuild may
   already be requested, because the Hermes command commits on its own.
-- Run `prepare.py` with the gateway stopped, as the image and `tools/local_stack.py` do. A turn
-  on a gateway still running the old release stores the old tools as the session's new pin, and
-  since the hash is already recorded, that chat stays on them until a later release changes the
-  hash.
+- Run `prepare.py` with the gateway stopped, as the image and `tools/local_stack.py` do. On a
+  gateway still running the old release, a chat it holds in memory keeps the old tools until the
+  gateway restarts. A chat it has not loaded stores the old tools as its new pin on its next
+  turn, and since the hash is already recorded, it stays on them until a later release changes
+  the hash. Both were measured with the pinned Hermes.
 
 The Hermes behaviour this depends on is listed in the module's docstring and exercised by
 `core/tests/hermes/test_frozen_sessions_real.py`. Run that test when the Hermes image changes.
@@ -105,7 +104,6 @@ The Hermes behaviour this depends on is listed in the module's docstring and exe
 |---|---|---|
 | `IDE_WORKSPACE` | hosting | The one workspace root of the sandbox, identical for every profile. It holds the workspace environment, the stores and one folder per Coworld; it must live on the durable, backed-up volume. |
 | `IDE_WORKSPACE_ENV` | hosting (optional) | A prebuilt workspace environment. |
-| `IDE_DEFAULT_COWORLD` | hosting (optional) | The Coworld a new workspace starts with. |
 | `IDE_RESEARCHER_PROFILES` | hosting | Comma-separated Researcher profile names (`researcher`, or `researcher-1,researcher-2`). |
 | `SOFTMAX_PLAYER_ID`, `SOFTMAX_PLAYER_CREDENTIAL` | hosting | The Player the workspace acts as, selected at workspace creation, and its credential. Both profiles read them. |
 | `SOFTMAX_USER_CREDENTIAL` | hosting, Orchestrator only | The user's User identity token (design B.16). Optional until provisioned; without it User-identity reads and writes are reported unavailable. It is deliberately not passed to terminal commands. |

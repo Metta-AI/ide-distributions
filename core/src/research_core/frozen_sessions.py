@@ -11,9 +11,9 @@ Preparation therefore compares a hash of what this distribution freezes into a s
 hash recorded in the profile's ``state.db``. When they differ it asks every session to rebuild
 both, once. A release that changes neither keeps every session's cache. Preparation runs before
 the gateway on every boot, so a workspace that slept through several releases catches up on its
-first turn, and no agent built from the old release is still in memory. That order matters: a
-turn on a gateway still running the old release would store the old tools as the new pin, and
-with the hash already recorded nothing would clear them.
+first turn, and no agent built from the old release is still in memory. That order matters: on
+a gateway still running the old release, a session it has not loaded stores the old tools as its
+new pin on its next turn, and with the hash already recorded nothing clears them.
 
 What this depends on in Hermes (checked by ``core/tests/hermes/test_frozen_sessions_real.py``):
 
@@ -54,26 +54,28 @@ STATE_DB = "state.db"
 PROMPT_SECTION_MODULES = ("plugin/briefing.py", "plugin/session_context.py", "plugin/register.py")
 
 
-def agent_surface(source: Path) -> str:
-    """A hash of what the distribution folder ``source`` freezes into its sessions.
+def agent_surface(source: Path, profile: Path) -> str:
+    """A hash of what the distribution folder ``source`` freezes into the sessions of ``profile``.
 
-    It covers the role's tool schemas, ``SOUL.md``, the prompt section code and what the prompt's
-    skill index reads from each skill: its path and frontmatter. A content hash and not a git
-    revision: an unrelated commit must not cost every open chat a prompt-cache miss, and a release
-    image has no ``.git``.
+    It covers the role's tool schemas, the prompt section code, what the prompt's skill index reads
+    from each skill (its path and frontmatter) and the profile's installed ``SOUL.md``, the copy
+    Hermes reads, so a hash is never recorded for instructions not yet installed. A content hash
+    and not a git revision: an unrelated commit must not cost every open chat a prompt-cache miss,
+    and a release image has no ``.git``.
     """
     role = source.name
     package = source.parent / "core" / "src" / "research_core"
     schemas = [spec.schema(role) for spec in tools_for(role)]
-    prompt_files = [source / "SOUL.md", *(package / module for module in PROMPT_SECTION_MODULES)]
+    section_files = [package / module for module in PROMPT_SECTION_MODULES]
     skill_files = [
         path
         for skills in (package / "skills" / "common", package / "skills" / role)
         for path in sorted(skills.rglob("SKILL.md"))
     ]
     digest = hashlib.sha256(json.dumps(schemas, sort_keys=True).encode())
+    digest.update((profile / "SOUL.md").read_bytes())
     for path, content in (
-        *((path, path.read_bytes()) for path in prompt_files),
+        *((path, path.read_bytes()) for path in section_files),
         *((path, _frontmatter(path)) for path in skill_files),
     ):
         digest.update(str(path.relative_to(source.parent)).encode())
@@ -94,7 +96,7 @@ def refresh_frozen_sessions(
     if not state_db.exists():
         return []  # no sessions yet; Hermes creates the file with the first one
     try:
-        surface = agent_surface(source)
+        surface = agent_surface(source, profile)
         with closing(sqlite3.connect(state_db)) as connection, connection:
             connection.execute("PRAGMA synchronous=FULL")
             row = connection.execute(

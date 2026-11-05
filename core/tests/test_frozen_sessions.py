@@ -34,7 +34,6 @@ def release(tmp_path) -> Path:
     (skill / "SKILL.md").write_text("---\nname: repair\n---\n")
     source = tmp_path / "release" / "researcher"
     source.mkdir()
-    (source / "SOUL.md").write_text("You are a researcher.\n")
     return source
 
 
@@ -43,6 +42,7 @@ def profile(tmp_path) -> Path:
     """A profile whose one session holds a tool pin."""
     home = tmp_path / "profile"
     home.mkdir()
+    (home / "SOUL.md").write_text("You are a researcher.\n")
     connection = sqlite3.connect(home / "state.db")
     connection.executescript(
         """
@@ -100,7 +100,7 @@ def test_a_new_release_refreshes_once_and_later_boots_keep_the_pin(release, prof
     ]
     assert pin(profile) is None
     assert refresh.calls == 1
-    assert recorded_surface(profile) == agent_surface(release)
+    assert recorded_surface(profile) == agent_surface(release, profile)
 
     # The next turn pins the new tools; a boot of the same release must leave that pin alone.
     set_pin(profile, "new-pin-hash")
@@ -125,7 +125,6 @@ def test_a_commit_that_changes_nothing_frozen_keeps_every_pin(release, profile):
 @pytest.mark.parametrize(
     "frozen_file",
     [
-        "researcher/SOUL.md",
         "core/src/research_core/plugin/briefing.py",
         "core/src/research_core/plugin/session_context.py",
         "core/src/research_core/plugin/register.py",
@@ -142,6 +141,21 @@ def test_a_change_to_a_frozen_file_refreshes(release, profile, frozen_file):
     assert refresh_frozen_sessions(profile, release, refresh)
     assert pin(profile) is None
     assert refresh.calls == 2
+
+
+def test_the_installed_soul_is_what_counts(release, profile):
+    """Hermes reads the profile's copy: a checkout ahead of the profile records nothing new."""
+    refresh = PromptRefresh()
+    refresh_frozen_sessions(profile, release, refresh)
+    set_pin(profile, "new-pin-hash")
+
+    (release / "SOUL.md").write_text("A newer checkout, not installed.\n")
+    assert refresh_frozen_sessions(profile, release, refresh) == []
+    assert pin(profile) == "new-pin-hash"
+
+    (profile / "SOUL.md").write_text("A newer checkout, installed.\n")
+    assert refresh_frozen_sessions(profile, release, refresh)
+    assert pin(profile) is None
 
 
 def test_only_a_skills_frontmatter_is_frozen(release, profile):
@@ -192,7 +206,8 @@ def test_the_hash_is_the_same_in_every_process(tmp_path):
     script = (
         "from pathlib import Path\n"
         "from research_core.frozen_sessions import agent_surface\n"
-        f"print(agent_surface(Path({str(REPO / 'orchestrator')!r})))\n"
+        f"source = Path({str(REPO / 'orchestrator')!r})\n"
+        "print(agent_surface(source, source))\n"
     )
     hashes = {
         subprocess.run(
@@ -219,7 +234,8 @@ def test_the_hash_is_the_same_in_every_process(tmp_path):
 
 
 def test_the_real_release_hash_differs_by_role():
-    assert agent_surface(REPO / "orchestrator") != agent_surface(REPO / "researcher")
+    orchestrator, researcher = REPO / "orchestrator", REPO / "researcher"
+    assert agent_surface(orchestrator, orchestrator) != agent_surface(researcher, researcher)
 
 
 def test_a_failed_prompt_request_leaves_the_session_as_it_was_and_retries(release, profile):
@@ -241,6 +257,7 @@ def test_a_failed_prompt_request_leaves_the_session_as_it_was_and_retries(releas
 def test_a_failure_after_the_prompt_request_records_nothing_and_retries(release, tmp_path):
     home = tmp_path / "no-sessions-table"
     home.mkdir()
+    (home / "SOUL.md").write_text("You are a researcher.\n")
     connection = sqlite3.connect(home / "state.db")
     connection.execute("CREATE TABLE state_meta (key TEXT PRIMARY KEY, value TEXT)")
     connection.close()
@@ -272,6 +289,7 @@ def test_no_failure_of_the_refresh_stops_the_boot(release, profile, failure):
 def test_a_database_without_the_expected_tables_does_not_stop_the_boot(release, tmp_path):
     home = tmp_path / "other-schema"
     home.mkdir()
+    (home / "SOUL.md").write_text("You are a researcher.\n")
     sqlite3.connect(home / "state.db").close()
     refresh = PromptRefresh()
 
@@ -313,6 +331,7 @@ def test_prepare_runs_the_refresh_through_the_hermes_command(tmp_path):
     shutil.copy(REPO / "uv.lock", checkout / "uv.lock")
     home = tmp_path / "profile"
     home.mkdir()
+    (home / "SOUL.md").write_text("You are an Orchestrator.\n")
     connection = sqlite3.connect(home / "state.db")
     connection.executescript(
         """

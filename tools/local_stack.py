@@ -15,8 +15,8 @@ the state on a Docker volume, a multiplexing gateway and ``research serve`` as t
 (``bootstrap.sh`` and ``as-profile.sh``, below) and runs the bootstrap inside the container:
 install ``uv``, install and prepare both profiles, write the ``.env`` files, start the gateway
 and the seam server. On a fresh volume it then runs the acceptance scenario unless
-``--no-scenario`` is given. ``up`` on an existing container restarts the services without
-reinstalling; ``--reset`` removes the container and the volume first.
+``--no-scenario`` is given. ``up`` on an existing container updates the profiles and restarts the
+services; ``--reset`` removes the container and the volume first.
 
 Secrets come from the caller's environment and go into the container only: ``OPENROUTER_API_KEY``
 (required on a fresh volume; later ``up`` runs keep the key already in the ``.env`` files) and,
@@ -846,7 +846,11 @@ write_env_files() {{
 }}
 
 install_profile() {{ # install_profile <role>
-    if [ -d "$HOST_HOME/profiles/$1" ]; then say "profile $1 is installed"; return; fi
+    if [ -d "$HOST_HOME/profiles/$1" ]; then
+        say "updating profile $1 from {SOURCE}/$1"
+        HERMES_HOME=$HOST_HOME "$HERMES" profile update "$1" --yes
+        return
+    fi
     say "installing profile $1 from {SOURCE}/$1"
     HERMES_HOME=$HOST_HOME "$HERMES" profile install "{SOURCE}/$1" --name "$1" --yes
 }}
