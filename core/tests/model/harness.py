@@ -526,7 +526,7 @@ def summary() -> list[str]:
         "other calls first, answered as the tools would (refusal or plausible result). "
         "Prompt tokens: mean of each case's first request. With repeats a cell is valid/judged "
         "and a rate is valid/judged, percent and [95% Wilson interval]. Intervals that do not "
-        "overlap show a real difference; overlapping ones show none at this sample size.",
+        "overlap show a real difference; overlapping ones decide nothing either way.",
         "",
         *rendered,
         "",

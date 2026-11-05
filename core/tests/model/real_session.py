@@ -31,6 +31,7 @@ from __future__ import annotations
 import itertools
 import json
 import os
+import re
 import secrets
 import sqlite3
 import time
@@ -59,6 +60,8 @@ RUN_NUMBERS = itertools.count(100)
 # normal here, so this is wider than the direct tests' limit.
 MAX_DETOURS = 12
 FAKE_PLAYER_ID = "ply_model_tests"
+# How a run's error text gives a host's refusal: the SDK's "Error code: 400", or "HTTP 400".
+REFUSED_REQUEST = re.compile(r"(?:Error code:?|HTTP)\s*(4\d\d)\b")
 GOAL = "G-1"
 TASK = "T-1"  # open, for the Orchestrator's cases
 HELD_TASK = "T-2"  # held by the Researcher's Session
@@ -383,7 +386,9 @@ class RealGateway:
     def _judge_end(self, status, stored: list[dict], result: harness.Result) -> None:
         """A run that ended without the judged call: text, or a host problem."""
         if status.status != "completed":
-            result.outcome = "host_error"
+            http_status = REFUSED_REQUEST.search(status.error or "")
+            refused = http_status and harness._is_rejection(int(http_status[1]))
+            result.outcome = "rejected" if refused else "host_error"
             result.detail = f"run ended {status.status}: {status.error or ''}"[:300]
             return
         last = next((m for m in reversed(stored) if m.get("role") == "assistant"), {})

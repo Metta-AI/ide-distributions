@@ -11,7 +11,7 @@ disagreement that makes a correct call impossible or a shown option useless:
 - a frozen tool or action the role's validator refuses;
 - a field the validator requires that the frozen schema does not declare (every call is refused);
 - a frozen field the validator does not know;
-- a field whose top-level type changed.
+- a field whose top-level type changed, or a frozen enum value the validator refuses.
 
 A new optional field is not reported: every call still passes without it. The frozen list also
 holds Hermes's own tools, so a retired tool of ours cannot be told apart from one of those and
@@ -138,6 +138,12 @@ def _compare_tool(role: catalog.Role, spec: ToolSpec, parameters: dict) -> list[
         old_type, new_type = schema.get("type"), deployed.get(name, {}).get("type")
         if old_type and new_type and old_type != new_type:
             found.append(Drift(spec.name, None, f"{name}: frozen as {old_type}, now {new_type}"))
+        if name != "action" and "enum" in deployed.get(name, {}):
+            refused = [v for v in schema.get("enum", []) if v not in deployed[name]["enum"]]
+            if refused:
+                found.append(
+                    Drift(spec.name, None, f"{name}: frozen values refused now: {refused}")
+                )
     return found
 
 

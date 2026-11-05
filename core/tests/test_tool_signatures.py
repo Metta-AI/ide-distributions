@@ -169,9 +169,9 @@ def is_generated(schema: dict) -> bool:
 
 def _field_problems(label: str, body: str, properties: dict, required) -> tuple[list, list]:
     """(names ``body`` has that ``properties`` lacks, required names it leaves out), going into the
-    keys listed for any field. A closing ``...`` means leaving names out is intended, here."""
+    keys listed for any field. A closing ``...`` allows leaving names out at its own level only."""
     unknown: list[str] = []
-    omitted: list[str] = []
+    inner_omitted: list[str] = []
     named: set[str] = set()
     items = top_level_items(body)
     for item in items:
@@ -181,8 +181,11 @@ def _field_problems(label: str, body: str, properties: dict, required) -> tuple[
         if match is None:
             unknown.append(f"{label}: cannot read {item!r}")
             continue
-        for name in NAME.findall(match[1]):
-            named.add(name)
+        names = NAME.findall(match[1])
+        for name in names:
+            # ``c?`` and ``d | e`` both let a reader leave the name out, so neither supplies it.
+            if len(names) == 1 and "?" not in match[1]:
+                named.add(name)
             if name not in properties:
                 unknown.append(f"{label}: no field {name!r}")
                 continue
@@ -193,11 +196,11 @@ def _field_problems(label: str, body: str, properties: dict, required) -> tuple[
                     f"{label}: {name}", value[1], schema["properties"], schema.get("required", ())
                 )
                 unknown += inner[0]
-                omitted += [f"{name}.{key}" for key in inner[1]]
+                inner_omitted += [f"{name}.{key}" for key in inner[1]]
     if items and items[-1] == FRAGMENT:
-        return unknown, []
-    omitted += [f for f in required if f not in named and not is_generated(properties[f])]
-    return unknown, omitted
+        return unknown, inner_omitted
+    omitted = [f for f in required if f not in named and not is_generated(properties[f])]
+    return unknown, [*inner_omitted, *omitted]
 
 
 def problems_with(signature: Signature) -> tuple[list[str], list[str]]:
@@ -317,6 +320,22 @@ def test_a_required_key_left_out_is_found():
     assert omitted == ["failure.next_step"]
     fragment = "`task.abandon {task, failure: {what_failed, ...}}`"
     assert problems_with(only(fragment)) == ([], [])
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "`claim.write {summary?, body, tags, evidence}`",
+        "`claim.write {summary | tags, body, evidence}`",
+    ],
+)
+def test_a_required_field_shown_as_leavable_counts_as_left_out(text):
+    assert "summary" in problems_with(only(text))[1]
+
+
+def test_an_outer_ellipsis_does_not_excuse_a_complete_inner_object():
+    signature = "`task.abandon {task, failure: {what_failed}, ...}`"
+    assert problems_with(only(signature))[1] == ["failure.next_step"]
 
 
 def test_an_action_the_role_cannot_call_is_found():

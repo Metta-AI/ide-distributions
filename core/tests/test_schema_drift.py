@@ -27,6 +27,13 @@ def drift_tool():
     return module
 
 
+def test_a_frozen_enum_value_the_validator_refuses_is_reported(drift_tool):
+    tools = current_tools()
+    goal = next(t for t in tools if t["function"]["name"] == "goal")
+    goal["function"]["parameters"]["properties"]["status"]["enum"] = ["retired_value"]
+    assert any("retired_value" in str(d) for d in drift_tool.compare(ROLE, tools))
+
+
 def current_tools() -> list[dict]:
     return [{"type": "function", "function": s.schema(ROLE)} for s in catalog.tools_for(ROLE)]
 

@@ -36,7 +36,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from research_core.plugin.repeats import firmer_refusal
-from research_core.store import claims, experiments, tasks
+from research_core.store import claims, experiments, settings, tasks
 from research_core.tools import catalog
 from research_core.tools.base import validate_args
 from tests.model import harness
@@ -316,6 +316,14 @@ def _task_abandon(args: dict, problems: list[str]) -> None:
     problems.extend(tasks._failure_problems(args.get("failure")))
 
 
+def _settings_update(args: dict, problems: list[str]) -> None:
+    found = settings.SETTINGS.get(args.get("key"))
+    if found is None:
+        problems.append(f"unknown setting {args.get('key')!r}")
+    else:
+        problems.extend(settings.validate_value(found, args.get("value")))
+
+
 # The store's own checks for actions whose arguments carry structure (lists of objects, objects,
 # word limits), run with records assumed to exist. Production runs them after validate_args.
 RECORD_CHECKS = {
@@ -323,6 +331,7 @@ RECORD_CHECKS = {
     ("claim", "add_evidence"): _claim_add_evidence,
     ("experiment", "create"): _experiment_create,
     ("task", "abandon"): _task_abandon,
+    ("settings", "update"): _settings_update,
 }
 
 
@@ -374,12 +383,20 @@ def messages(case: Case, schemas: harness.SchemaSet) -> list[dict]:
     return history if case.refused is None else [*history, *refused_history(case, schemas)]
 
 
+def _role_has_action(case: Case, action: str) -> bool:
+    spec = next(s for s in catalog.tools_for(case.role) if s.name == case.tool)
+    return any(known.name == action for known in spec.actions_for(case.role))
+
+
 def is_judged(case: Case, tool: str, args: dict) -> bool:
-    """A call to the expected tool counts unless it is a read, or a Researcher's first step of
-    taking the Task: no action, or a write action."""
+    """A call to the expected tool counts unless it is a read that tool has, or a Researcher's
+    first step of taking the Task: no action, an action it does not have, or a write action."""
+    if tool != case.tool:
+        return False
     action = args.get("action")
-    taking_the_task = case.role == "researcher" and (tool, action) == ("task", "claim")
-    return tool == case.tool and action not in READ_ACTIONS and not taking_the_task
+    if case.role == "researcher" and (tool, action) == ("task", "claim"):
+        return False
+    return not (action in READ_ACTIONS and _role_has_action(case, action))
 
 
 def judge(case: Case, call: harness.Call, args: dict) -> tuple[str, str]:

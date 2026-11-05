@@ -300,6 +300,37 @@ def test_a_valid_call_stays_valid_when_the_run_has_already_ended(status, monkeyp
     assert gateway.run_case("m", CLAIM_WRITE).outcome == "valid"
 
 
+def test_a_read_action_the_tool_does_not_have_is_judged(script):
+    result = run_case_of(script, CLAIM_WRITE, {"action": "workers"})
+    assert result.outcome == "invalid" and "'workers' instead of write" in result.detail
+
+
+@pytest.mark.parametrize(
+    ("args", "problem"),
+    [
+        ({"key": "max_researchers", "cites": "m-40"}, "cannot be null"),
+        ({"key": "max_researchers", "value": "two", "cites": "m-40"}, "must be an int"),
+        ({"key": "no_such_setting", "value": 2, "cites": "m-40"}, "unknown setting"),
+    ],
+)
+def test_a_settings_update_the_store_refuses_is_invalid(args, problem):
+    case = Case("orchestrator", "settings", "update", "Set it.")
+    outcome, detail = judged({"action": "update", **args}, case)
+    assert outcome == "invalid" and problem in detail
+
+
+def test_a_real_run_refused_by_the_host_counts_and_an_outage_does_not():
+    gateway = RealGateway(Path("/"), Path("h"), "k", "m")
+    for error, outcome in (
+        ("Error code: 400 - bad schema", "rejected"),
+        ("HTTP 503", "host_error"),
+    ):
+        result = harness.Result("m", "h", "c", "wrong_tool")
+        ended = RunStatus("r", "failed", "s", None, error, terminal=True)
+        gateway._judge_end(ended, [], result)
+        assert result.outcome == outcome
+
+
 def test_an_orchestrators_task_claim_is_judged_not_excused(script):
     case = Case("orchestrator", "task", "create", "Create a Task.")
     assert run_case_of(script, case, {"action": "claim", "task": "T-5"}).outcome == "invalid"
