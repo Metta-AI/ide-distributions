@@ -62,7 +62,7 @@ from typing import Any, Protocol
 from research_core import prepare
 from research_core.plugin.inference_hook import MAX_RESPONSE_TOKENS
 from research_core.tools import catalog
-from research_core.tools.base import ToolContext, run_tool
+from research_core.tools.base import ToolContext, run_tool, validate_args
 from research_core.tools.catalog import Role
 
 KEY = os.environ.get("OPENROUTER_API_KEY")
@@ -241,6 +241,15 @@ class SchemaSet(Protocol):
         (a recovery case's history, and the answer to a refused call before the judged one)."""
 
 
+def own_tool_problems(role: Role, name: str, args: dict) -> list[str]:
+    """What an action's own tool refuses in a call: it is stricter than the grouped call the judging
+    reads, which drops another action's empty fields and takes a field named action."""
+    spec = catalog.TOOLS.get(name)
+    if spec is None or spec.split_from is None:
+        return []
+    return validate_args(spec, role, args)[1]
+
+
 class ShippedSchemas:
     """The schemas the profile plugin registers today (``ToolSpec.schema``)."""
 
@@ -251,13 +260,12 @@ class ShippedSchemas:
 
     def canonical(self, role: Role, name: str, args: dict) -> tuple[str, dict]:
         """A call to an action's own tool reads as the grouped tool and action, for the judging.
-        One naming an action stays as it is: production refuses it, so it must not be judged valid.
-        """
+        :func:`own_tool_problems` says what production's flat tool refuses in it."""
         spec = catalog.TOOLS.get(name)
-        if spec is None or spec.split_from is None or "action" in args:
+        if spec is None or spec.split_from is None:
             return name, args
         tool, action = spec.split_from
-        return tool, {"action": action, **args}
+        return tool, {**args, "action": action}
 
     def outgoing(self, role: Role, tool: str, args: dict) -> tuple[str, dict]:
         own_tool = catalog.TOOLS.get(f"{tool}_{args.get('action')}")

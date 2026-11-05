@@ -438,6 +438,9 @@ def judge(case: Case, call: harness.Call, args: dict) -> tuple[str, str]:
     """The outcome of the judged call, and what production would refuse."""
     if call.arguments is None:
         return "invalid", f"arguments are not a JSON object: {call.raw[:200]}"
+    refused = harness.own_tool_problems(case.role, call.name, call.arguments)
+    if refused:
+        return "invalid", f"{'; '.join(refused)}; sent {sorted(call.arguments)}"
     if args.get("action") not in (None, case.action):
         return "invalid", f"action {args['action']!r} instead of {case.action}; sent {sorted(args)}"
     spec = next(s for s in catalog.tools_for(case.role) if s.name == case.tool)

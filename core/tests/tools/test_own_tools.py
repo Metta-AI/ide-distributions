@@ -144,8 +144,14 @@ def test_own_tool_text_stands_alone():
             assert "action" not in text.lower(), (spec.name, text)
 
 
-def test_the_model_tests_do_not_judge_a_flat_call_naming_an_action_as_valid():
-    schemas = harness.ShippedSchemas()
-    assert schemas.canonical("researcher", "task_ask", {"task": "T-1"})[0] == "task"
-    named = {"action": "release", "task": "T-1"}
-    assert schemas.canonical("researcher", "task_ask", named) == ("task_ask", named)
+@pytest.mark.parametrize("extra", [{"action": "ask"}, {"question_id": None}])
+def test_the_model_tests_see_what_a_flat_tool_refuses(extra):
+    args = {"task": "T-1", "question": "Which?", **extra}
+    assert harness.own_tool_problems("researcher", "task_ask", args)
+    assert not harness.own_tool_problems("researcher", "task_ask", {"task": "T-1", "question": "?"})
+    assert harness.ShippedSchemas().canonical("researcher", "task_ask", args)[0] == "task"
+
+
+def test_a_flat_refusal_lists_action_among_what_it_received(ctx_factory):
+    refused = json.loads(run_tool("task_ask", {"action": "ask"}, ctx_factory("researcher")))
+    assert refused["context"]["received"] == ["action"]

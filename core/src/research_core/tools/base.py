@@ -529,10 +529,10 @@ def argument_error(
     fix spelled out, so the summary names what this call sent and the payload carries the usage.
     A call naming an action that has its own tool is shown how to call that tool.
     """
+    received = sorted(k for k in args if k != "action" or spec.actions is None)
     selected = spec.action(action) if action else None
     if selected is not None and selected.own_tool:
         spec, action = TOOLS[f"{spec.name}_{action}"], None
-    received = sorted(k for k in args if k != "action")
     label = f"{spec.name} {action}" if action else spec.name
     how_to = usage(spec, role, action)
     if "example" in how_to:
