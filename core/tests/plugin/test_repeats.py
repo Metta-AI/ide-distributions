@@ -167,6 +167,23 @@ def test_results_carrying_hermes_cache_markers_are_read():
     assert rewritten["request"]["messages"] == [user, *third]
 
 
+def test_a_result_holding_more_than_loop_guard_notes_is_kept():
+    user = {"role": "user", "content": "record it"}
+    steered = refused_pair("b")
+    steered[1] = {
+        **steered[1],
+        "content": steered[1]["content"] + "\n\n[OUT-OF-BAND USER MESSAGE]\nUse L-8 instead.\n"
+        "[/OUT-OF-BAND USER MESSAGE]",
+    }
+    first, third = refused_pair("a"), refused_pair("c")
+    guarded = refused_pair("d")
+    guarded[1] = {**guarded[1], "content": guarded[1]["content"] + "\n\n[hermes note: stop.]"}
+    rewritten = repeats.without_repeated_refusals(
+        request={"messages": [user, *first, *steered, *third, *guarded]}
+    )
+    assert rewritten["request"]["messages"] == [user, *steered, *guarded]
+
+
 def test_a_request_without_repeats_is_left_alone():
     success = [
         {

@@ -12,9 +12,9 @@ subagent spawns. So a halt does not always mean a tool failed. The runs API repo
 
 * ``without_repeated_refusals`` (``llm_request`` middleware): a model shown the same refused call
   several times tends to send it again, whatever the refusal says. So each request keeps only the
-  latest of identical refused calls (a response with one call; a batch is left alone). Only the
-  request changes: the stored history keeps them all,
-  and Hermes's guard still counts them. When a call is refused again, the provider's cache misses
+  latest of identical refused calls (a response with one call and no text added to its result but
+  loop guard notes; others are left alone). Only the request changes: the stored history keeps
+  them all, and Hermes's guard still counts them. When a call is refused again, the provider's cache misses
   once from where the earlier copy was. Measured on Kimi K3.1 Pro on 2026-11-04 (README, "Develop
   and test").
 * ``transform_tool_result``: the second time the same call (tool and arguments) is refused in a
@@ -54,6 +54,11 @@ FAILURE_TOLERANT_TOOL_NAMES = frozenset(
     {"terminal", "execute_code", "process_manage", "process", "browser_navigate", "web_extract"}
 )
 _REQUIRED = re.compile(r"^([\w.]+) is required\b")
+# What Hermes's loop guard appends to a result, about the repeat itself. Anything else after a
+# refusal (a user's mid-turn message, a budget warning, a plugin's notice) is sent only there.
+_ONLY_GUARD_NOTES = re.compile(
+    r"(?:\s*\[(?:Tool loop warning|Tool loop hard stop|hermes note): [^\n]*\])*\s*"
+)
 # How each role reports a problem it cannot fix itself.
 WAY_OUT: dict[str, str] = {
     "orchestrator": "report the problem with ui.notify",
@@ -120,16 +125,17 @@ def _result_text(content: Any) -> Any:
 
 def _refused_call(messages: list[dict], index: int) -> tuple[str, str] | None:
     """(tool, arguments text) when ``messages[index]`` is a single call whose result, the next
-    message, is a refusal. Hermes sends arguments in one canonical form, so equal text is an
-    identical call."""
+    message, is a refusal with nothing added but loop guard notes. Hermes sends arguments in one
+    canonical form, so equal text is an identical call."""
     calls = messages[index].get("tool_calls") or []
     if len(calls) != 1 or index + 1 == len(messages):
         return None
     result = messages[index + 1]
-    if (
-        result.get("tool_call_id") != calls[0].get("id")
-        or refusal_of(_result_text(result.get("content"))) is None
-    ):
+    text = _result_text(result.get("content"))
+    if result.get("tool_call_id") != calls[0].get("id") or refusal_of(text) is None:
+        return None
+    _, end = json.JSONDecoder().raw_decode(text.lstrip())
+    if not _ONLY_GUARD_NOTES.fullmatch(text.lstrip()[end:]):
         return None
     return calls[0]["function"]["name"], calls[0]["function"]["arguments"]
 
