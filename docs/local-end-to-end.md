@@ -330,8 +330,8 @@ uv run python tools/local_stack.py down --reset       # also remove the containe
 ```
 
 `up` on an existing container stops the seam and the gateway, runs `hermes profile update` and
-`prepare.py` for both profiles, as a boot of the image does, and starts them again; `up --reset`
-starts over. `--platform`, `--seam-port` (default 8650) and `--gateway-port` (default 8642, all given
+`prepare.py` for both profiles, as a boot of the image does, and starts them again. A container
+from an older Hermes digest is replaced first; the volume stays. `up --reset` starts over. `--platform`, `--seam-port` (default 8650) and `--gateway-port` (default 8642, all given
 after `up`) and `--name` (default `ide-local`, given before the command; the volume is
 `<name>-stack`) are fixed when the container is created and read back from its labels afterwards.
 The scenario is written for a new workspace: run it once per volume, or `up --reset` first.

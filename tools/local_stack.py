@@ -547,6 +547,13 @@ def cmd_up(args: argparse.Namespace) -> int:
                 " so setup and runtime both use Hermes UID 10000"
             )
         check_secrets(settings.platform, fresh, args.player)
+        # The volume holds the sessions and the container only the image, so an old pin of Hermes
+        # moves to the current one by replacing the container alone.
+        if docker("inspect", "--format", "{{.Config.Image}}", name).strip() != IMAGE:
+            print(f"replacing container {name} with one from {IMAGE}; the volume stays")
+            docker("rm", "--force", name)
+            create_container(settings)
+            state = "running"
         requested = (args.seam_port, args.gateway_port, args.platform)
         if requested != (settings.seam_port, settings.gateway_port, settings.platform):
             print(
