@@ -249,7 +249,7 @@ SPEC = tool(
                 " lineage: only if the champion is an earlier version of the same policy.",
                 enum=list(AUTO_CHAMPION),
             ),
-            "reason": a.string("Why this Version is submitted now (kept on the champion record)."),
+            "reason": a.string("Why this Version is submitted now."),
             "user_requested": a.boolean(
                 "true when the user asked for this submission: no setting or quality bar"
                 " applies. false (default) for your own initiative."

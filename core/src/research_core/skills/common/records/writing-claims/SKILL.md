@@ -13,7 +13,7 @@ A claim is one finding with typed evidence. Everything you learn that someone wi
 
 - the same finding: `claim_add_evidence {claim, type, ref, stance, note}`; evidence can be added, but a claim's text and tags and its existing links do not change once written, so a changed finding is a new claim that supersedes it;
 - a finding this one replaces: write the new claim, then `claim.retire {claim: C-old, status: superseded, superseded_by: C-new}`;
-- a finding this one contradicts: write yours with the contradicting evidence; the pair shows as contested until one is refuted.
+- a finding this one contradicts: write yours with its own evidence, then add that evidence to the old claim with `stance: contradicts` (`claim_add_evidence`); a claim shows as contested when its newest link contradicts it.
 
 ## Write
 

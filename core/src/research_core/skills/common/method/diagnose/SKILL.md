@@ -5,7 +5,7 @@ description: Use when turning a weakness into testable hypotheses.
 
 # Diagnose
 
-Diagnosis turns a signal with evidence into two to four independent, testable hypotheses, each ready to become an Experiment. Run it after `survey` has decomposed a weakness or `replay-diagnosis` has named a cause. You decide; nobody picks for you.
+Diagnosis turns a signal with evidence into two to four independent, testable hypotheses, each ready to become an Experiment. Run it after `survey` has decomposed a weakness or `replay-diagnosis` has named a cause.
 
 ## Method
 
@@ -15,7 +15,7 @@ Diagnosis turns a signal with evidence into two to four independent, testable hy
 4. **Propose two to four varied hypotheses.** Cover stop (a bad behaviour fires), enable (a good behaviour is absent) and amplify (a working behaviour is unreliable). If refuting one would refute them all, you wrote one hypothesis several times. Each has a mechanism ("X happens because Y, which causes Z"), not a tweak; a lever (the component that drives it, as a tag); a prediction that differs from what happens if it is false, naming the metric that moves; and the evidence it rests on.
 5. **Record them as proposed Experiments.** `experiment_create {summary, goal, hypothesis {statement, if_true, if_false, motivation}, methods, tags: [<lever>, G-n], related_claims}`. A proposed Experiment is the hypothesis record; it stays editable until a Task starts it. Leave `methods.candidate` empty.
 6. **Record the diagnosis as claims** (`writing-claims`): the cause, its evidence and how sure you are. A cause you could not see is a gap, not a zero.
-7. **Propose the work.** `task_propose {type: improvement, goal, title, description, reasoning, experiment: X-n, for_human}` for the best one or two, with why this order and which levers you skipped as refuted. Do not design or run the Experiment in a research Task; the Orchestrator decides what runs.
+7. **Propose the work.** `task_propose {type: improvement, goal, title, description, reasoning, experiment: X-n, for_human}` for the best one or two, with why this order and which levers you skipped as refuted. Do not start or run the Experiment in a research Task; the Orchestrator decides what runs.
 
 ## Failure handling
 

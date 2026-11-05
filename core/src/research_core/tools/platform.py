@@ -556,7 +556,8 @@ SPEC = tool(
             ),
             ActionSpec(
                 "episodes",
-                "Episodes of a policy version, or of a league's active policies; give one of them.",
+                "Episodes of a policy version, or of up to ten of a league's active policies, from "
+                "any league or XP request (truncated when more); give one of them.",
                 {"policy_version": a.string("A policy version id."), "league": LEAGUE},
                 example_fields=("league",),
             ),

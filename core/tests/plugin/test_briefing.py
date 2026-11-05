@@ -242,7 +242,7 @@ def test_workspace_status_capabilities_champion_and_window(tmp_path):
         ),
     )
     ctx.store.set_meta("checks_at", now_iso(lambda: NOW - timedelta(hours=2)))
-    ctx.store.set_meta("credits", json.dumps({"balance": 120, "held": 10}))
+    ctx.store.set_meta("credits", json.dumps({"balance": 120}))
     ctx.store.set_meta("stale_overrides", json.dumps(["task", "claim"]))
     ctx.store.set_meta(
         "league_versions", "The workspace is on g version 0 (cow_0); its leagues run 1"
@@ -269,7 +269,7 @@ def test_workspace_status_capabilities_champion_and_window(tmp_path):
     text = briefing.render(ctx, "chat1", role="orchestrator", now=NOW)
     assert "paused: yes" in text
     assert "watcher heartbeat 3 min ago, work pending" in text
-    assert "credits: 120 (10 held)" in text
+    assert "credits: 120" in text
     assert "CLI versions: coworld installed 1.2.0, lock 1.3.0; lock refreshed 2026-10-27" in text
     assert "softmax-cli" not in text
     assert "Capability check: 2 h ago; 1 of 2 ok" in text
