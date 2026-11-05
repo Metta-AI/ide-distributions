@@ -1,9 +1,9 @@
 # The client contract (version 1)
 
 The profiles own one small contract with clients: the IDE, the site, coplay, and any scripted
-client. It is published here as three JSON Schema files plus this note. The design calls the
-part built so far **the seam** (design §10); the rest of the contract layer (panels, multi-client
-sync, the `agent-context` panel) ships later and extends these files without breaking them.
+client. It is published here as three JSON Schema files plus this note. The design calls it
+**the seam** (design §10); what is still to build is listed at the end and extends these files
+without breaking them.
 
 | File | What it describes |
 |---|---|
@@ -65,7 +65,7 @@ bridge never writes them:
 | Stamp | Who | Where |
 |---|---|---|
 | `client` — the client that opened the Session (`id`, `kind`, `guide`) | bridge | the block; it overrides any `client` the message carried |
-| `coworld` — the active Coworld | bridge | the block; a client showing another Coworld is told so in `problems` |
+| `coworld` — the Session's Coworld | bridge | the block; a client showing another Coworld is told so in `problems` |
 | the changes since this conversation's last turn | turn hook | `[changed since your last turn]` |
 | the unread notices | turn hook | `[notices since your last turn]` |
 
@@ -199,7 +199,7 @@ backend accepts the current one and refuses others in `problems`.
 ## Deferred to the contract layer
 
 Not part of the seam, and not built here: `session-update`, the panel kinds' rendering rules,
-multi-client replay of UI state, the `agent-context` panel's computed parts, relaying live chat
+multi-client replay of UI state, relaying live chat
 tokens, messages reads from the Hermes transcript, and client-supplied guides by reference.
 `ui-state.schema.json` describes `show`, `panels` and `asks`; the `reactions` map the seam
 writes is an addition for the next revision of that file.

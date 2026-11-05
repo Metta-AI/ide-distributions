@@ -1,5 +1,7 @@
 """The tool surface (design C.2, amendment A3.1): counts, roles and executors."""
 
+from pathlib import Path
+
 import pytest
 
 from research_core.tools import catalog
@@ -76,6 +78,15 @@ def test_tool_counts_match_the_design():
     assert names("orchestrator") == ORCHESTRATOR and len(ORCHESTRATOR) == 26
     assert names("researcher") == RESEARCHER and len(RESEARCHER) == 23
     assert len(ORCHESTRATOR) <= catalog.TOOL_BUDGET
+
+
+def test_readmes_state_the_tool_counts():
+    """Hermes registers each tool of an action of its own, so the counts are of the whole list."""
+    repo = Path(__file__).resolve().parents[2]
+    for role, tools in (("orchestrator", ORCHESTRATOR), ("researcher", RESEARCHER)):
+        assert f"{len(tools)} tools, listed in" in (repo / role / "README.md").read_text()
+    core = (repo / "core" / "README.md").read_text()
+    assert f"{len(ORCHESTRATOR)} Orchestrator, {len(RESEARCHER)} Researcher" in core
 
 
 def test_executor_table():

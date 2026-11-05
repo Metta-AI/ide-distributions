@@ -2,7 +2,7 @@
 
 > **Retired.** These notes describe the previous `orchestrator` and `researcher` profiles
 > (the `ide_research_core` package, `RESEARCH_*` variables, `bootstrap.py`), which were removed
-> on October 28, 2026 and rebuilt from
+> on October 29, 2026 and rebuilt from
 > [ide-profile-refactor-2026-10-28-final.html](ide-profile-refactor-2026-10-28-final.html).
 > Nothing below describes the current code; see `core/README.md` and
 > `docs/plans/ide-profile-refactor/` for that. Kept for history.
