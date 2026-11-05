@@ -130,6 +130,25 @@ def test_a_request_keeps_only_the_latest_of_identical_refused_calls():
     assert len(request["messages"]) == 9, "the caller's request is not edited in place"
 
 
+def test_results_carrying_hermes_cache_markers_are_read():
+    """On OpenRouter with Kimi or Claude, Hermes sends the latest results as marked text parts."""
+
+    def marked(pair: list) -> list:
+        text_part = {
+            "type": "text",
+            "text": pair[1]["content"],
+            "cache_control": {"type": "ephemeral"},
+        }
+        return [pair[0], {**pair[1], "content": [text_part]}]
+
+    user = {"role": "user", "content": "record it"}
+    first, second, third = refused_pair("a"), marked(refused_pair("b")), marked(refused_pair("c"))
+    rewritten = repeats.without_repeated_refusals(
+        request={"messages": [user, *first, *second, *third]}
+    )
+    assert rewritten["request"]["messages"] == [user, *third]
+
+
 def test_a_request_without_repeats_is_left_alone():
     success = [
         {
@@ -161,6 +180,9 @@ def test_the_middleware_never_raises():
     broken = {"messages": [{"role": "assistant", "tool_calls": [{"id": "a"}]}, {"content": "{}"}]}
     assert repeats.without_repeated_refusals(request=broken) is None
     assert repeats.without_repeated_refusals(request={"messages": "not a list"}) is None
+    parts = {"role": "tool", "tool_call_id": "a", "content": ["not a text part"]}
+    broken = {"messages": [refused_pair("a")[0], parts]}
+    assert repeats.without_repeated_refusals(request=broken) is None
 
 
 def test_halt_writes_one_notice_naming_the_session_kind_and_tool(workspace):

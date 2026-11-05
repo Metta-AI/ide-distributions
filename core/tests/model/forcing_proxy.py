@@ -6,16 +6,17 @@ OpenRouter base URL, it answers a conversation's first requests itself with the 
 script names, and forwards everything else unchanged. So the refusals are real (the real tool, the
 real hooks, Hermes's real loop guard), the turn is one turn, and the model's next call is real.
 
-What a base URL other than OpenRouter's changes in Hermes (``agent/reasoning_params.py``): it stops
-sending ``reasoning`` and replaying ``reasoning_details``. The proxy puts ``reasoning`` back as
-production sends it; the replayed details stay out, though ``reasoning`` and ``reasoning_content``
-are still replayed. A captured request also had no ``max_tokens``, so the plugin's output cap
-(``bound_output_request``) did not apply; that only changes the credit a request reserves.
+It listens under a name in OpenRouter's domain (``PROXY_HOST``, which the docker command in the
+README points at the container itself), because Hermes shapes a request by its base URL: only for
+OpenRouter does it add cache markers (``agent/agent_runtime_helpers.py``, which turn the last results
+into text parts) and replay ``reasoning_details`` (``agent/reasoning_params.py``). So what the model
+gets is what production sends.
 """
 
 from __future__ import annotations
 
 import json
+import socket
 import threading
 import urllib.error
 import urllib.request
@@ -23,9 +24,8 @@ from collections import Counter
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from tests.model.harness import HERMES_DEFAULT_REASONING
-
 UPSTREAM = "https://openrouter.ai/api/v1"
+PROXY_HOST = "proxy.openrouter.ai"
 FORCED_ID_PREFIX = "call_forced_"
 
 
@@ -49,6 +49,8 @@ class ForcingProxy:
 
     def start(self) -> str:
         proxy = self
+        address = socket.gethostbyname(PROXY_HOST)
+        assert address == "127.0.0.1", f"run with docker's --add-host {PROXY_HOST}:127.0.0.1"
 
         class Handler(BaseHTTPRequestHandler):
             def log_message(self, *_):
@@ -63,7 +65,7 @@ class ForcingProxy:
 
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
-        return f"http://127.0.0.1:{self.server.server_address[1]}/api/v1"
+        return f"http://{PROXY_HOST}:{self.server.server_address[1]}/api/v1"
 
     def stop(self) -> None:
         self.server.shutdown()
@@ -96,7 +98,6 @@ class ForcingProxy:
             if forced is not None:
                 self._answer_with(handler, *forced, body)
                 return
-            raw = json.dumps({**body, "reasoning": HERMES_DEFAULT_REASONING}).encode()
         self._forward(handler, raw)
 
     def _answer_with(

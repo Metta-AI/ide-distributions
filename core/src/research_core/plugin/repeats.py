@@ -13,8 +13,9 @@ subagent spawns. So a halt does not always mean a tool failed. The runs API repo
 * ``without_repeated_refusals`` (``llm_request`` middleware): a model shown the same refused call
   several times tends to send it again, whatever the refusal says. So each request keeps only the
   latest of identical refused calls. Only the request changes: the stored history keeps them all,
-  and Hermes's guard still counts them. Measured on Kimi K3.1 Pro on 2026-11-04 (README, "Develop
-  and test"); changing the refusal's wording made no measurable difference.
+  and Hermes's guard still counts them. When a call is refused again, the provider's cache misses
+  once from where the earlier copy was. Measured on Kimi K3.1 Pro on 2026-11-04 (README, "Develop
+  and test").
 * ``transform_tool_result``: the second time the same call (tool and arguments) is refused in a
   turn, its result is replaced by a short refusal that names what to supply and how to get out
   (report the problem and end the run). The replacement is still a JSON refusal with an
@@ -106,9 +107,16 @@ def firmer_refusal(role: Role, tool_name: str, refusal: dict, count: int) -> str
     )
 
 
+def _result_text(content: Any) -> Any:
+    """A result's text. Hermes sends the last results as text parts carrying its cache markers."""
+    if isinstance(content, list):
+        return "".join(part.get("text", "") for part in content)
+    return content
+
+
 def _refused_call(messages: list[dict], index: int) -> tuple[str, str] | None:
     """(tool, arguments text) when ``messages[index]`` is a single call whose result, the next
-    message, is a refusal. Hermes writes arguments in one compact form, so equal text is an
+    message, is a refusal. Hermes sends arguments in one canonical form, so equal text is an
     identical call."""
     calls = messages[index].get("tool_calls") or []
     if len(calls) != 1 or index + 1 == len(messages):
@@ -116,7 +124,7 @@ def _refused_call(messages: list[dict], index: int) -> tuple[str, str] | None:
     result = messages[index + 1]
     if (
         result.get("tool_call_id") != calls[0].get("id")
-        or refusal_of(result.get("content")) is None
+        or refusal_of(_result_text(result.get("content"))) is None
     ):
         return None
     return calls[0]["function"]["name"], calls[0]["function"]["arguments"]
@@ -124,16 +132,15 @@ def _refused_call(messages: list[dict], index: int) -> tuple[str, str] | None:
 
 def drop_repeated_refusals(messages: list[dict]) -> list[dict]:
     """``messages`` with only the latest of each set of identical refused calls."""
-    latest = {}
-    for index in range(len(messages)):
-        call = _refused_call(messages, index)
-        if call is not None:
-            latest[call] = index
+    latest: dict[tuple[str, str], int] = {}
     dropped: set[int] = set()
     for index in range(len(messages)):
         call = _refused_call(messages, index)
-        if call is not None and latest[call] != index:
-            dropped |= {index, index + 1}
+        if call is None:
+            continue
+        if call in latest:
+            dropped |= {latest[call], latest[call] + 1}
+        latest[call] = index
     return [message for index, message in enumerate(messages) if index not in dropped]
 
 

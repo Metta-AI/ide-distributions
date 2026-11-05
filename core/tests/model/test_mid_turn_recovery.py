@@ -7,6 +7,7 @@ and the real hooks and loop guard answer; the model's next call is real and is j
 
 from __future__ import annotations
 
+import json
 import os
 
 import pytest
@@ -79,6 +80,9 @@ def test_requests_drop_repeats_but_the_stored_history_keeps_them(gateway):
     assert gateway.forcing.requests, "the proxy saw the requests"
     for body in gateway.forcing.requests:
         assert drop_repeated_refusals(body["messages"]) == body["messages"]
+    assert "cache_control" in json.dumps(gateway.forcing.requests[-1]["messages"]), (
+        "Hermes treats the proxy as OpenRouter, so the requests are shaped as in production"
+    )
 
 
 @pytest.mark.parametrize("refusals", RECOVERY_DEPTHS)
