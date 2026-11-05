@@ -369,7 +369,7 @@ def test_apply_profile_config_without_a_hermes_executable(tmp_path, env, monkeyp
 def test_install_toolchains_supports_python_and_reports_the_rest(ctx):
     ran: list[list[str]] = []
 
-    def run(argv, capture_output=True, text=True, check=False):
+    def run(argv, **_):
         ran.append(list(argv))
         return subprocess.CompletedProcess(argv, 0, "", "")
 
@@ -396,7 +396,7 @@ def test_install_toolchains_supports_python_and_reports_the_rest(ctx):
     assert result["problems"][0].startswith("toolchain nim 2.0.8: setup installs only python")
     assert result["problems"][1] == "toolchain python: a version is required"
 
-    def failing(argv, capture_output=True, text=True, check=False):
+    def failing(argv, **_):
         return subprocess.CompletedProcess(argv, 2, "out", "no such python")
 
     failed = coworld_setup.install_toolchains(
@@ -439,3 +439,15 @@ def test_research_coworld_cli(ctx, upstream, env, monkeypatch, capsys):
     assert (
         "not a Coworld id" in json.loads(capsys.readouterr().out.strip().splitlines()[-1])["error"]
     )
+
+
+def test_a_toolchain_install_that_hangs_is_a_problem_not_a_stall(ctx):
+    def hangs(argv, **kwargs):
+        raise subprocess.TimeoutExpired(argv, kwargs["timeout"])
+
+    result = coworld_setup.install_toolchains(
+        ctx.workspace, [{"kind": "python", "version": "3.11"}], run=hangs
+    )
+
+    assert result["toolchains"][0]["status"] == "failed"
+    assert f"took over {coworld_setup.TOOLCHAIN_INSTALL_TIMEOUT_S} seconds" in result["problems"][0]
