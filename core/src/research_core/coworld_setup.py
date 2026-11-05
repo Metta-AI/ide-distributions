@@ -43,6 +43,8 @@ if TYPE_CHECKING:  # pragma: no cover
 SETUP_EVENT = "coworld.setup_needed"
 IMPORT_NOTE = "imported from the Coworld repository"
 SUPPORTED_TOOLCHAINS = ("python",)
+# It runs inside the watcher tick too, so a hung download must not stall every merge and check.
+TOOLCHAIN_INSTALL_TIMEOUT_S = 600
 SKILL_FILE = "SKILL.md"
 UPSTREAM_SHA_FILE = ".upstream-sha"
 CITATIONS_FILE = "source-citations.json"
@@ -431,9 +433,17 @@ def _install_python(version: str, target: Path, run: Runner) -> str | None:
         ["uv", "venv", "--python", version, str(target)],
     ):
         try:
-            done = run(argv, capture_output=True, text=True, check=False)
+            done = run(
+                argv,
+                capture_output=True,
+                text=True,
+                check=False,
+                timeout=TOOLCHAIN_INSTALL_TIMEOUT_S,
+            )
         except FileNotFoundError:
             return "uv not found on PATH; it is needed to install a Python toolchain"
+        except subprocess.TimeoutExpired:
+            return f"`{' '.join(argv)}` took over {TOOLCHAIN_INSTALL_TIMEOUT_S} seconds"
         if done.returncode != 0:
             return (
                 f"`{' '.join(argv)}` failed with exit code {done.returncode}\n"
