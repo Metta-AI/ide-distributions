@@ -94,9 +94,9 @@ def skill_index(role: Role) -> str:
 
 
 def bare_skill_name(name: str) -> str:
-    """``method/scouting`` is the same skill as ``scouting``: Hermes tries the path under each
-    skill folder too."""
-    return name.rsplit("/", 1)[-1]
+    """``method/scouting`` and ``method:scouting`` are the same skill as ``scouting``: Hermes
+    tries the path under each skill folder, and reads ``a:b`` with no plugin ``a`` as ``a/b``."""
+    return name.replace(":", "/").rsplit("/", 1)[-1]
 
 
 def skill_view_result(role: Role, name: str) -> str:
