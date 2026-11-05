@@ -12,11 +12,12 @@ subagent spawns. So a halt does not always mean a tool failed. The runs API repo
 
 * ``without_repeated_refusals`` (``llm_request`` middleware): a model shown the same refused call
   several times tends to send it again, whatever the refusal says. So each request keeps only the
-  latest of identical refused calls (a response with one call and no text added to its result but
-  loop guard notes; others are left alone). Only the request changes: the stored history keeps
-  them all, and Hermes's guard still counts them. When a call is refused again, the provider's
-  cache misses once from where the earlier copy was. Measured on Kimi K3.1 Pro on 2026-11-04
-  (README, "Develop and test").
+  latest of identical refused calls. A copy stays if its response held several calls, if its
+  result holds anything but the refusal and loop guard notes, or if dropping it would leave two
+  user messages in a row. Only the request changes: the stored history keeps them all, and
+  Hermes's guard still counts them. When a call is refused again, the provider's cache misses once
+  from where the earlier copy was. Measured on Kimi K3.1 Pro on 2026-11-04 (README, "Develop and
+  test").
 * ``transform_tool_result``: the second time the same call (tool and arguments) is refused in a
   turn, its result is replaced by a short refusal that names what to supply and how to get out
   (report the problem and end the run). The replacement is still a JSON refusal with an
