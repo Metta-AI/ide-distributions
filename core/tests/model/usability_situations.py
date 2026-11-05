@@ -1209,8 +1209,8 @@ HARD = [
     ),
     chat(
         "hard-directive-reaches-running-task",
-        "From now on, never touch the opening book. This goes for everything, including what is "
-        "already running. This is message m-41.",
+        "From now on, never use more than 30 seeds in an evaluation. This goes for everything, "
+        "including what is already running. This is message m-41.",
         ("task.message",),
         ("goals-and-tasks",),
         before=("directive.add",),
@@ -1519,7 +1519,6 @@ HARD = [
                     "kind": "xp",
                     "detail": "X-5's requests",
                     "ref": ["xreq_1", "xreq_2"],
-                    "operation_id": "wait-1",
                 },
                 ok(
                     record={

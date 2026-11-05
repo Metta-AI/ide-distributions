@@ -108,7 +108,7 @@ class ToolSpec:
             properties["action"] = {
                 "type": "string",
                 "enum": [action.name for action in actions],
-                "description": " ".join(f"{a.name}: {a.description}" for a in actions),
+                "description": " ".join(action_line(a) for a in actions),
             }
             takers: dict[str, list[ActionSpec]] = {}
             for action in actions:
@@ -152,6 +152,16 @@ class ToolSpec:
         if required:
             parameters["required"] = required
         return {"name": self.name, "description": self.description, "parameters": parameters}
+
+
+def action_line(action: ActionSpec) -> str:
+    """One action in the tool's list: its name, the fields it requires, what it does.
+
+    A JSON schema can mark only ``action`` as required when the rest depend on the action, so this
+    puts them where the model chooses the action. Measured on Kimi K3.1 Pro on 2026-11-04.
+    """
+    needs = f" (needs {', '.join(action.required)})" if action.required else ""
+    return f"{action.name}{needs}: {action.description}"
 
 
 def field_description(name: str, taking: list[ActionSpec], action_count: int) -> str:

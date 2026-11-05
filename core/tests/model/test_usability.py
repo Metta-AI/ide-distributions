@@ -463,7 +463,7 @@ class FakeReplies:
         # Without a required field it is refused: nothing happened, and the run goes on.
         (
             [
-                [("task", {"action": "message", "task": "T-1", "text": "x"})],
+                [("task", {"action": "message", "task": "T-1"})],
                 [],
             ],
             "text",

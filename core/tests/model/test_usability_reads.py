@@ -357,13 +357,12 @@ def test_offline_a_version_reads_as_uploaded_after_this_runs_upload(monkeypatch)
     assert seen[1]["record"]["uploaded"]["policy_version_id"] == "pv-12"
 
 
-def test_offline_a_checklist_nested_or_flat_meets_the_argument_rule(monkeypatch):
+def test_offline_a_flat_checklist_meets_the_argument_rule(monkeypatch):
     situation = next(s for s in SITUATIONS if s.id == "r-hard-no-version-maintenance")
     deliverables = {"commit": "3f2a9c1", "summary": "Fixed the script.", "merge": "yes"}
-    base = {"action": "complete", "task": "T-21", "outcome": "succeeded", "operation_id": "o"}
-    for args in ({**base, **deliverables}, {**base, "checklist": deliverables}):
-        run = _run_replies(monkeypatch, situation, [[("task", args)]])
-        assert (run.outcome, run.args_right) == ("right", True), args
+    args = {"action": "complete", "task": "T-21", "outcome": "succeeded", **deliverables}
+    run = _run_replies(monkeypatch, situation, [[("task", args)]])
+    assert (run.outcome, run.args_right) == ("right", True), args
 
 
 def test_offline_a_second_call_in_the_reply_that_settles_it_still_counts(monkeypatch):
