@@ -46,7 +46,7 @@ async def main():
             name="session.open",
             args={"client": {"id": "contract-proof", "kind": "test"}},
         )
-        assert Request.model_validate(operation.model_dump(exclude={"id"})).root
+        assert Request.model_validate(operation.model_dump(exclude={"id", "trace_context"})).root
         async with response(operation, seam, gateway, inference) as result:
             assert result.status_code == 200, await result.aread()
             session = result.json()["session_id"]
