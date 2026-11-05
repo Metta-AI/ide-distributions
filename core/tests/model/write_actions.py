@@ -513,6 +513,10 @@ def run_case(model: str, host: str, case: Case, schemas: harness.SchemaSet) -> h
                 result.reasoning_gaps = gaps_in_reasoning(case, args, reply.reasoning)
                 return result
             result.detours.append(f"{call.name} {call.raw[:120]}")
+            if call.arguments is not None and harness.own_tool_problems(
+                case.role, call.name, call.arguments
+            ):
+                tool, args = call.name, call.arguments  # refused as the flat call it was
             content = answer(case, schemas, tool, None if call.arguments is None else args)
             answers.append({"role": "tool", "tool_call_id": call.id, "content": content})
         history = [*history, reply.message, *answers]

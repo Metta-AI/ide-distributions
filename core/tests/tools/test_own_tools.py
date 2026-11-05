@@ -6,7 +6,7 @@ import pytest
 
 from research_core.tools import catalog
 from research_core.tools.base import run_tool, usage
-from tests.model import harness
+from tests.model import harness, write_actions
 
 
 def tools():
@@ -155,3 +155,10 @@ def test_the_model_tests_see_what_a_flat_tool_refuses(extra):
 def test_a_flat_refusal_lists_action_among_what_it_received(ctx_factory):
     refused = json.loads(run_tool("task_ask", {"action": "ask"}, ctx_factory("researcher")))
     assert refused["context"]["received"] == ["action"]
+
+
+def test_the_model_tests_answer_a_detour_as_the_flat_tool_refuses_it():
+    case = next(c for c in write_actions.CASES if c.tool == "task" and c.role == "researcher")
+    args = {"action": "ask", "task": "T-1", "question": "Which?"}
+    refused = json.loads(write_actions.answer(case, harness.ShippedSchemas(), "task_ask", args))
+    assert "unknown field 'action'" in refused["problems"]
