@@ -39,7 +39,7 @@ hermes profile install ~/ide-distributions/orchestrator --name orchestrator --ye
 
 `prepare.py` records where the shared code lives, creates the stores, re-applies the config
 keys the machinery relies on, points every profile at the active Coworld's skills and code,
-builds the workspace environment under `$IDE_WORKSPACE/tools/venv`, and retires the obsolete watcher cron. Run it again after every `hermes profile update`;
+moves open chats onto a release's changed tools and instructions, builds the workspace environment under `$IDE_WORKSPACE/tools/venv`, and retires the obsolete watcher cron. Run it again after every `hermes profile update`;
 `--check` shows what it would change. `docs/hosting.md` has the full contract.
 
 ## The watcher

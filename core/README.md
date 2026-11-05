@@ -43,6 +43,7 @@ decisions is `docs/plans/ide-profile-refactor/`.
 | `skills/` | The shipped skills: `common/<category>/<skill>/`, `orchestrator/<skill>/`, `researcher/<skill>/`; `prepare.py` points `skills.external_dirs` at them. |
 | `task_types/` | The four Task types with their completion checklists and Researcher instructions. |
 | `prepare.py` | Profile preparation after install or update: core path marker, protected and retired config keys, the active Coworld's skill directories for every profile, shipped values over earlier defaults (not the model settings, but for one Orchestrator migration off `kimi-k3`), stores, the watcher job, the workspace environment, the default Coworld. |
+| `frozen_sessions.py` | Called by `prepare.py`: when a release changes the tool schemas or the instructions, open chats drop their stored copies and take the new ones on their next turn (`docs/hosting.md`, "Open chats after a release"). |
 | `cli.py` | The `research` command; each subcommand module registers itself. |
 
 ## Run the tests
@@ -64,6 +65,8 @@ starts but its API server does not, and the gateway enables that server from the
 `.env`, not from the process environment. `docs/local-end-to-end.md` turns the real acceptance
 run into a local end-to-end setup: the one-command run, an interactive session that stays up
 (`IDE_E2E_KEEP=1`, optionally on the real platform), and the same inside the hosted image.
+`core/tests/hermes/test_frozen_sessions_real.py` needs no key: its docstring has the command that
+runs it inside the pinned Hermes image, so it tests the Hermes version that ships.
 
 ## Upload recovery
 

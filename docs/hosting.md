@@ -49,15 +49,51 @@ when you call the script). With `IDE_WORKSPACE` unset the workspace defaults to
    (Hermes applies a per-model entry over the rules for every model, so route a Kimi model
    differently with an entry under `provider_routing.models`);
 4. retires the Orchestrator's obsolete `watcher` cron job; `research serve` owns scheduling;
-5. builds the workspace environment with `uv sync --frozen --no-dev --project <checkout>` into
+5. moves open chats onto this release's tools and instructions when those changed (see "Open
+   chats after a release");
+6. builds the workspace environment with `uv sync --frozen --no-dev --project <checkout>` into
    `$IDE_WORKSPACE/tools/venv`, or verifies a prebuilt one named by `IDE_WORKSPACE_ENV` against
    the lock's sha256;
-6. on a fresh Orchestrator workspace with `IDE_DEFAULT_COWORLD` set, registers and activates that
+7. on a fresh Orchestrator workspace with `IDE_DEFAULT_COWORLD` set, registers and activates that
    Coworld so its setup wake runs before the first chat.
 
 `--check` prints what it would change and writes nothing. The 300-second budget hosting gives
 the script holds when the workspace environment is prebuilt; a first `uv sync` takes a few
 minutes and should happen at image build (then set `IDE_WORKSPACE_ENV`).
+
+### Open chats after a release
+
+Hermes resends what a session first sent, so the provider's prompt cache stays valid: the tool
+definitions (`sessions.tool_names`) and the system prompt (`sessions.system_prompt_hash`). It
+replaces stored tool definitions only when its own version changes, so a release of this
+repository does not reach an open chat by itself, and compaction does not fix that: a real
+compaction by the gateway left both stale. A chat could then keep a schema the deployed validators
+refuse.
+
+`prepare.py` closes this (`core/src/research_core/frozen_sessions.py`). It hashes what the release
+freezes into a session: the role's tool schemas, `SOUL.md`, the two prompt section modules and
+the shipped `SKILL.md` files. The hash is kept in the profile's `state.db` (`state_meta`, key
+`ide_distribution.agent_surface`). When the hash differs, it runs `hermes sessions refresh-prompts`
+and sets `tool_names` to NULL on every session; each session's next turn sends and stores the
+current tools and a rebuilt prompt, and keeps its conversation. Each chat pays one prompt-cache
+miss, on that turn. When the hash is the same, including after a commit that changes nothing
+frozen, no session is touched and the cache stays valid.
+
+- It needs no manual step and no release coordination. Every boot runs `prepare.py` for each
+  profile before the gateway starts, so each profile's own `state.db` is covered, nothing from
+  the old release is still in memory, and a workspace that slept through several releases catches up
+  at its next wake.
+- The first boot that sees sessions without a recorded hash refreshes them once. That heals
+  chats opened before this existed, and also happens on the second boot of a new workspace, because
+  a new profile has no `state.db` when `prepare.py` first runs.
+- A failed refresh does not stop the boot. `prepare.py`'s summary line says what failed, sessions
+  stay as they were, and the next boot tries again.
+- Run `prepare.py` with the gateway stopped, as the image does. Under a running gateway, a live
+  agent keeps sending the old tools until the gateway restarts, because its plugin code is the old
+  release too.
+
+The Hermes behaviour this depends on is listed in the module's docstring and exercised by
+`core/tests/hermes/test_frozen_sessions_real.py`. Run that test when the Hermes image changes.
 
 ## Environment per profile (`.env`)
 
