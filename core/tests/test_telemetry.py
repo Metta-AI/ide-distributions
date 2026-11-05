@@ -17,6 +17,7 @@ def test_exception_status_never_records_sensitive_exception_text(spans):
 
 
 def test_native_callbacks_keep_concurrent_turns_and_retry_attempts_separate(monkeypatch, spans):
+    monkeypatch.setattr(tracing, "admission_trace", lambda *_: (None, {}))
     active = {"t1", "t2"}
     monkeypatch.setattr(tracing, "active_native_turns", lambda current: active)
     hooks, session_span = tracing.make_instrumentation("researcher")
@@ -50,6 +51,7 @@ def test_native_callbacks_keep_concurrent_turns_and_retry_attempts_separate(monk
 
 
 def test_orphan_observation_ends_incomplete_without_reclaiming_active_tool(monkeypatch, spans):
+    monkeypatch.setattr(tracing, "admission_trace", lambda *_: (None, {}))
     active = {"failed", "long-tool"}
     monkeypatch.setattr(tracing, "active_native_turns", lambda current: active)
     hooks, session_span = tracing.make_instrumentation("orchestrator")

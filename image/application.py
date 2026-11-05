@@ -7,7 +7,7 @@ from uuid import NAMESPACE_URL, UUID, uuid5
 import httpx
 from inference import Availability
 from opentelemetry.trace import StatusCode
-from pydantic import BaseModel, ConfigDict, JsonValue, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, JsonValue, ValidationError
 
 from contract import (
     NAMES,
@@ -33,6 +33,7 @@ class Operation(BaseModel):
     op_id: UUID
     name: str
     args: dict[str, JsonValue]
+    trace_context: dict[str, str] = Field(default_factory=dict)
 
 
 class PendingSession(BaseModel):
@@ -56,7 +57,9 @@ async def response(
     import asyncio
 
     async def validate():
-        return Request.model_validate(operation.model_dump(exclude={"id"})).root.args
+        return Request.model_validate(
+            operation.model_dump(exclude={"id", "trace_context"})
+        ).root.args
 
     (args,) = await asyncio.gather(validate(), return_exceptions=True)
     if isinstance(args, ValidationError):
@@ -144,6 +147,7 @@ async def response(
             raise AssertionError(type(args))
     with span(
         "workspace.request",
+        context=propagator.extract(operation.trace_context),
         **{
             "request.id": str(operation.id),
             "op.id": str(operation.op_id),

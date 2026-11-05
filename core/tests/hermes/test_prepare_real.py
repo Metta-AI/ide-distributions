@@ -188,6 +188,13 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from hermes_state_registry import acquire, release
 from run_agent import AIAgent
 from hermes_cli.middleware import apply_llm_request_middleware
+from research_core import intake, layout
+from research_core.plugin.executor import profile_env
+from research_core.store.actors import Actor
+from research_core.store.db import Store
+from research_core.telemetry import span
+from uuid import uuid4
+workspace = layout.from_env(profile_env())
 request = {"model": "proof",
     "messages": [{"role": "user", "content": "Unchanged native text"}], "max_tokens": 131072}
 bounded = apply_llm_request_middleware(request, provider="openrouter").payload
@@ -241,6 +248,16 @@ if sys.argv[1] == "1":
     prior = [(m["id"], m["role"], m["content"]) for m in db.get_messages(sid)]
 try:
     for text in ("Hello from the OpenAI message contract", "Continue this same chat"):
+        op_id = str(uuid4())
+        with Store.open(workspace.store_path, kind="workspace") as store:
+            with span("fixture.client_request"):
+                intake.accept(store, Actor.harness(), op_id=op_id, kind="message",
+                    request={"message": {"role": "user", "content": text}}, session_id=sid,
+                    message=text, payload=json.dumps({"input": [{"role": "user", "content": text}],
+                        "instructions": None}))
+            with store.tx(Actor.harness()) as tx:
+                tx.execute("UPDATE client_admissions SET dispatch_started=1 WHERE op_id=?",
+                    (op_id,))
         initial = db.get_messages_as_conversation(sid, include_row_ids=True)
         agent = AIAgent(model="proof", provider="custom", api_mode="chat_completions",
             base_url=f"http://127.0.0.1:{server.server_port}/v1", api_key="fixture",
@@ -249,6 +266,10 @@ try:
             session_db=db, max_iterations=2)
         result = agent.run_conversation(text, conversation_history=initial)
         assert result["final_response"] == "Chat received", result
+        with Store.open(workspace.store_path, kind="workspace") as store:
+            with store.tx(Actor.harness()) as tx:
+                tx.execute("UPDATE client_admissions SET status='completed' WHERE op_id=?",
+                    (op_id,))
         assert any(m["role"] == "user" and isinstance(m["content"], str)
             and m["content"].startswith(text) for m in captured[-1]["messages"]), captured[-1]
     saved = db.get_messages(sid)
@@ -277,6 +298,14 @@ finally:
     models = [e for e in events if e["name"] == "chat"]
     turns = [e for e in events if e["name"] == "invoke_agent"]
     assert len(turns) == 2 and len(models) == 3, events
+    admitted = [e for e in events if e["name"] == "fixture.client_request"]
+    assert len(admitted) == 2
+    assert [e["links"][0]["context"]["trace_id"] for e in turns] == [
+        e["context"]["trace_id"] for e in admitted
+    ]
+    assert [e["links"][0]["context"]["span_id"] for e in turns] == [
+        e["context"]["span_id"] for e in admitted
+    ]
     assert [e["attributes"]["retry.count"] for e in models] == [0, 1, 0]
     assert models[0]["attributes"]["http.response.status_code"] == 429
     assert models[0]["status"]["status_code"] == "ERROR"
