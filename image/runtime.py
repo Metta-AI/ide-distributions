@@ -13,6 +13,7 @@ from typing import Literal
 from uuid import uuid4
 
 import httpx
+from aide import serve as serve_aide
 from control import serve
 from inference import Availability
 from inference import maintain as maintain_inference
@@ -266,11 +267,22 @@ async def run(stack: AsyncExitStack) -> None:
                     connected=relay_connected,
                 )
             )
+            # The AIDE backend runs beside the legacy connection and gates nothing.
+            aide_backend = group.create_task(
+                serve_aide(
+                    platform_url=bootstrap.platform_url,
+                    workspace_id=bootstrap.workspace_id,
+                    credential=bootstrap.credential.get_secret_value(),
+                    env=profile_env,
+                    inference=inference,
+                )
+            )
             await asyncio.wait(
                 [
                     group.create_task(gateway.wait()),
                     group.create_task(seam.wait()),
                     control,
+                    aide_backend,
                     recovery,
                 ],
                 return_when=asyncio.FIRST_COMPLETED,
@@ -280,6 +292,7 @@ async def run(stack: AsyncExitStack) -> None:
 
 async def main() -> None:
     logging.basicConfig()
+    logging.getLogger("aide").setLevel(logging.INFO)
     stopping = asyncio.Event()
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGTERM, signal.SIGINT):

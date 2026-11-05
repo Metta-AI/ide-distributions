@@ -101,6 +101,146 @@ def test_transform_never_raises_and_ignores_non_refusals():
     assert hook(tool_name="claim", args=object(), result="{", session_id="s") is None
 
 
+def test_a_short_refusal_keeps_what_the_dropped_copy_held():
+    conflict = {
+        "ok": False,
+        "error": "the page changed since you read it",
+        "problems": ["wiki edit conflict"],
+        "conflict": True,
+        "current_body": "the page now",
+        "current_revision_id": "r2",
+        "context": {"action": "edit"},
+        "usage": {"does": "long"},
+    }
+    short = json.loads(repeats.firmer_refusal("researcher", "wiki_edit", conflict, 2))
+    assert short["current_body"] == "the page now"
+    assert short["current_revision_id"] == "r2"
+    assert short["context"] == {"action": "edit", "tool": "wiki_edit", "refused": 2}
+    assert "usage" not in short
+
+
+def refused_pair(call_id: str, arguments: str = '{"action":"write"}', name: str = "claim") -> list:
+    """A call and its refusal as they appear in a request, with Hermes's loop warning appended."""
+    return [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": call_id, "function": {"name": name, "arguments": arguments}}],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": call_id,
+            "content": claim_refusal() + "\n\n[Tool loop warning: ...]",
+        },
+    ]
+
+
+def test_a_request_keeps_only_the_latest_of_identical_refused_calls():
+    user = {"role": "user", "content": "record it"}
+    first, second, third = refused_pair("a"), refused_pair("b"), refused_pair("c")
+    other = refused_pair("d", arguments='{"action":"write","summary":"x"}')
+    request = {"model": "m", "messages": [user, *first, *other, *second, *third]}
+
+    rewritten = repeats.without_repeated_refusals(request=request, provider="openrouter")["request"]
+
+    assert rewritten["messages"] == [user, *other, *third]
+    assert rewritten["model"] == "m"
+    assert len(request["messages"]) == 9, "the caller's request is not edited in place"
+
+
+def test_results_carrying_hermes_cache_markers_are_read():
+    """On OpenRouter with Kimi or Claude, Hermes sends the latest results as marked text parts."""
+
+    def marked(pair: list) -> list:
+        text_part = {
+            "type": "text",
+            "text": pair[1]["content"],
+            "cache_control": {"type": "ephemeral"},
+        }
+        return [pair[0], {**pair[1], "content": [text_part]}]
+
+    user = {"role": "user", "content": "record it"}
+    first, second, third = refused_pair("a"), marked(refused_pair("b")), marked(refused_pair("c"))
+    rewritten = repeats.without_repeated_refusals(
+        request={"messages": [user, *first, *second, *third]}
+    )
+    assert rewritten["request"]["messages"] == [user, *third]
+
+
+def test_a_result_holding_more_than_loop_guard_notes_is_kept():
+    user = {"role": "user", "content": "record it"}
+    steered = refused_pair("b")
+    steered[1] = {
+        **steered[1],
+        "content": steered[1]["content"] + "\n\n[OUT-OF-BAND USER MESSAGE]\nUse L-8 instead.\n"
+        "[/OUT-OF-BAND USER MESSAGE]",
+    }
+    first, third = refused_pair("a"), refused_pair("c")
+    guarded = refused_pair("d")
+    guarded[1] = {**guarded[1], "content": guarded[1]["content"] + "\n\n[hermes note: stop.]"}
+    rewritten = repeats.without_repeated_refusals(
+        request={"messages": [user, *first, *steered, *third, *guarded]}
+    )
+    assert rewritten["request"]["messages"] == [user, *steered, *guarded]
+
+
+def test_a_result_holding_an_image_is_kept():
+    first, second = refused_pair("a"), refused_pair("b")
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA"}}
+    first[1] = {**first[1], "content": [{"type": "text", "text": first[1]["content"]}, image]}
+    assert repeats.without_repeated_refusals(request={"messages": [*first, *second]}) is None
+
+
+def test_a_drop_never_leaves_two_user_messages_in_a_row():
+    first_user, second_user = {"role": "user", "content": "a"}, {"role": "user", "content": "b"}
+    first, second = refused_pair("a"), refused_pair("b")
+    rewritten = repeats.without_repeated_refusals(
+        request={"messages": [first_user, *first, second_user, *second]}
+    )
+    assert rewritten is None, "nothing could be dropped"
+    third = refused_pair("c")
+    rewritten = repeats.without_repeated_refusals(
+        request={"messages": [first_user, *first, *second, second_user, *third]}
+    )
+    assert rewritten["request"]["messages"] == [first_user, *second, second_user, *third]
+
+
+def test_a_request_without_repeats_is_left_alone():
+    success = [
+        {
+            "role": "assistant",
+            "tool_calls": [{"id": "a", "function": {"name": "claim", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "a", "content": '{"ok": true}'},
+    ]
+    two_calls = {
+        "role": "assistant",
+        "tool_calls": [
+            {"id": "b", "function": {"name": "claim", "arguments": "{}"}},
+            {"id": "c", "function": {"name": "claim", "arguments": "{}"}},
+        ],
+    }
+    for messages in (
+        [],
+        refused_pair("a"),
+        [*success, *success],  # identical calls that worked
+        [*refused_pair("a"), *refused_pair("b", name="task")],  # another tool
+        [two_calls, *refused_pair("d")[1:], two_calls, *refused_pair("e")[1:]],  # a parallel batch
+        refused_pair("a")[:1],  # no result yet
+    ):
+        assert repeats.without_repeated_refusals(request={"messages": messages}) is None
+    assert repeats.without_repeated_refusals(request={"input": "a Responses request"}) is None
+
+
+def test_the_middleware_never_raises():
+    broken = {"messages": [{"role": "assistant", "tool_calls": [{"id": "a"}]}, {"content": "{}"}]}
+    assert repeats.without_repeated_refusals(request=broken) is None
+    assert repeats.without_repeated_refusals(request={"messages": "not a list"}) is None
+    parts = {"role": "tool", "tool_call_id": "a", "content": ["not a text part"]}
+    broken = {"messages": [refused_pair("a")[0], parts]}
+    assert repeats.without_repeated_refusals(request=broken) is None
+
+
 def test_halt_writes_one_notice_naming_the_session_kind_and_tool(workspace):
     wstore = Store.open(workspace.store_path, kind="workspace")
     sessions.register(

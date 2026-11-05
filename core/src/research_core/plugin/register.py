@@ -42,7 +42,9 @@ def make_register(role: Role) -> Callable[[Any], None]:
                 description=spec.description,
             )
         from research_core.plugin.repeats import make_hooks as make_repeat_hooks
+        from research_core.plugin.repeats import without_repeated_refusals
 
+        ctx.register_middleware("llm_request", without_repeated_refusals)
         # Before the advisory hooks: Hermes keeps the first string a transform_tool_result returns.
         for hook_name, callback in make_repeat_hooks(role).items():
             ctx.register_hook(hook_name, callback)
