@@ -194,11 +194,13 @@ def request_generated(ctx: ToolContext, tool: str, args: dict) -> dict:
             command_id = command_identity(ctx, tool, f"generated:{uuid4()}")
             _accept(tx, ctx, tool, fields, command_id, payload)
     result = _await_result(ctx, command_id)
-    if CommandReceipt.parse(result).state == "pending":
+    state = CommandReceipt.parse(result).state
+    if state == "pending":
         return {**result, "next": PENDING_NEXT_STEP}
-    if earlier is not None and earlier["result"] is not None:
+    if state == "applied" and earlier is not None and earlier["result"] is not None:
         result["repeat_of_earlier_call"] = REPEAT_NOTE
-    mark_reply_seen(ctx, command_id)
+    if not _hermes_gave_up_on_this_call():
+        mark_reply_seen(ctx, command_id)
     return result
 
 
@@ -208,6 +210,16 @@ def read_command(ctx: ToolContext, command_id: str) -> dict:
     if CommandReceipt.parse(result).state != "pending":
         mark_reply_seen(ctx, command_id)
     return result
+
+
+def _hermes_gave_up_on_this_call() -> bool:
+    """An interrupt makes Hermes tell the model the call was cancelled while this thread runs on.
+    This reply then never arrives, so the model's retry must still join the command."""
+    try:
+        from tools.interrupt import is_interrupted
+    except ImportError:  # outside Hermes: tests, the CLI and workspace-executor subprocesses
+        return False
+    return is_interrupted()
 
 
 def mark_reply_seen(ctx: ToolContext, command_id: str) -> None:
@@ -321,6 +333,7 @@ def apply(ctx, instance_id: str) -> None:
                 elif command["tool"] == "task":
                     call = ToolCall(spec=task.SPEC, args=args, ctx=tool_ctx, action=args["action"])
                     result = task.execute(call)
+                    task.remember_seen_revisions(call, result)
                 elif command["tool"] == "workspace":
                     from research_core.tools import workspace
 

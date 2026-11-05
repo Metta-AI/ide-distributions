@@ -1032,14 +1032,28 @@ def read(store: Store, task_id: int | str, *, live_run: bool = False) -> dict[st
 def note_seen(
     store: Store, actor: Actor, session_id: str, records: Sequence[Mapping[str, Any]]
 ) -> None:
-    """Record the Task revisions a Session was shown, for :func:`revision_for_assignment`."""
+    """Record the Task revisions a Session was shown, for :func:`revision_for_assignment`.
+
+    Most reads show nothing new, and those must not wait for the store's write lock.
+    """
+    seen = {
+        row["task_id"]: row["updated"]
+        for row in store.q(
+            "SELECT task_id,updated FROM task_views WHERE session_id=?", (session_id,)
+        )
+    }
+    views = {_task_number(record["id"]): record["updated"] for record in records}
+    changed = {
+        task_id: updated for task_id, updated in views.items() if seen.get(task_id) != updated
+    }
+    if not changed:
+        return
     with store.tx(actor) as tx:
-        for record in records:
+        for task_id, updated in changed.items():
             tx.execute(
                 "INSERT INTO task_views(session_id,task_id,updated) VALUES (?,?,?)"
-                " ON CONFLICT(session_id,task_id) DO UPDATE SET updated=excluded.updated"
-                " WHERE updated!=excluded.updated",
-                (session_id, _task_number(record["id"]), record["updated"]),
+                " ON CONFLICT(session_id,task_id) DO UPDATE SET updated=excluded.updated",
+                (session_id, task_id, updated),
             )
 
 

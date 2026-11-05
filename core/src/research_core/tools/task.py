@@ -329,10 +329,9 @@ def execute(call: ToolCall) -> dict:
 def dispatch(call: ToolCall) -> dict:
     if call.action == "command":
         return read_command(call.ctx, call.get("command_id"))
-    if call.action in {"read", "list", "workers"} or call.ctx.coordinator_instance is not None:
-        result = execute(call)
-    else:
-        result = submit(call)
+    if call.action not in {"read", "list", "workers"} and call.ctx.coordinator_instance is None:
+        return submit(call)
+    result = execute(call)
     remember_seen_revisions(call, result)
     return result
 
@@ -360,8 +359,8 @@ SPEC = durable_tool(
         actions=(
             ActionSpec(
                 "command",
-                "Read a pending transition's durable result.",
-                {"command_id": a.string("The command_id returned by a pending transition.")},
+                "Read the result of a call that came back pending.",
+                {"command_id": a.string("The command_id that pending call returned.")},
                 ("command_id",),
                 BOTH,
             ),

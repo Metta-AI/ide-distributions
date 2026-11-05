@@ -1808,7 +1808,7 @@ class Coordinator:
             if occupied >= int(settings.get([ctx.wstore, ctx.store], "max_researchers")):
                 raise StoreError(["research capacity is reserved; wait for a worker to settle"])
             session_id = mint_session_id()
-            # The prompt is rendered from the exact task revision the model selected.
+            # The prompt is rendered from the exact task revision the session saw.
             text = (
                 start_text(ctx.store, coworld, task)
                 + f"\n\nAssignment context:\n{context}\nReason:\n{rationale}"

@@ -8,7 +8,10 @@ Two identical calls in one response never reach a tool (``_deduplicate_tool_call
 """
 
 import json
+import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
+from types import ModuleType
 
 import pytest
 
@@ -119,6 +122,34 @@ def test_a_repeat_after_the_gateway_died_returns_the_earlier_result(ctx, monkeyp
     apply(ctx)  # the coordinator finishes the accepted command while the gateway restarts
     retried = call(ctx, CREATE)
     assert retried["ok"] and retried["record"]["id"] == "T-1"
+    assert "did nothing" in retried["repeat_of_earlier_call"]
+    assert count(ctx, "tasks") == 1
+
+
+def test_a_refusal_found_by_a_retry_is_not_called_done_and_the_next_call_runs(ctx, monkeypatch):
+    args = {**CREATE, "type": "research", "goal": "G-1"}
+    with monkeypatch.context() as patch:
+        die_before_the_reply(patch)
+        with pytest.raises(ProcessDied):
+            call(ctx, args)
+    apply(ctx)
+    retried = call(ctx, args)
+    assert retried["transition_state"] == "refused" and "repeat_of_earlier_call" not in retried
+    goals.create(ctx.store, HARNESS, title="Goal", end_state="Done", reason="Asked")
+    assert call_applied(ctx, args)["record"]["id"] == "T-1"
+
+
+def test_a_retry_after_hermes_cancelled_the_call_joins_the_command(ctx, monkeypatch):
+    interrupt = ModuleType("tools.interrupt")
+    interrupt.is_interrupted = lambda: True
+    with monkeypatch.context() as patch:
+        patch.setitem(sys.modules, "tools", ModuleType("tools"))
+        patch.setitem(sys.modules, "tools.interrupt", interrupt)
+        cancelled = call_applied(
+            ctx, CREATE
+        )  # this reply goes nowhere: the model is told "cancelled"
+    retried = call(ctx, CREATE)
+    assert retried["command_id"] == cancelled["command_id"]
     assert "did nothing" in retried["repeat_of_earlier_call"]
     assert count(ctx, "tasks") == 1
 
@@ -278,6 +309,33 @@ def test_assign_after_the_sessions_own_write_needs_no_second_read(ctx):
     approved = call_applied(ctx, {"action": "approve", "task": "T-1"})
     assert approved["record"]["updated"] != listed["updated"]
     assert call_applied(ctx, ASSIGN)["kind"] == "reserved"
+
+
+def test_assign_after_reading_the_sessions_own_write_from_a_pending_reply(ctx, no_wait):
+    tasks.propose(
+        ctx.store, HARNESS, type="maintenance", title="Repair", description="Repair the build"
+    )
+    assert call(ctx, {"action": "list"})["ok"]
+    ctx.clock.advance(1)
+    pending = call(ctx, {"action": "approve", "task": "T-1"})
+    apply(ctx)
+    assert call(ctx, {"action": "command", "command_id": pending["command_id"]})["ok"]
+    call(ctx, ASSIGN)
+    apply(ctx)
+    assert ctx.wstore.one("SELECT count(*) FROM task_assignments")[0] == 1
+
+
+def test_a_read_showing_nothing_new_does_not_take_the_write_lock(ctx):
+    make_task(ctx, type="maintenance")
+    assert call(ctx, {"action": "read", "task": "T-1"})["ok"]
+    blocker = ctx.store
+    blocker.conn.execute("BEGIN IMMEDIATE")
+    try:
+        started = time.monotonic()
+        assert call(ctx, {"action": "read", "task": "T-1"})["ok"]
+        assert time.monotonic() - started < 2
+    finally:
+        blocker.conn.execute("ROLLBACK")
 
 
 def test_a_planning_wake_counts_as_having_seen_its_tasks(ctx):
