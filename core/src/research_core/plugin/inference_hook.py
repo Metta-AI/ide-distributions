@@ -153,5 +153,6 @@ def bound_output_request(
     if not fields:
         fields = ["max_output_tokens" if "input" in bounded else "max_tokens"]
     for key in fields:
+        bounded.setdefault(key, MAX_RESPONSE_TOKENS)
         bounded[key] = min(bounded[key] or MAX_RESPONSE_TOKENS, MAX_RESPONSE_TOKENS)
     return {"request": bounded, "reason": "Bound workspace output credit reservations"}

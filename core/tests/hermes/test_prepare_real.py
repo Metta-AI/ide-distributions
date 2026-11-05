@@ -192,6 +192,10 @@ request = {"model": "proof",
     "messages": [{"role": "user", "content": "Unchanged native text"}], "max_tokens": 131072}
 bounded = apply_llm_request_middleware(request, provider="openrouter").payload
 assert bounded == {**request, "max_tokens": 16384}, bounded
+for body, key in [({"messages": []}, "max_tokens"), ({"input": []}, "max_output_tokens")]:
+    request = {"model": "proof", **body}
+    bounded = apply_llm_request_middleware(request, provider="openrouter").payload
+    assert bounded == {**request, key: 16384}, bounded
 captured = []
 class Provider(BaseHTTPRequestHandler):
     def do_POST(self):
