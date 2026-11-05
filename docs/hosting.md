@@ -39,9 +39,9 @@ when you call the script). With `IDE_WORKSPACE` unset the workspace defaults to
 3. re-applies the config keys the machinery relies on (`approvals.mode: off`, no deny list,
    memory off, `tools.tool_search.enabled: off`, the plugin and toolset, `cron.catch_up_missed`,
    the Orchestrator's compaction settings, the tool-result prune trigger, the disabled Hermes
-   toolsets), removes retired keys, points every profile at the
-   active Coworld (`skills.external_dirs`, `skills.trusted_project_dirs`, `terminal.cwd`), and
-   applies shipped values only where the owner kept an earlier default; it does not change the
+   toolsets), removes retired keys, sets every profile's `skills.external_dirs`,
+   `skills.trusted_project_dirs` (every registered Coworld's code) and `terminal.cwd` (the
+   workspace root), and applies shipped values only where the owner kept an earlier default; it does not change the
    model (the one exception: an Orchestrator on `moonshotai/kimi-k3` with no recorded model
    change moves once to `moonshotai/kimi-k3.1-pro`, see `contract/CONTRACT.md`, "Profile
    models"), but adds the OpenRouter host pins for the Kimi models (`provider_routing.models`,
@@ -51,9 +51,9 @@ when you call the script). With `IDE_WORKSPACE` unset the workspace defaults to
 4. retires the Orchestrator's obsolete `watcher` cron job; `research serve` owns scheduling;
 5. builds the workspace environment with `uv sync --frozen --no-dev --project <checkout>` into
    `$IDE_WORKSPACE/tools/venv`, or verifies a prebuilt one named by `IDE_WORKSPACE_ENV` against
-   the lock's sha256;
-6. on a fresh Orchestrator workspace with `IDE_DEFAULT_COWORLD` set, registers and activates that
-   Coworld so its setup wake runs before the first chat.
+   the lock's sha256.
+
+`prepare.py` activates no Coworld: a Session that works on one names it when it opens.
 
 `--check` prints what it would change and writes nothing. The 300-second budget hosting gives
 the script holds when the workspace environment is prebuilt; a first `uv sync` takes a few
@@ -65,7 +65,6 @@ minutes and should happen at image build (then set `IDE_WORKSPACE_ENV`).
 |---|---|---|
 | `IDE_WORKSPACE` | hosting | The one workspace root of the sandbox, identical for every profile. It holds the workspace environment, the stores and one folder per Coworld; it must live on the durable, backed-up volume. |
 | `IDE_WORKSPACE_ENV` | hosting (optional) | A prebuilt workspace environment. |
-| `IDE_DEFAULT_COWORLD` | hosting (optional) | The Coworld a new workspace starts with. |
 | `IDE_RESEARCHER_PROFILES` | hosting | Comma-separated Researcher profile names (`researcher`, or `researcher-1,researcher-2`). |
 | `SOFTMAX_PLAYER_ID`, `SOFTMAX_PLAYER_CREDENTIAL` | hosting | The Player the workspace acts as, selected at workspace creation, and its credential. Both profiles read them. |
 | `SOFTMAX_USER_CREDENTIAL` | hosting, Orchestrator only | The user's User identity token (design B.16). Optional until provisioned; without it User-identity reads and writes are reported unavailable. It is deliberately not passed to terminal commands. |
@@ -124,7 +123,7 @@ hosted workspaces continue to recover automatically through their supervisor.
 The bridge does transport only. For each user message it POSTs `{"input": <message + "\n\nContext
 v1:\n" + json>, "session_id"}` to the Orchestrator's runs route, where the JSON block is the
 client's typed context validated against `research context-schema` and stamped with the client's
-identity, the active Coworld and `contract_version: 1`. If the Session has a live run, new inputs wait in the durable inbox. It streams each store's `events` table to clients as Server-Sent Events
+identity, the Session's Coworld and `contract_version: 1`. If the Session has a live run, new inputs wait in the durable inbox. It streams each store's `events` table to clients as Server-Sent Events
 (`research store events --after <seq>` and `--follow` show the rows; one cursor per store), and
 applies user edits through `research store apply --actor user:<id> <op> <json>`. Notices
 (`events` rows of kind `notice`) must reach every client. `research serve` is the reference

@@ -25,7 +25,8 @@ off by default so CI is unchanged:
   to);
 * ``IDE_E2E_PLATFORM=real`` runs against the real Softmax platform with the caller's
   ``SOFTMAX_PLAYER_ID``, ``SOFTMAX_PLAYER_CREDENTIAL``, ``COGAMES_API_URL`` and
-  ``IDE_DEFAULT_COWORLD`` written into every ``.env``; the scenario then waits for a submission
+  ``IDE_E2E_COWORLD`` (the Coworld the chat Session is bound to) written into every ``.env``; the
+  scenario then waits for a submission
   by that Player that did not exist when it started;
 * ``IDE_E2E_TIMEOUT_S`` replaces the scenario timeout (a real build takes longer than the fake).
 """

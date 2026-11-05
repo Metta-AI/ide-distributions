@@ -7,24 +7,26 @@ That call must pass the checks production runs before anything changes: ``valida
 tools' argument check) and, for the actions whose store checks need no records, those checks
 too (``RECORD_CHECKS``). Calls before it get the answer production would give: the tool's own
 refusal when the argument check refuses them, otherwise a plausible result (``RESULT``). A model
-that has not called the tool within ``MAX_REQUESTS`` requests fails the case. A recovery case
-starts from a history holding one or three refused calls: the first answered with the refusal
-the tool returns today, a repeat with the shorter one the repeat hook puts in its place. The
-rate fell to 5/10 after three refusals when this was first measured on a real context, so both
-depths are measured.
+that has not called the tool within ``MAX_REQUESTS`` requests (``MAX_REQUESTS_REAL_CONTEXT`` with a
+captured context) fails the case. A recovery case starts from a history holding one or three
+refused calls: the first answered with the refusal the tool returns today, a repeat with the
+shorter one the repeat hook puts in its place. Measured on 2026-11-04 with a real context, the
+rate was 60/60 after one refusal and 22/60 after three, so both depths are measured.
 
 Which write actions are covered. One case per write action, of the record tools (claim, goal,
-task, experiment, directive, settings, ui), that has at least two required fields, so the model
-has to compose arguments rather than pass one reference; plus ``ui.notify``, the incident wake's
-other write. Left out, to keep a run small:
+task, experiment, directive, settings, ui), that has at least two required fields besides the
+generated ``operation_id``, so the model has to compose arguments rather than pass one reference;
+plus ``ui.notify``, the incident wake's other write. Left out, to keep a run small:
   - actions with the same shape as a covered one: task.propose, task.message and task.reject
     for the Orchestrator (task.create, task.answer), task.link (two references), and the
     Researcher's claim.retire and experiment.abandon (covered for the Orchestrator);
   - workspace.change_complete, which needs a worktree the instruction cannot make plausible;
-  - the flat tools (submit, upload, wiki_edit, forum_post, softmax_api, github): their schemas
-    mark required fields as required at the top level, so a provider can enforce them, which
-    the action tools cannot;
-  - actions whose only required field is one reference (task.approve, experiment.start, ...).
+  - the tools without actions (submit, upload, wiki_edit, softmax_api): their schemas mark required
+    fields as required at the top level, so a provider can enforce them, which the action tools
+    cannot;
+  - the other tools (version, xp, platform, forum_post, github): ``test_tool_call_format.py``
+    sends each one instruction;
+  - actions whose only decided field is one reference (task.approve, experiment.start, ...).
 """
 
 from __future__ import annotations
@@ -129,6 +131,14 @@ ORCHESTRATOR = [
     ),
     Case("orchestrator", "goal", "set_status", "Park Goal G-2 because league L-4 closed."),
     Case("orchestrator", "task", "create", TASK_CREATE),
+    Case(
+        "orchestrator",
+        "task",
+        "assign",
+        "Assign Task T-3 (its updated value is 2026-11-04T10:00:00+00:00) to the researcher "
+        "profile, assignment id asg-3: start from league L-7's standings, because it is the only "
+        "worker.",
+    ),
     Case(
         "orchestrator",
         "task",

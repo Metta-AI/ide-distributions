@@ -8,10 +8,13 @@ before it are answered, and how host failures count.
 from __future__ import annotations
 
 import json
+from pathlib import Path
 
 import pytest
 
+from tests.hermes.test_spike_s1 import Host
 from tests.model import harness, write_actions
+from tests.model.real_session import RealGateway
 from tests.model.write_actions import Case, run_case
 
 CLAIM_WRITE = Case("orchestrator", "claim", "write", "Record a claim.")
@@ -229,14 +232,6 @@ def test_wilson_interval_matches_known_values(successes, total, low, high):
     assert found == pytest.approx((low, high), abs=0.01)
 
 
-@pytest.mark.parametrize(
-    ("successes", "total", "below"),
-    [(17, 20, True), (18, 20, False), (49, 55, True), (50, 55, False), (55, 55, False)],
-)
-def test_only_a_rate_clearly_under_the_floor_counts_as_below(successes, total, below):
-    assert harness.clearly_below(successes, total, 0.95) is below
-
-
 def test_the_summary_shows_sample_size_and_interval(script, monkeypatch):
     monkeypatch.setattr(harness, "RESULTS", harness.Results(schemas="shipped"))
     for valid in (True, True, False):
@@ -246,6 +241,13 @@ def test_the_summary_shows_sample_size_and_interval(script, monkeypatch):
     rows = {line.split("  ")[0]: line for line in table.splitlines()}
     assert "2/3 67% [21-94]" in rows["first-try valid"]
     assert "2/3" in rows[CLAIM_WRITE.label]
+
+
+def test_the_gateway_and_host_keep_the_key_out_of_their_repr():
+    key = "sk-or-secret"
+    host = Host(Path("h"), Path("/"), Path("/"), 1, "api-secret", key, Path("l"))
+    gateway = RealGateway(Path("/"), Path("h"), key, "m", host=host)
+    assert key not in repr(gateway) and key not in repr(host) and "api-secret" not in repr(host)
 
 
 # --- what production refuses (finding B) ------------------------------------------------------

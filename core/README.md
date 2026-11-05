@@ -42,7 +42,7 @@ decisions is `docs/plans/ide-profile-refactor/`.
 | `prompts/` | The SOUL parts per role, `vocabulary.md` (from metta) and `build.py`; `tools/build_prompts.py` renders `orchestrator/SOUL.md` and `researcher/SOUL.md` and syncs the plugin manifests. |
 | `skills/` | The shipped skills: `common/<category>/<skill>/`, `orchestrator/<skill>/`, `researcher/<skill>/`; `prepare.py` points `skills.external_dirs` at them. |
 | `task_types/` | The four Task types with their completion checklists and Researcher instructions. |
-| `prepare.py` | Profile preparation after install or update: core path marker, protected and retired config keys, the active Coworld's skill directories for every profile, shipped values over earlier defaults (not the model settings, but for one Orchestrator migration off `kimi-k3`), stores, the watcher job, the workspace environment, the default Coworld. |
+| `prepare.py` | Profile preparation after install or update: core path marker, protected and retired config keys, every profile's skill and trusted-project directories, shipped values over earlier defaults (not the model settings, but for one Orchestrator migration off `kimi-k3`), stores, retiring the watcher job, the workspace environment. |
 | `cli.py` | The `research` command; each subcommand module registers itself. |
 
 ## Run the tests
@@ -56,7 +56,7 @@ uv run python tools/build_prompts.py --check && uv run python tools/check_prompt
 
 The fake platform (`IDE_PLATFORM=fake`) needs no network; the `hermes`-marked tests install the
 profiles into a temporary Hermes home; the dispatch spike and the real acceptance run also need
-an OpenRouter key. Hermes v0.21.6 needs Python 3.14 for its own dependencies, so a local
+an OpenRouter key. The pinned image runs Hermes on Python 3.14, so a local
 `HERMES_BIN` is easiest to get from an isolated environment of the Hermes checkout
 (`UV_PROJECT_ENVIRONMENT=<somewhere> uv sync --frozen --no-dev --extra messaging`, then
 `<somewhere>/bin/hermes`); the `messaging` extra brings `aiohttp`, without which the gateway

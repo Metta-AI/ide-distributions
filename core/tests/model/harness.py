@@ -2,7 +2,8 @@
 
 The tests call OpenRouter directly, never through Hermes, so they measure what a model and an
 OpenRouter host make of the tool schemas, not Hermes's own parsing of the reply. The request is
-shaped as Hermes v0.21.6 shapes it on its OpenRouter provider profile: no ``temperature``
+shaped as the pinned Hermes (v0.22.6) shapes it on its OpenRouter provider profile: no
+``temperature``
 (``agent/transports/chat_completions.py`` ``_base_kwargs`` sends one only for a profile's fixed
 temperature, and OpenRouter's has none), and ``reasoning: {enabled: true, effort: medium}`` for a
 model whose OpenRouter catalog entry lists ``reasoning`` among its supported parameters when the
@@ -24,20 +25,11 @@ built-in tools, sorted by name as Hermes's registry does, through Hermes's own s
 ``IDE_HERMES_SRC`` names; without it the full-toolset tests fail rather than send schemas Hermes
 would rewrite.
 
-``hermes_builtin_tools.json`` is Hermes v0.21.6's ``hermes-api-server`` toolset as one
-credential-free local install resolves it (memory off, tool search off): 21 tools. It is not
-read from the hosted image, whose credentials and installed browser can add or remove tools
-(``web_search`` backends, the browser tools). It was generated on 2026-11-02 with Python 3.14
-and Hermes's pinned dependencies, and is regenerated the same way::
-
-    uv pip compile --python-version 3.14 <hermes>/pyproject.toml -o /tmp/hermes-reqs.txt
-    HERMES_HOME=$(mktemp -d) PYTHONPATH=<hermes> uv run --no-project --python 3.14 \\
-      --with-requirements /tmp/hermes-reqs.txt python -c "import json, model_tools; \\
-      json.dump(model_tools.get_tool_definitions(enabled_toolsets=['hermes-api-server'], \\
-      quiet_mode=True), open('hermes_builtin_tools.json', 'w'), indent=1, ensure_ascii=False)"
-
-with a ``config.yaml`` in that ``HERMES_HOME`` that sets ``memory.memory_enabled: false`` and
-``tools.tool_search.enabled: "off"``, as the profiles do.
+``hermes_builtin_tools.json`` is the Hermes tools of a real Session on the pinned image: the 16
+tools Hermes froze for it, the same for both roles, captured with ``IDE_TOOL_CALL_CONTEXT``
+(README, "Develop and test"). ``test_real_session.py`` fails when a real Session's list no longer
+matches. To regenerate after an image change, run ``-k test_a_real_session`` with that variable,
+then copy ``orchestrator.hermes_tools`` from the capture into this file.
 
 Real context. ``IDE_TOOL_CALL_CONTEXT`` names a file ``test_real_session.py`` captured from real
 Sessions: per role, the system prompt Hermes stored (SOUL, briefing, skill index, sections) and
@@ -291,7 +283,7 @@ def hermes_sanitizers() -> tuple[ModuleType, ModuleType]:
     if not source:
         raise RuntimeError(
             "IDE_HERMES_SRC is not set: full-toolset mode sends schemas through Hermes's own "
-            "sanitizers; point it at a Hermes v0.21.6 source tree"
+            "sanitizers; point it at the source of the pinned Hermes (/opt/hermes in the image)"
         )
     root = Path(source)
     return (
@@ -330,13 +322,7 @@ def full_toolset(role: Role, schemas: SchemaSet, model: str) -> list[dict]:
     if captured is not None:
         builtins = captured.hermes_tools
     else:
-        # The profiles disable Hermes's browser toolset (prepare.PROTECTED_KEYS); the snapshot
-        # has it.
-        builtins = [
-            tool
-            for tool in json.loads(HERMES_BUILTIN_TOOLS.read_text())
-            if not tool["function"]["name"].startswith("browser_")
-        ]
+        builtins = json.loads(HERMES_BUILTIN_TOOLS.read_text())
     ide = [{"type": "function", "function": s} for s in schemas.tools(role)]
     tools = sanitizer.sanitize_tool_schemas(
         sorted([*builtins, *ide], key=lambda tool: tool["function"]["name"])
@@ -446,11 +432,6 @@ def wilson_interval(successes: int, total: int) -> tuple[float, float]:
     center = (share + z**2 / (2 * total)) / denominator
     margin = z * math.sqrt(share * (1 - share) / total + z**2 / (4 * total**2)) / denominator
     return max(0.0, center - margin), min(1.0, center + margin)
-
-
-def clearly_below(successes: int, total: int, floor: float) -> bool:
-    """Whether the rate is below ``floor`` beyond what the sample's noise explains."""
-    return wilson_interval(successes, total)[1] < floor
 
 
 def judged_rate(results: list[Result]) -> tuple[int, int]:

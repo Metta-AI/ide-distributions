@@ -57,7 +57,7 @@ profiles inside the hosted image through `tools/local_stack.py`; it passed on Oc
 - For the real platform (Option B with `IDE_E2E_PLATFORM=real`) a **test** Player's
   `SOFTMAX_PLAYER_ID` and `SOFTMAX_PLAYER_CREDENTIAL` (a bare `cga_` token, or a player session
   as JSON; see `researcher/distribution.yaml`), `COGAMES_API_URL` when it is not
-  `https://softmax.com/api`, and `IDE_DEFAULT_COWORLD`, the Coworld to start on. The scenario
+  `https://softmax.com/api`, and `IDE_E2E_COWORLD`, the Coworld the chat Session is bound to. The scenario
   makes a real submission as that Player and spends model calls doing it. Check the credential
   first:
 
@@ -218,23 +218,21 @@ session ends; the run directory stays for reading.
 ```bash
 IDE_E2E_KEEP=1 IDE_E2E_PLATFORM=real IDE_E2E_TIMEOUT_S=1800 \
   SOFTMAX_PLAYER_ID=ply_... SOFTMAX_PLAYER_CREDENTIAL=... COGAMES_API_URL=https://softmax.com/api \
-  IDE_DEFAULT_COWORLD=cow_... \
+  IDE_E2E_COWORLD=cow_... \
   HERMES_BIN=$HERMES_BIN OPENROUTER_API_KEY=... \
   uv run pytest -q -m hermes core/tests/hermes/test_seam_real_hermes.py -s
 ```
 
 With `IDE_E2E_PLATFORM=real` the harness does not configure the fake platform and writes
 `IDE_PLATFORM=real` plus `SOFTMAX_PLAYER_ID`, `SOFTMAX_PLAYER_CREDENTIAL`, `COGAMES_API_URL` and
-`IDE_DEFAULT_COWORLD` (those that are set) from your environment into the host's and both
-profiles' `.env`; `prepare.py` then registers and activates the default Coworld on the fresh
-workspace, as hosting does, so the fixed request applies to it. Without `IDE_DEFAULT_COWORLD`
-the request "Submit the starter as my champion." names no Coworld; use `IDE_E2E_SCENARIO=0` and
-send a request that does.
+`IDE_E2E_COWORLD` (those that are set) from your environment into the host's and both
+profiles' `.env`, and opens the chat Session bound to `IDE_E2E_COWORLD`, so the fixed request
+applies to it. The run fails at once without the Player's two variables or `IDE_E2E_COWORLD`.
 
 The scenario's assertions were kept, read through the real client: it records the Player's
 submissions on the ladder when it starts and passes when a submission that was not there
-before appears (`RealPlatform.submissions(player_id=...)`), and the active Coworld must be
-`IDE_DEFAULT_COWORLD` when that is set. The per-Player check is implied by the ladder's Player
+before appears (`RealPlatform.submissions(player_id=...)`), and the Session's Coworld must be
+`IDE_E2E_COWORLD`. The per-Player check is implied by the ladder's Player
 filter (the real `Submission` record carries no Player id), so a run with the real platform
 proves the chain ends in a submission as the test Player, not that the fake's `.env` isolation
 holds; the fake run checks that. The harness never prints the credential; it is in the run's
@@ -319,7 +317,7 @@ of the same scenario on another fresh volume took 33 seconds. The exact output i
   reads it); the tool never prints it and writes nothing on this machine. A later `up` without
   the key in the environment keeps the one already in the `.env` files.
 - For the real platform, the same variables as Option B: `SOFTMAX_PLAYER_ID`,
-  `SOFTMAX_PLAYER_CREDENTIAL`, optionally `COGAMES_API_URL` and `IDE_DEFAULT_COWORLD`.
+  `SOFTMAX_PLAYER_CREDENTIAL` and optionally `COGAMES_API_URL`.
 
 ### Commands
 
@@ -354,7 +352,7 @@ exec`:
 |---|---|
 | Install `uv` into `/opt/data/.local/bin` (the image ships none, CI uses `astral-sh/setup-uv`), which is on the Hermes user's login-shell `PATH`; mark `/src` safe for git (it belongs to your Mac user) | The image has `uv` |
 | `hermes profile install /src/<role> --name <role> --yes` into `HERMES_HOME=/opt/data/host` for both roles; skipped when the profile exists | The same, from the release checkout |
-| Write `/opt/data/host/.env` and both profiles' `.env`: one random `API_SERVER_KEY` per volume (kept in `/opt/data/local_stack/api_key`), `API_SERVER_HOST=0.0.0.0` in the host home (the gateway binds from there, so the published port reaches it) and `127.0.0.1` in the profiles (where the watcher and the seam read the gateway's address), `GATEWAY_MULTIPLEX_PROFILES=true`, `IDE_WORKSPACE=/opt/data/workspace`, `IDE_PLATFORM`, `IDE_RESEARCHER_PROFILES=researcher`, `SOFTMAX_PLAYER_ID` (`ply_canary` for the fake), `OPENROUTER_API_KEY`, and for the real platform the Player credential, `COGAMES_API_URL` and `IDE_DEFAULT_COWORLD` | The per-profile `.env` hosting writes |
+| Write `/opt/data/host/.env` and both profiles' `.env`: one random `API_SERVER_KEY` per volume (kept in `/opt/data/local_stack/api_key`), `API_SERVER_HOST=0.0.0.0` in the host home (the gateway binds from there, so the published port reaches it) and `127.0.0.1` in the profiles (where the watcher and the seam read the gateway's address), `GATEWAY_MULTIPLEX_PROFILES=true`, `IDE_WORKSPACE=/opt/data/workspace`, `IDE_PLATFORM`, `IDE_RESEARCHER_PROFILES=researcher`, `SOFTMAX_PLAYER_ID` (`ply_canary` for the fake), `OPENROUTER_API_KEY`, and for the real platform the Player credential and `COGAMES_API_URL` | The per-profile `.env` hosting writes |
 | `prepare.py --source /src/<role> --hermes /opt/hermes/.venv/bin/hermes` with the image's Python, each with `HERMES_HOME=<profile home>` and that profile's `.env` exported (`as-profile.sh`); the first run builds the workspace environment with `uv sync` into `/opt/data/workspace/tools/venv` (uv's cache and the CPython 3.12 it fetches stay on the volume) | The same script; the environment is prebuilt at image build |
 | Fake platform: build the fakegame fixture repository at `/opt/data/upstream/fakegame_repo` and point the fake's manifest at it (`tools/local_stack/configure_fake_platform.py`, as the real-Hermes test does) | n/a |
 | `hermes gateway run` with the host home, in the background, log `/opt/data/gateway.log`; ready when `GET /v1/capabilities` answers 200 with the key. The lifetime `research serve` coordinator owns observation and workflow advancement | The multiplexing gateway |
@@ -518,9 +516,7 @@ On the real platform `up` never runs the submission scenario on its own, and `sc
 without `--really`, because the scenario uploads and submits the starter policy to a real
 league as your Player. Ask the Orchestrator for what you want through the seam instead; it
 finds Coworlds with `platform.leagues` and `platform.coworld`, and a switch clones the
-Coworld's source repository from the manifest (or from a `source` URL you name). With
-`IDE_DEFAULT_COWORLD=cow_...` in the environment, `prepare.py` registers and activates that
-Coworld on the fresh workspace before the first chat.
+Coworld's source repository from the manifest (or from a `source` URL you name).
 
 ### What still differs from production
 

@@ -32,7 +32,7 @@ import os
 import secrets
 import sqlite3
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -81,6 +81,13 @@ ORCHESTRATOR_CASES = [
         "I am asking for it now.",
     ),
     Case("orchestrator", "task", "create", TASK_CREATE),
+    Case(
+        "orchestrator",
+        "task",
+        "assign",
+        f"Assign Task {TASK} to the researcher profile: start from league L-7's standings, "
+        "because it is the only worker.",
+    ),
     Case(
         "orchestrator",
         "task",
@@ -155,9 +162,10 @@ class RealGateway:
 
     root: Path
     hermes_bin: Path
-    openrouter_key: str
+    # Not in the repr: pytest prints a failing test's fixtures with it.
+    openrouter_key: str = field(repr=False)
     model: str
-    host: Host | None = None
+    host: Host | None = field(default=None, repr=False)
     runs: HermesRuns | None = None
 
     def start(self) -> None:
@@ -186,7 +194,11 @@ class RealGateway:
         )
 
     def stop(self) -> None:
+        """Stop the gateway and remove the ``.env`` files: pytest keeps its temporary folders,
+        and these hold the OpenRouter key."""
         self.host.stop_gateway()
+        for dotenv in self.host.home.rglob(".env"):
+            dotenv.unlink()
 
     def env(self, role: str = "orchestrator") -> dict[str, str]:
         return {**self.host.profile_env(role), **self.host.dotenv_extra}

@@ -6,7 +6,7 @@ Costs real money, so it runs only on request: ``-m model``, ``OPENROUTER_API_KEY
 Environment, all optional:
   IDE_TOOL_CALL_MODELS   the one model every profile runs (default Kimi K3.1 Pro)
   IDE_TOOL_CALL_CASES    comma-separated substrings of case ids
-  IDE_TOOL_CALL_REPEATS  runs per case (default 5)
+  IDE_TOOL_CALL_REPEATS  runs per case (default 10)
   IDE_TOOL_CALL_PARALLEL runs at a time (default 4)
   IDE_TOOL_CALL_CONTEXT  a path: also write the captured real context there, for the direct
                          tests (``test_write_actions.py``) to send
@@ -32,14 +32,18 @@ pytestmark = [
     pytest.mark.skipif(not hermes_bin_from_env(), reason="HERMES_BIN is not set"),
 ]
 DEFAULT_MODEL = "moonshotai/kimi-k3.1-pro"
-DEFAULT_REPEATS = 5
-# Proposed from the 2026-11-04 measurement on Kimi K3.1 Pro: first try 109/110, after one refusal
-# 40/40, after three 40/40, and the one miss was a fault of the case, since fixed. Each interval's
-# lower end is at least 91%, so 95% is a rate this path has shown it can hold, with room for a
-# model's ordinary slips. At the default repeats the check fails at 49/55 on the first try or
-# 17/20 on a recovery depth, the first counts the sample can tell apart from 95%.
+DEFAULT_REPEATS = 10
+# Measured on Kimi K3.1 Pro on 2026-11-04: 283/285 valid over two runs, across the refusal depths.
+# The check is the plain reading of the rate: the share of valid calls must be at least this. At
+# the default repeats that asks for 114/120 on the first try and 38/40 per recovery depth. Chance
+# that all three rows pass, by the model's true rate (exact binomial):
+#                                               99%   97%   92%
+#   share at least 95%, 10 repeats (this check)  98%   72%    2%
+#   share at least 95%, 5 repeats                96%   69%    8%
+#   Wilson top end at least 95%, 10 repeats     100%   99%   39%  (passes 110/120, 36/40)
+#   Wilson low end at least 95%                 no run of this size can pass
 AGREED_RATE = 0.95
-MIN_SAMPLE = 20  # the default repeats give 55 first-try calls and 20 per recovery depth
+MIN_SAMPLE = 20  # fewer judged calls than this say too little to decide on
 MODEL = (harness.env_list("IDE_TOOL_CALL_MODELS") or [DEFAULT_MODEL])[0]
 
 
@@ -88,6 +92,12 @@ def test_a_real_session_gets_the_built_prompt_and_tools(captured):
     path = os.environ.get("IDE_TOOL_CALL_CONTEXT")
     if path:
         Path(path).write_text(json.dumps({r: asdict(c) for r, c in captured.items()}))
+    snapshot = json.loads(harness.HERMES_BUILTIN_TOOLS.read_text())
+    for role, context in captured.items():
+        assert context.hermes_tools == snapshot, (
+            f"{role}: a real Session's Hermes tools no longer match hermes_builtin_tools.json; "
+            "regenerate it (see harness.py)"
+        )
 
 
 def test_a_fresh_sessions_frozen_tools_show_no_drift(gateway, captured):
@@ -124,7 +134,7 @@ def test_write_action_through_a_real_session(case: Case, calls, request):
 def test_the_agreed_rate(refusals: int):
     """The parent task's done-when: the model tests pass at an agreed rate through a real session.
 
-    Fails when the valid rate is below ``AGREED_RATE`` by more than the sample's noise explains.
+    Fails when the share of valid calls is below ``AGREED_RATE``, at each refusal depth.
     """
     results = [r for r in harness.RESULTS.items if harness.refusals_in(r.case) == refusals]
     valid, total = harness.judged_rate(results)
@@ -132,8 +142,6 @@ def test_the_agreed_rate(refusals: int):
         pytest.skip(
             f"{total} judged calls after {refusals} refusals; a decision needs {MIN_SAMPLE}"
         )
-    low, high = harness.wilson_interval(valid, total)
-    assert not harness.clearly_below(valid, total, AGREED_RATE), (
-        f"after {refusals} refusals: {valid}/{total}, interval {low:.2f}-{high:.2f}, "
-        f"agreed rate {AGREED_RATE}"
+    assert valid / total >= AGREED_RATE, (
+        f"after {refusals} refusals: {valid}/{total}, agreed rate {AGREED_RATE}"
     )

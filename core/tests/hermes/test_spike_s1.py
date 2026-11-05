@@ -80,8 +80,9 @@ class Host:
     home: Path
     workspace: Path
     port: int
-    key: str
-    openrouter_key: str
+    # Not in the repr: pytest prints a failing test's fixtures with it.
+    key: str = field(repr=False)
+    openrouter_key: str = field(repr=False)
     log: Path
     process: subprocess.Popen | None = None
     timings: dict[str, float] = field(default_factory=dict)
