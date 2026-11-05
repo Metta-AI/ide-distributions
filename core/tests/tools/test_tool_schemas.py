@@ -1,12 +1,24 @@
 """The tool schemas the models see: object fields spell out their keys, every field is
 described, and a field several actions share has one shape."""
 
+import re
+
 import pytest
 
 from research_core.tools import catalog
-from research_core.tools.base import ActionSpec, ToolSpec, field_description, usage
+from research_core.tools.base import ActionSpec, ToolSpec, field_description, usage, validate_args
 
 ROLES = catalog.ROLES
+# A value of each JSON type, to ask the validator about a field.
+VALUES = {
+    "string": "x",
+    "integer": 1,
+    "number": 1.0,
+    "boolean": True,
+    "array": ["x"],
+    "object": {"x": "x"},
+    None: "x",
+}
 
 
 def specs():
@@ -126,3 +138,69 @@ def test_field_description_forms():
 def test_a_refusal_shows_an_object_fields_keys():
     how_to = usage(catalog.TOOLS["claim"], "researcher", "write")
     assert how_to["required"]["evidence"].endswith("Shape: [{type, ref, stance, note?}]")
+
+
+def role_actions():
+    """(role, spec, action) for every action a role can call."""
+    for role in ROLES:
+        for spec in catalog.tools_for(role):
+            for action in spec.actions_for(role):
+                yield role, spec, action
+
+
+def test_every_field_a_validator_requires_is_declared():
+    """A closed schema that leaves out a required field makes every call to the action refused:
+    Kimi models do not send undeclared fields (``core/tests/model/test_undeclared_fields.py``)."""
+    problems = []
+    for role in ROLES:
+        for spec in catalog.tools_for(role):
+            properties = spec.schema(role)["parameters"]["properties"]
+            problems += [f"{role} {spec.name}: {f}" for f in spec.required if f not in properties]
+    for role, spec, action in role_actions():
+        accepted = spec.accepted(action)
+        properties = spec.schema(role)["parameters"]["properties"]
+        for name in (*action.required, *action.example_fields):
+            if name not in accepted or name not in properties:
+                problems.append(f"{role} {spec.name}.{action.name}: {name}")
+    assert problems == []
+
+
+def test_every_key_an_object_requires_is_declared():
+    problems = []
+    for spec in specs():
+        for where, name, schema in declared_fields(spec):
+            for path, node in nested(f"{where}:{name}", schema):
+                missing = set(node.get("required") or ()) - set(node.get("properties") or ())
+                if missing:
+                    problems.append(f"{path}: {sorted(missing)}")
+    assert problems == []
+
+
+def named_actions(description: str) -> set[str]:
+    """The actions a field description says require or take it ("Required for a, b; optional
+    for c.") and those it describes by name ("write: Keywords ...")."""
+    names: set[str] = set()
+    for listed in re.findall(r"(?:[Rr]equired|[Oo]ptional) for ([a-z_, ]+)", description):
+        names.update(part.strip() for part in listed.split(","))
+    for listed in re.findall(r"(?:^|\. )([a-z_]+(?:, [a-z_]+)*): ", description):
+        names.update(part.strip() for part in listed.split(","))
+    return names
+
+
+def test_a_field_is_advertised_for_an_action_only_if_the_validator_accepts_it():
+    """What the tool list says an action takes and what ``validate_args`` lets through agree."""
+    problems = []
+    for role, spec, action in role_actions():
+        accepted = spec.accepted(action)
+        for name, schema in spec.properties(role).items():
+            if name == "action":
+                continue
+            args = {"action": action.name, name: VALUES[schema.get("type")]}
+            refused = (
+                f"{name} is not a field of {action.name}" in validate_args(spec, role, args)[1]
+            )
+            if refused == (name in accepted):
+                problems.append(f"{role} {spec.name}.{action.name}: {name}: validator disagrees")
+            if refused and action.name in named_actions(schema.get("description", "")):
+                problems.append(f"{role} {spec.name}.{action.name}: {name}: advertised, refused")
+    assert problems == []
