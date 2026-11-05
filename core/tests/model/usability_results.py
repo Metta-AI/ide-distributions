@@ -14,6 +14,7 @@ import json
 import math
 from collections import Counter
 from collections.abc import Iterable
+from dataclasses import asdict
 
 from tests.model.usability_situations import Situation
 
@@ -25,19 +26,8 @@ def short_hash(text: str) -> str:
 
 
 def situation_hash(situation: Situation) -> str:
-    return short_hash(
-        json.dumps(
-            [
-                situation.text,
-                situation.acts,
-                situation.skills,
-                situation.payload,
-                situation.args,
-                situation.before,
-            ],
-            sort_keys=True,
-        )
-    )
+    """Of every field, so a change to anything the model is shown or judged on says so."""
+    return short_hash(json.dumps(asdict(situation), sort_keys=True))
 
 
 def _top(counter: Counter, count: int = 5) -> dict[str, int]:
@@ -274,6 +264,11 @@ def compare(old: dict, new: dict) -> list[str]:
         f"Baseline {old['meta']['date']} at {old['meta']['commit']}; "
         f"this run {new['meta']['date']} at {new['meta']['commit']}."
     ]
+    if old["meta"].get("reads") != new["meta"].get("reads"):
+        lines.append(
+            "The two ran on different read results (meta.reads), so what differs below is not "
+            "comparable as a change in the tools."
+        )
     for scope in ("all", "orchestrator", "researcher", "plain", "hard"):
         before, after = old["totals"][scope], new["totals"][scope]
         lines.append(
@@ -292,13 +287,14 @@ def compare(old: dict, new: dict) -> list[str]:
             found.append(f"new situation {name}")
             continue
         if was["hash"] != row["hash"]:
-            found.append(f"situation {name} changed its text: not comparable")
+            found.append(f"situation {name} changed: not comparable")
             continue
         for metric, n_key in (
             ("right", "n"),
             ("first_call_right", "n"),
             ("skill_opened", "n"),
             ("args_right", "args_checked"),
+            ("act_valid_first_try", "attempted"),
         ):
             if metric in row and metric in was:
                 found.append(
@@ -324,14 +320,13 @@ def compare(old: dict, new: dict) -> list[str]:
                         0.05,
                     )
                 )
-    for section in ("sizes",):
-        for name, row in new[section].items():
-            was = old[section].get(name)
-            if was is not None and was["hash"] != row["hash"]:
-                found.append(
-                    f"{name} text changed: {was['bytes']} -> {row['bytes']} bytes, "
-                    f"{was.get('tokens')} -> {row.get('tokens')} tokens"
-                )
+    for name, row in new["sizes"].items():
+        was = old["sizes"].get(name)
+        if was is not None and was["hash"] != row["hash"]:
+            found.append(
+                f"{name} text changed: {was['bytes']} -> {row['bytes']} bytes, "
+                f"{was.get('tokens')} -> {row.get('tokens')} tokens"
+            )
     return [*lines, *[line for line in found if line]]
 
 
@@ -342,28 +337,63 @@ def _without(row: dict, *keys: str) -> dict:
     return {key: value for key, value in row.items() if key not in keys}
 
 
+def _endings_not_right(row: dict) -> dict:
+    """What ended the runs that did not go right. Most situations have none, so most rows save
+    the room of a line that would only repeat ``right``."""
+    acts = set(row["acts"])
+    return {
+        ending: count
+        for ending, count in row["ended_with"].items()
+        if ending not in acts and ending != "right"
+    }
+
+
+def _baseline_situation(row: dict) -> dict:
+    kept = {
+        key: row[key]
+        for key in (
+            "hash",
+            "n",
+            "right",
+            "first_call_right",
+            "args_checked",
+            "args_right",
+            "attempted",
+            "act_valid_first_try",
+        )
+    }
+    if "skill_opened" in row:
+        kept["skill_opened"] = row["skill_opened"]
+    missed = _endings_not_right(row)
+    if missed:
+        kept["ended_with"] = missed
+    return kept
+
+
 def _baseline_view(results: dict) -> dict:
-    """The counts :func:`compare` tests, without what the situations file or raw runs hold."""
+    """The counts :func:`compare` tests and the report's tables rest on; the raw runs and the
+    situations file hold the rest."""
     return {
         **results,
         "situations": {
-            name: _without(
-                row,
-                "role",
-                "acts",
-                "skills",
-                "outcomes",
-                "first_calls",
-                "skills_opened",
-                "first_ide_valid",
-                "mean_preparation",
-                "mean_requests",
-                "mean_skills_opened",
-            )
-            for name, row in results["situations"].items()
+            name: _baseline_situation(row) for name, row in results["situations"].items()
         },
-        "acts": {name: _without(row, "situations") for name, row in results["acts"].items()},
-        "skills": {name: _without(row, "situations") for name, row in results["skills"].items()},
+        "acts": {
+            name: {"n": row["n"], "right": row["right"], "instead": row["instead"]}
+            for name, row in results["acts"].items()
+        },
+        "skills": {
+            name: _without(row, "situations", "n_listed", "opened_listed")
+            for name, row in results["skills"].items()
+        },
+        "comprehension": {
+            name: {"right": row["right"], "n": row["n"]}
+            for name, row in results["comprehension"].items()
+        },
+        "opinions": {
+            name: {"n": row["n"], "clarity": row["clarity"]}
+            for name, row in results["opinions"].items()
+        },
     }
 
 

@@ -17,13 +17,15 @@ prompt sections around the skill index (from a request captured on 2026-11-03) a
 tools. The tools are ``model_tools.get_tool_definitions(enabled_toolsets=["hermes-api-server"],
 disabled_toolsets=["browser", "connections", "cronjob"])`` run inside the image, without
 ``memory`` (the profiles turn it off) and with ``vision_analyze`` (it appears only with a vision
-provider; its schema is from the same capture). This differs from
-``hermes_builtin_tools.json``, which is v0.21.6: the ``terminal`` and ``skill_view`` descriptions
-changed. The ``Execution discipline`` section is the one Hermes adds only for Kimi models, so it
+provider; its schema is from the same capture). ``delegate_task`` has the text a real session
+froze, which leaves out the sentence on what children may call. ``hermes_builtin_tools.json`` on
+``main`` is still v0.21.6, with other ``terminal`` and ``skill_view`` descriptions; the
+``tools/model-test-gaps`` branch refreshes it. The ``Execution discipline`` section is the one Hermes adds only for Kimi models, so it
 is here for both roles because the test model is Kimi.
 
 What is not real: the workspace itself. :data:`BRIEFING` and the session context describe a made
-up Coworld, in the format the plugin renders, and no tool touches a store.
+up Coworld, in the format the plugin renders, and no tool touches a store;
+``usability_reads`` answers for them.
 """
 
 # ruff: noqa: E501 (the briefing below is one line per item, as the plugin renders it)
@@ -45,6 +47,7 @@ from tests.model import harness
 HERMES = json.loads(Path(__file__).with_name("usability_hermes.json").read_text(encoding="utf-8"))
 SKILLS_DIR = Path(research_core.__file__).parent / "skills"
 COWORLD = "cow_cogs"
+TASK_ID = "T-21"
 COWORLD_CODE = f"/opt/data/workspace/{COWORLD}/code"
 BINDINGS = ("ab", "diagnosis", "eval-design", "replay-inspection", "survey")
 
