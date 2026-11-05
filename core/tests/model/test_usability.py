@@ -41,6 +41,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+import research_core
 from research_core.tools import catalog
 from tests.model import (
     harness,
@@ -63,12 +64,17 @@ def inputs_fingerprint(model: str, host: str, schemas: harness.SchemaSet) -> dic
     the model is sent, what answers it, and what judges it."""
     judging = (usability_probe, usability_readability, write_actions)
     source = "".join(Path(module.__file__).read_text() for module in judging)
+    package = Path(research_core.__file__).parent
+    for path in sorted(package.rglob("*")):  # the checks, the tools, the prompts and the skills
+        if path.suffix in (".py", ".md", ".json", ".yaml"):
+            source += path.read_text()
     tools = {role: schemas.tools(role) for role in catalog.ROLES}
     return {
         "model": model,
         "host": host,
         "provider": harness.provider_for(model, host),
         "schemas": schemas.label,
+        "hermes_source": os.environ.get("IDE_HERMES_SRC"),
         "reads": usability_reads.READS_HASH,
         "source": usability_results.short_hash(source),
         "tools": usability_results.short_hash(json.dumps([tools, usability_context.HERMES])),

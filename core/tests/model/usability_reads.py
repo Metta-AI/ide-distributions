@@ -23,7 +23,9 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
+from research_core.stats import decision_rule, ingest
 from research_core.store import settings
+from research_core.tools import experiment as experiment_tool
 from research_core.tools.base import error_payload
 from research_core.tools.directive import running_tasks_note
 from research_core.tools.settings import describe
@@ -50,6 +52,7 @@ TASK_MESSAGES = {
     ],
 }
 TOOLCHAIN_DIRECTIVE = {"r-complete-failed", "r-hard-fail-args"}
+GOAL_MET = {"o-hard-goal-complete"}
 LOW_CREDITS = {"r-wait-credits", "r-hard-wait-credits-args"}
 # What a situation's payload says of the mixin, against the fixture's floor of 20 episodes.
 MIXIN_FLOOR = {"o-hard-review-reopen": 100}
@@ -116,9 +119,11 @@ def goal_read(situation: Situation, args: dict) -> dict:
     goal_id = _ref("G", args["goal"])
     goal = GOALS.get(goal_id, GOALS["G-2"])
     claims = [_claim_summary(_claim(claim_id)) for claim_id in goal["claims"]]
+    where = {"where_it_stands": "rank 3 after round 13"} if situation.id in GOAL_MET else {}
     return {
         "record": {
             **_goal_row(goal_id),
+            **where,
             "tasks": {**goal["tasks"], "open": goal["open"]},
             "experiments": {
                 "proposed": 1,
@@ -273,6 +278,22 @@ def _message(number: int, text: str) -> dict:
     }
 
 
+REVIEWED_RESULT = "X-5 reached its verdict and the claims record it; see the checklist."
+
+
+def _reviewed_checklist(situation: Situation) -> dict:
+    """What a finished improvement Task holds (``task_types/improvement.md``), by its verdict."""
+    confirmed = situation.x5 == "confirmed"
+    return {
+        "claims": ["C-30"],
+        "experiment": "X-5",
+        "versions": ["V-12"],
+        "submission_candidate": "yes" if confirmed else "no",
+        "submission_reason": f"X-5 {X5_STATUS[situation.x5]} against the champion",
+        "merge_reason": "the change is the point" if confirmed else "the result is a finding",
+    }
+
+
 def own_task(situation: Situation) -> dict:
     """The run's own Task, as ``task.read`` and ``task.claim`` return it. The ``wait`` a situation
     has already made shows on it."""
@@ -331,7 +352,8 @@ def task_read(situation: Situation, args: dict) -> dict:
             task_id,
             status="complete",
             outcome="succeeded",
-            result="See the wake's payload.",
+            result=REVIEWED_RESULT,
+            checklist=_reviewed_checklist(situation),
             merge="yes" if situation.id != "o-hard-review-refuted" else "no",
             completed_commit="abc1234",
             experiment_id=5,
@@ -716,6 +738,24 @@ def _experiment(
     }
 
 
+def _computed_results(record: dict) -> dict:
+    """``results`` as the real close computes them from the record's stored rows."""
+    rows = experiment_tool.stored_rows(record["runs"])
+    design = experiment_tool.design_from(
+        record["methods"], record["methods"]["candidate"], record["runs"], rows
+    )
+    kept, _ = ingest.ingest_rows(rows, design.game_version, [m.name for m in design.metrics])
+    pairs = ingest.pair(experiment_tool.one_row_per_seed(kept), design)
+    verdict = decision_rule.evaluate(design, pairs)
+    measurements = experiment_tool.measurements_from(design, pairs, verdict)
+    return {
+        "verdict": verdict.verdict,
+        "measurements": measurements,
+        "interpretation": experiment_tool.summarise(verdict, measurements, len(pairs)),
+        "reason_codes": verdict.reason_codes,
+    }
+
+
 def _closed_results(verdict: str, candidate_rate: float, baseline_rate: float) -> dict:
     return {
         "verdict": verdict,
@@ -736,18 +776,18 @@ def _closed_results(verdict: str, candidate_rate: float, baseline_rate: float) -
 def _x5(situation: Situation) -> dict:
     state = situation.x5
     status = X5_STATUS[state]
-    results = {}
-    if status in ("confirmed", "refuted"):
-        results = _closed_results(status, BASELINE_WIN_RATE + X5_EFFECT[state], BASELINE_WIN_RATE)
-    return _experiment(
+    record = _experiment(
         "X-5",
         "Does a lower retreat threshold reduce late losses?",
         status,
         _x5_baseline(state),
         "" if state == "designed" else "V-12",
         _x5_runs(state),
-        results,
+        {},
     )
+    if status in ("confirmed", "refuted"):
+        record["results"] = _computed_results(record)
+    return record
 
 
 def _x3() -> dict:
@@ -968,7 +1008,10 @@ def _division_row() -> dict:
     return {"id": DIVISION, "name": "Main", "level": 1, "league_id": LEAGUE}
 
 
-def _standing_rows() -> list[dict]:
+def _standing_rows(situation: Situation) -> list[dict]:
+    order = list(STANDINGS)
+    if situation.id in GOAL_MET:  # our Player, 5th in the fixture, reached 3rd
+        order.insert(2, order.pop(4))
     return [
         {
             "division_id": DIVISION,
@@ -981,7 +1024,7 @@ def _standing_rows() -> list[dict]:
             "rounds_played": 12,
             "policy_label": f"{name.lower()}-main:v3",
         }
-        for rank, (player, name, score) in enumerate(STANDINGS, start=1)
+        for rank, (player, name, score) in enumerate(order, start=1)
     ]
 
 
@@ -1106,13 +1149,13 @@ def _replay_pin(episode: str) -> dict:
     }
 
 
-def _standings(args: dict) -> dict:
+def _standings(situation: Situation, args: dict) -> dict:
     if args.get("division"):
-        return {"division": args["division"], "standings": _standing_rows()}
+        return {"division": args["division"], "standings": _standing_rows(situation)}
     return {
         "league": args.get("league") or LEAGUE,
         "divisions": [_division_row()],
-        "standings": _standing_rows(),
+        "standings": _standing_rows(situation),
     }
 
 
@@ -1140,7 +1183,7 @@ PLATFORM: dict[str, Callable[[Situation, dict], dict]] = {
     "leagues": lambda s, a: {"leagues": [_league_row()]},
     "league": lambda s, a: {"league": _league_row(str(a["league"]))},
     "divisions": lambda s, a: {"league": a["league"], "divisions": [_division_row()]},
-    "standings": lambda s, a: _standings(a),
+    "standings": _standings,
     "active_policies": lambda s, a: {
         "league": a["league"],
         "excluded": {"player": PLAYER if a.get("exclude_player") else None, "user_players": None},
@@ -1167,7 +1210,7 @@ PLATFORM: dict[str, Callable[[Situation, dict], dict]] = {
             {
                 "league": _league_row(),
                 "memberships": [_membership(PLAYER, "pv-7", champion=True)],
-                "standings": [row for row in _standing_rows() if row["player_id"] == PLAYER],
+                "standings": [row for row in _standing_rows(s) if row["player_id"] == PLAYER],
             }
         ],
     },

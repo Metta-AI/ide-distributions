@@ -1268,7 +1268,7 @@ HARD = [
     ),
     chat(
         "hard-goal-complete",
-        "G-1's end state is met: X-5 confirmed it. Close G-1 out.",
+        "G-1's end state is met: we reached rank 3 in round 13. Close G-1 out.",
         ("goal.set_status",),
         ("goals-and-tasks",),
         args={"status": "completed"},
@@ -1563,7 +1563,11 @@ HARD = [
         ("xp.request",),
         ("run-eval", "experiment"),
         task_type="improvement",
-        args={"opponents": r"(?=.*\bpv-1\b)(?=.*\bpv-2\b)", "league": None},
+        args={
+            "opponents": r"(?=.*\bpv-1\b)(?=.*\bpv-2\b)",
+            "league": None,
+            "arms?": "(?=.*baseline)(?=.*candidate)",
+        },
         before=("upload",),
     ),
     task(
