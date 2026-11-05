@@ -23,7 +23,6 @@ OPERATIONS = (
     "practice_status",
     "program_release",
     "task_update",
-    "name_keep",
 )
 
 

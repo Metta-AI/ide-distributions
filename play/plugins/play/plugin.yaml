@@ -14,5 +14,4 @@ provides_tools:
   - practice_status
   - program_release
   - task_update
-  - name_keep
   - fresh_start

@@ -31,7 +31,6 @@ PLAY_TOOLS = {
         ["step", "status", "detail"],
         {"title", "step", "status", "detail", "version", "outcome"},
     ),
-    "name_keep": (["name"], {"name"}),
     "fresh_start": (["confirm"], {"confirm"}),
 }
 
