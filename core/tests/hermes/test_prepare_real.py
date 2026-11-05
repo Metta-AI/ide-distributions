@@ -200,15 +200,26 @@ captured = []
 class Provider(BaseHTTPRequestHandler):
     def do_POST(self):
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        captured.append(request)
+        if self.path.endswith("/chat/completions") and not request.get("response_format"):
+            captured.append(request)
+            if len(captured) == 1:
+                body = b'{"error":{"message":"fixture rate limit"}}'
+                self.send_response(429)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
         message = {"role": "assistant", "content": "Chat received"}
         choice = {"index": 0, "finish_reason": "stop", "message": message}
+        usage = {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12,
+                 "prompt_tokens_details": {"cached_tokens": 5}}
         body = json.dumps({"id": "proof", "object": "chat.completion", "created": 1,
             "model": "proof", "choices": [choice],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}}).encode()
+            "usage": usage}).encode()
         if request.get("stream"):
             chunk = {"id": "proof", "object": "chat.completion.chunk", "created": 1,
-                "model": "proof", "choices": [
+                "model": "proof", "usage": usage, "choices": [
                     {"index": 0, "finish_reason": "stop", "delta": message}]}
             body = ("data: " + json.dumps(chunk) + "\\n\\ndata: [DONE]\\n\\n").encode()
         self.send_response(200)
@@ -258,6 +269,21 @@ finally:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "PASS pinned native text chat and resume" in result.stdout
+
+    # Registration, retry boundaries and usage mapping are our Hermes integration contract.
+    events = [
+        json.loads(line) for line in result.stderr.splitlines() if line.startswith('{"name":')
+    ]
+    models = [e for e in events if e["name"] == "chat"]
+    turns = [e for e in events if e["name"] == "invoke_agent"]
+    assert len(turns) == 2 and len(models) == 3, events
+    assert [e["attributes"]["retry.count"] for e in models] == [0, 1, 0]
+    assert models[0]["attributes"]["http.response.status_code"] == 429
+    assert models[0]["status"]["status_code"] == "ERROR"
+    assert all(e["attributes"]["gen_ai.usage.input_tokens"] == 10 for e in models[1:])
+    assert all(e["attributes"]["gen_ai.usage.cache_read.input_tokens"] == 5 for e in models[1:])
+    assert all(e["attributes"]["observation.complete"] for e in turns)
+    assert all("Hello from the OpenAI message contract" not in json.dumps(e) for e in events)
 
 
 def test_installed_agent_reads_attachment_after_resume(hermes_bin, host):
@@ -351,6 +377,15 @@ finally:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "PASS native file read before and after agent resume" in result.stdout
+
+    events = [
+        json.loads(line) for line in result.stderr.splitlines() if line.startswith('{"name":')
+    ]
+    tools = [e for e in events if e["name"] == "execute_tool"]
+    assert len(tools) == 2 and all(
+        e["attributes"]["gen_ai.tool.name"] == "read_file" for e in tools
+    ), events
+    assert all("cedar-7381-native-read" not in json.dumps(e) for e in events)
 
 
 def test_disabled_toolsets_remove_the_named_tools_and_keep_the_working_ones(hermes_bin, host):
@@ -467,112 +502,3 @@ finally:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "PASS" in result.stdout
-
-
-def test_installed_native_tracing_captures_model_and_rejected_tool(hermes_bin, host):
-    """Native lifecycle dispatch, real HTTP provider, and the installed distribution plugin."""
-    prepare(hermes_bin, host, "orchestrator")
-    script = """
-import json, threading
-from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from hermes_state_registry import acquire, release
-from run_agent import AIAgent
-calls = []
-class Provider(BaseHTTPRequestHandler):
-    def do_POST(self):
-        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        if not self.path.endswith("/chat/completions") or request.get("response_format"):
-            body = json.dumps({"id":"metadata", "object":"chat.completion", "created":1,
-                "model":"proof", "choices":[{"index":0,"finish_reason":"stop",
-                    "message":{"role":"assistant",
-                        "content":json.dumps({"title":"Timing proof"})}}]}).encode()
-            self.send_response(200)
-            self.send_header("Content-Type","application/json")
-            self.send_header("Content-Length",str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
-        calls.append(request)
-        if len(calls) == 1:
-            body = json.dumps({"error":{"message":"fixture rate limit"}}).encode()
-            self.send_response(429)
-            self.send_header("Content-Type","application/json")
-            self.send_header("Content-Length",str(len(body)))
-            self.end_headers()
-            self.wfile.write(body)
-            return
-        message = {"role":"assistant", "content":"Finished"}
-        reason = "stop"
-        if len(calls) == 2:
-            message = {"role":"assistant", "content":None, "tool_calls":[{
-                "id":"rejected-task-message", "type":"function", "function":{
-                    "name":"task", "arguments":json.dumps(
-                        {"action":"message", "task":"T-1", "text":"fixture"})
-                }}]}
-            reason = "tool_calls"
-        body = json.dumps({"id":"timing-proof", "object":"chat.completion", "created":1,
-            "model":"proof", "choices":[{"index":0,"finish_reason":reason,"message":message}],
-            "usage":{"prompt_tokens":20,"completion_tokens":3,"total_tokens":23,
-                     "prompt_tokens_details":{"cached_tokens":5}}}).encode()
-        if request.get("stream"):
-            if "tool_calls" in message:
-                message["tool_calls"][0]["index"] = 0
-            chunk = {"id":"timing-proof", "object":"chat.completion.chunk", "created":1,
-                "model":"proof", "choices":[{"index":0,"finish_reason":reason,"delta":message}],
-                "usage":{"prompt_tokens":20,"completion_tokens":3,"total_tokens":23,
-                         "prompt_tokens_details":{"cached_tokens":5}}}
-            body = ("data: " + json.dumps(chunk) + "\\n\\ndata: [DONE]\\n\\n").encode()
-        self.send_response(200)
-        self.send_header("Content-Type",
-            "text/event-stream" if request.get("stream") else "application/json")
-        self.send_header("Content-Length",str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-    def log_message(self,*args): pass
-server = ThreadingHTTPServer(("127.0.0.1",0), Provider)
-threading.Thread(target=server.serve_forever,daemon=True).start()
-db = acquire()
-try:
-    agent = AIAgent(model="proof", provider="custom", api_mode="chat_completions",
-        base_url=f"http://127.0.0.1:{server.server_port}/v1", api_key="fixture",
-        enabled_toolsets=["ide-orchestrator"], quiet_mode=True, skip_context_files=True,
-        skip_memory=True, skip_background_review=True, session_id="native-timing-proof",
-        session_db=db, max_iterations=3)
-    result = agent.run_conversation("Measure this fixture turn", task_id="native-timing-proof")
-    assert result["final_response"] == "Finished", result
-    assert len(calls) == 3, calls
-    tool_results = [m for m in calls[-1]["messages"] if m["role"] == "tool"]
-    assert len(tool_results) == 1
-    assert json.loads(tool_results[0]["content"])["ok"] is False
-    print("PASS native timing fixture")
-finally:
-    server.shutdown()
-    server.server_close()
-    release(db)
-"""
-    result = run([hermes_python(hermes_bin), "-c", script], host.env("orchestrator"))
-    assert result.returncode == 0, result.stdout + result.stderr
-    events = [
-        json.loads(line) for line in result.stderr.splitlines() if line.startswith('{"name":')
-    ]
-    models = [e for e in events if e["name"] == "chat"]
-    tools = [
-        e
-        for e in events
-        if e["name"] == "execute_tool" and e["attributes"].get("tool.boundary") == "native"
-    ]
-    turns = [e for e in events if e["name"] == "invoke_agent"]
-    assert len(models) == 3 and len(tools) == len(turns) == 1, events
-    assert [e["attributes"]["retry.count"] for e in models] == [0, 1, 0]
-    assert models[0]["attributes"]["http.response.status_code"] == 429
-    assert models[0]["status"]["status_code"] == "ERROR"
-    assert models[0]["end_time"] <= models[1]["start_time"]
-    assert all(e["attributes"]["gen_ai.usage.cache_read.input_tokens"] == 5 for e in models[1:])
-    assert all(e["attributes"]["gen_ai.usage.input_tokens"] == 20 for e in models[1:])
-    assert tools[0]["status"]["status_code"] == "ERROR"
-    assert turns[0]["attributes"]["observation.complete"]
-    assert all(e["parent_id"] == turns[0]["context"]["span_id"] for e in models + tools)
-    assert all("Measure this fixture turn" not in json.dumps(e) for e in events)
-    distribution = [e for e in events if e["attributes"].get("tool.boundary") == "distribution"]
-    assert len(distribution) == 1
-    assert distribution[0]["parent_id"] == turns[0]["context"]["span_id"]

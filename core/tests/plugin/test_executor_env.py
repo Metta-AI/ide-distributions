@@ -64,6 +64,7 @@ def test_workspace_tools_inherit_logs_and_propagate_standard_context(tmp_path, m
     from research_core import layout, telemetry
 
     env = {"IDE_WORKSPACE": str(tmp_path / "ws")}
+    monkeypatch.setenv("IDE_WORKSPACE", env["IDE_WORKSPACE"])
     ws = layout.from_env(env)
     ws.venv_python.parent.mkdir(parents=True)
     ws.venv_python.touch()
@@ -74,8 +75,11 @@ def test_workspace_tools_inherit_logs_and_propagate_standard_context(tmp_path, m
         return subprocess.CompletedProcess(args[0], 0, stdout='{"ok":false}')
 
     monkeypatch.setattr(executor.subprocess, "run", run)
-    with telemetry.span("native.tool") as parent:
-        assert executor.run_in_workspace("demo", {}, env) == '{"ok":false}'
+    # Match Hermes's isolated handler worker: the parent exists but is not current.
+    with telemetry.tracer().start_span("native.tool") as parent:
+        tool = types.SimpleNamespace(name="demo", executor="workspace", timeout_s=1)
+        handler = executor.make_handler(tool, "researcher", lambda session: parent)
+        assert handler({}, session_id="s1") == '{"ok":false}'
     assert "stderr" not in calls[0] and "capture_output" not in calls[0]
     context = telemetry.process_context(calls[0]["env"])
     from opentelemetry import trace
