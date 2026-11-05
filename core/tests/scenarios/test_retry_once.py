@@ -156,6 +156,33 @@ def test_an_interrupt_ends_the_wait_and_the_retry_joins_the_command(ctx, monkeyp
     assert count(ctx, "tasks") == 1
 
 
+def test_an_interrupted_retry_that_finds_the_result_leaves_the_next_retry_protected(
+    ctx, monkeypatch
+):
+    with monkeypatch.context() as patch:
+        die_before_the_reply(patch)
+        with pytest.raises(ProcessDied):
+            call(ctx, CREATE)
+    apply(ctx)
+    interrupt = ModuleType("tools.interrupt")
+    interrupt.is_interrupted = lambda: True
+    with monkeypatch.context() as patch:
+        patch.setitem(sys.modules, "tools", ModuleType("tools"))
+        patch.setitem(sys.modules, "tools.interrupt", interrupt)
+        assert call(ctx, CREATE)["ok"]
+    assert call(ctx, CREATE)["record"]["id"] == "T-1"
+    assert count(ctx, "tasks") == 1
+
+
+def test_a_repeat_that_joins_a_pending_command_and_sees_it_finish_says_so(ctx, monkeypatch):
+    with monkeypatch.context() as patch:
+        patch.setattr(transitions, "REQUEST_WAIT_SECONDS", 0)
+        call(ctx, CREATE)
+    joined = call_applied(ctx, CREATE)
+    assert joined["ok"] and "did nothing" in joined["repeat_of_earlier_call"]
+    assert count(ctx, "tasks") == 1
+
+
 def test_a_repeat_while_the_coordinator_died_mid_transaction_applies_once(ctx, monkeypatch):
     class CoordinatorDied(BaseException):
         pass

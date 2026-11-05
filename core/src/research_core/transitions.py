@@ -187,7 +187,7 @@ def request_generated(ctx: ToolContext, tool: str, args: dict) -> dict:
     payload = json.dumps(fields, sort_keys=True)
     with admissions.dispatch_lock(ctx.wstore), ctx.store.tx(ctx.actor) as tx:
         earlier = tx.one(
-            "SELECT id,result FROM transition_commands WHERE reply_seen_at IS NULL AND tool=?"
+            "SELECT id FROM transition_commands WHERE reply_seen_at IS NULL AND tool=?"
             " AND args=? AND role=? AND actor=? AND actor_epoch IS ? ORDER BY rowid DESC LIMIT 1",
             (tool, payload, ctx.role, str(ctx.actor), ctx.actor.epoch),
         )
@@ -200,7 +200,7 @@ def request_generated(ctx: ToolContext, tool: str, args: dict) -> dict:
     state = CommandReceipt.parse(result).state
     if state == "pending":
         return {**result, "next": PENDING_NEXT_STEP}
-    if state == "applied" and earlier is not None and earlier["result"] is not None:
+    if state == "applied" and earlier is not None:
         result["repeat_of_earlier_call"] = REPEAT_NOTE
     note_delivery(ctx, result)
     return result
@@ -218,13 +218,14 @@ def note_delivery(ctx: ToolContext, result: dict) -> None:
     """Record that the session that issued this finished command is being given its result: an
     identical call is a new intent from now on, and the Task revisions it shows count as seen.
     Both commit together, so neither can fail after the other. Another session's read changes
-    nothing, and neither does repeating a read of a delivered command."""
+    nothing, and neither does repeating a read of a delivered command. Under an interrupt Hermes
+    may discard this reply, so it stays unmarked: at worst a deliberate repeat gets REPEAT_NOTE."""
     command_id = result["command_id"]
     command = ctx.store.one(
         "SELECT tool,reply_seen_at FROM transition_commands WHERE id=? AND actor=?",
         (command_id, str(ctx.actor)),
     )
-    if command is None or command["reply_seen_at"] is not None:
+    if command is None or command["reply_seen_at"] is not None or _hermes_interrupted():
         return
     from research_core.tools import task
 
