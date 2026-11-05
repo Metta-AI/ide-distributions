@@ -19,6 +19,7 @@ import json
 import threading
 import urllib.error
 import urllib.request
+from collections import Counter
 from dataclasses import dataclass, field
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -43,6 +44,8 @@ class ForcingProxy:
     scripts: dict[str, list[ForcedCall]] = field(default_factory=dict)
     requests: list[dict] = field(default_factory=list)  # every chat request, as Hermes sent it
     server: ThreadingHTTPServer | None = None
+    answered: Counter[str] = field(default_factory=Counter)  # script key -> calls forced so far
+    lock: threading.Lock = field(default_factory=threading.Lock)
 
     def start(self) -> str:
         proxy = self
@@ -65,29 +68,34 @@ class ForcingProxy:
     def stop(self) -> None:
         self.server.shutdown()
 
-    def _script_for(self, messages: list[dict]) -> list[ForcedCall]:
+    def next_forced(self, messages: list[dict]) -> tuple[ForcedCall, int] | None:
+        """The conversation's next scripted call and its position, if any are left. Counted here,
+        not from the request: the plugin's middleware drops repeated refused calls from it."""
         first_user = next((m for m in messages if m.get("role") == "user"), {})
         content = first_user.get("content")
         text = content if isinstance(content, str) else json.dumps(content)
-        return next((calls for key, calls in self.scripts.items() if key in text), [])
+        script_key = next((key for key in self.scripts if key in text), None)
+        if script_key is None:
+            return None
+        with self.lock:
+            index = self.answered[script_key]
+            if index == len(self.scripts[script_key]):
+                return None
+            self.answered[script_key] += 1
+        return self.scripts[script_key][index], index
 
     def _on_post(self, handler: BaseHTTPRequestHandler, raw: bytes) -> None:
         if not handler.path.endswith("/chat/completions"):
             self._forward(handler, raw)
             return
         body = json.loads(raw)
-        messages = body.get("messages") or []
-        script = self._script_for(messages)
         # Only the main loop offers tools: titling and other side requests are forwarded.
-        forced_so_far = sum(
-            str(m.get("tool_call_id", "")).startswith(FORCED_ID_PREFIX) for m in messages
-        )
         if body.get("tools"):
             self.requests.append(body)
-        if body.get("tools") and forced_so_far < len(script):
-            self._answer_with(handler, script[forced_so_far], forced_so_far, body)
-            return
-        if body.get("tools"):
+            forced = self.next_forced(body.get("messages") or [])
+            if forced is not None:
+                self._answer_with(handler, *forced, body)
+                return
             raw = json.dumps({**body, "reasoning": HERMES_DEFAULT_REASONING}).encode()
         self._forward(handler, raw)
 

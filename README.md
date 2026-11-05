@@ -123,6 +123,13 @@ calls with the real context, 60 runs per row (November 4, 2026):
 | 4 identical | 20/60, 33% [23-46] | 56/60, 93% [84-97] |
 | 1 of one, 2 of another | 37/60, 62% [49-73] | 55/60, 92% [82-96] |
 
+Through this test, on real Hermes with three identical refused calls: 20/40, 50% [35-65] with the
+middleware unregistered, and 39/40, 98% [87-100] with it.
+
+Hermes's loop warnings stay on. On three different refused calls, where its "Do not switch to
+text-only replies; keep using tools" line fires, the next call was valid 59/60 with its warnings and
+56/60 with `warnings_enabled: false`, so nothing showed the text prolonging a loop.
+
 Rewording the repeat refusal did not help: a full refusal, a filled-in example from the model's own
 arguments, naming the field, the field first, and no way out all fell between 47% and 62%, with
 overlapping intervals. A schema that lacks the required field stays at 0/60 whatever the text says,
