@@ -827,34 +827,6 @@ class SeamServer:
             )
             return {"state": "dispatch"}
 
-    def cleanup_unbound_chats(self, body: dict) -> dict:
-        with self.stores() as stores:
-            selected = [
-                dict(row)
-                for row in stores.wstore.q(
-                    "SELECT id,profile,run_id FROM sessions WHERE kind='chat'"
-                    " AND coworld_id IS NOT NULL"
-                    " AND json_extract(session_context,'$.league') IS NULL"
-                )
-            ]
-            if "execute_ids" in body:
-                allowed = {row["id"] for row in selected}
-                if not set(body["execute_ids"]).issubset(allowed):
-                    raise Refused(HTTPStatus.CONFLICT, "Cleanup selection changed; preview again")
-                with stores.wstore.tx(Actor.user("cleanup-unbound-chats")) as tx:
-                    for session_id in body["execute_ids"]:
-                        tx.execute("DELETE FROM aide_receipts WHERE session_id=?", (session_id,))
-                        tx.execute(
-                            "DELETE FROM client_admissions WHERE session_id=?", (session_id,)
-                        )
-                        tx.execute("DELETE FROM sessions WHERE id=?", (session_id,))
-                        tx.event(
-                            "session.deleted",
-                            session_id,
-                            {"reason": "operator cleanup of unbound chat"},
-                        )
-            return {"items": selected}
-
     def aide_pending(self, body: dict) -> dict:
         session_id = _text(body, "session_id")
         pending = body["pending"]
@@ -1339,7 +1311,6 @@ class _Handler(BaseHTTPRequestHandler):
             "/session-open": seam.session_open,
             "/aide-pending": seam.aide_pending,
             "/aide-command": seam.aide_command,
-            "/cleanup-unbound-chats": seam.cleanup_unbound_chats,
             "/message": seam.message,
             "/message-cancel": seam.message_cancel,
             "/messages/context": seam.message_context,

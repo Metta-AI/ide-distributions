@@ -221,13 +221,6 @@ Normal main pushes still dispatch the existing legacy image release, unchanged. 
 qualification is an explicit manual selection through the existing release machinery and uses
 an isolated qualified pointer; it never replaces `autoresearch` or enrolls another workspace.
 
-Before cutting over a retained volume containing pre-league Coworld chat sessions, preview
-those exact records with `/opt/hermes/.venv/bin/python /opt/distribution/image/cleanup-unbound-chats.py`.
-Add `--execute` to delete the selected native transcripts through the gateway's supported
-session DELETE route and then retire their workspace registry/admission records. Active native
-write guards are retained and reported for a later retry. Scoped chats, workspace chats,
-tasks and goals are outside this cleanup. Startup never performs this deletion automatically.
-
 Text acceptance uses durable native intake identities. Supported input is one final user message,
 preceded optionally by plain-text system/developer messages or user messages named
 `softmax_page_context`. Page data uses the named user form. Other prefix shapes return
