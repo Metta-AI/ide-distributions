@@ -459,7 +459,7 @@ def test_task_card_stays_in_the_existing_workspace_journal(program):
     card = Journal.load(program.workspace).card
     assert card.key.startswith("play-")
     body = card.body
-    assert body["origin"] == "player"  # the bridge forwards only coach tasks
+    assert body["origin"] == "player"
     assert body["state"] == "active" and body["version"] == 2
     assert [s["rung"] for s in body["steps"]] == [
         "reflect",

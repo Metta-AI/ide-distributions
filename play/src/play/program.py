@@ -6,16 +6,15 @@ a new version of one program with a stable name, practiced, and released only wh
 so. ``journal.json`` (``play.journal``) remembers every version, practice and release, so the
 cogent names things as the user does ("towerless v2") and never needs a platform id.
 
-Every platform call goes through the shared ``softmax_tool`` client: the credential is installed
+Every platform call goes through the vendored ``softmax_tool`` client: the credential is installed
 into the profile-local Softmax home before each CLI call, and every mutating call (upload,
 practice, release) first runs ``whoami`` and refuses unless the credential is the Player
 ``RESEARCH_PLAYER_ID`` (``SoftmaxClient.require_player``). League-scoped calls receive their league explicitly.
 
-The coach's refusals come back as data, never as an error and never retried:
-``{"outcome": "refused", "refusal": "credit_denied",
-"reason", "state"?, "ask"?}``. The same call made again sends the same request (practice reuses
-its idempotency key; release looks up the league's submissions first), so asking again after the
-coach answers is safe.
+A credit refusal comes back as data, never as an error and never retried:
+``{"outcome": "refused", "refusal": "credit_denied", "reason"}``. The same call made again sends
+the same request (practice reuses its idempotency key; release looks up the league's submissions
+first), so asking again is safe.
 """
 
 import difflib
@@ -1032,7 +1031,7 @@ class Program:
         try:
             result = self.client.submit(label, league, self.player)
         except SoftmaxCliError as error:
-            # The shared client raises a 402 as a failure; it is the same refusal as practice's.
+            # The vendored client raises a 402 as a failure; it is the same refusal as practice's.
             if not xp.CREDIT_DENIAL.search(str(error)):
                 raise
             stderr = re.split(r" exited -?[0-9]+: ", str(error), maxsplit=1)[-1]

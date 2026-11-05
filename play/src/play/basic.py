@@ -7,10 +7,9 @@ continuation, labels and ``GOTO`` / ``GOSUB`` / ``ON``, single-line and block ``
 and ``ELSE``, ``WHILE`` / ``WEND``, ``FOR`` / ``TO`` / ``STEP`` / ``NEXT``, ``DO`` / ``LOOP``,
 ``SELECT CASE``, ``EXIT SUB`` / ``FOR`` / ``DO``, top-level ``SUB`` / ``END SUB`` and top-level ``DIM``
 arrays with literal bounds. It also counts what it can cheaply: the 64 routines and the 256 globals (512 in structures mode)
-(only variables assigned to, so a floor, never an overcount). It checks the limits the builder's GotA reference states: 64 KiB of source, 32 arrays and
+(only variables assigned to, so a floor, never an overcount). It checks GotA's stated limits: 64 KiB of source, 32 arrays and
 4,096 array elements in total. A program that opts into GotA's structures (a ``' @gota-structures``
-comment; researcher/games/gota/gates/limits.py) gets the host's storage, so only its size and
-blocks are checked. Generals allows 256 KiB of source and 100,000 array elements;
+comment) gets the host's larger limits: 512 globals, 128 arrays and 262,144 array elements. Generals allows 256 KiB of source and 100,000 array elements;
 its compiler owns routine and global storage limits. ``TYPE`` blocks and ``.`` member
 access are accepted in both games.
 

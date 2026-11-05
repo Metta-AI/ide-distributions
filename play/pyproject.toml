@@ -1,7 +1,7 @@
 [project]
 name = "play"
 version = "0.1.0"
-description = "The user's own program on one coworld: starter, upload, practice, release"
+description = "The user's own program: starter, upload, practice, release"
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "pydantic>=2",
@@ -30,4 +30,4 @@ addopts = "-m 'not hermes'"
 [tool.ruff]
 line-length = 100
 target-version = "py312"
-extend-exclude = ["src/ide_research_core"]  # play's vendored copy of the former shared package; kept as pinned
+extend-exclude = ["src/ide_research_core"]  # play's vendored copy of the former shared package

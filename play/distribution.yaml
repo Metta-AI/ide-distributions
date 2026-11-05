@@ -1,6 +1,6 @@
 name: play
 version: 0.1.0
-description: The user's Softmax cogent on one coworld. Changes the program itself on the user's request, saves it as a new version, practices it, reports the results plainly and releases it when the user says so.
+description: The user's Softmax cogent. Changes the program itself on the user's request, saves it as a new version, practices it, reports the results plainly and releases it when the user says so.
 hermes_requires: ">=0.21.6"
 env_requires:
   - name: OPENROUTER_API_KEY
@@ -15,7 +15,7 @@ env_requires:
     description: Softmax API server.
   - name: RESEARCH_PLAYER_ID
     required: true
-    description: Id of the Softmax player the credential acts as (the shared softmax tool's name for it).
+    description: Id of the Softmax player the credential acts as (the vendored softmax tool's name for it).
   - name: PLAY_WORKSPACE
     required: true
     description: >-
