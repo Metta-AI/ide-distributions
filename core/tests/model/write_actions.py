@@ -6,16 +6,17 @@ expected tool: a call to that tool with no ``action``, or with any action that i
 That call must pass the checks production runs before anything changes: ``validate_args`` (the
 tools' argument check) and, for the actions whose store checks need no records, those checks
 too (``RECORD_CHECKS``). Calls before it get the answer production would give: the tool's own
-refusal when the argument check refuses them, otherwise a plausible result (``RESULT``). A model
-that has not called the tool within ``MAX_REQUESTS`` requests fails the case. A recovery case
-starts from a history holding one refused call and the refusal the tool returns today.
+refusal when the argument check refuses them, otherwise a plausible result (``RESULT``, or the
+case's ``read_result``). A model that has not called the tool within ``MAX_REQUESTS`` requests
+fails the case. A recovery case starts from a history holding one refused call and the refusal
+the tool returns today.
 
 Which write actions are covered. One case per write action, of the record tools (claim, goal,
 task, experiment, directive, settings, ui), that has at least two required fields, so the model
 has to compose arguments rather than pass one reference; plus ``ui.notify``, the incident wake's
 other write. Left out, to keep a full run near $1.60 (2026-11-02):
-  - actions with the same shape as a covered one: task.propose, task.message and task.reject
-    for the Orchestrator (task.create, task.answer), task.link (two references), and the
+  - actions with the same shape as a covered one: task.propose and task.reject for the
+    Orchestrator (task.create, task.answer), task.link (two references), and the
     Researcher's claim.retire and experiment.abandon (covered for the Orchestrator);
   - workspace.change_complete, which needs a worktree the instruction cannot make plausible;
   - the flat tools (submit, upload, wiki_edit, forum_post, softmax_api, github): their schemas
@@ -51,7 +52,7 @@ MAX_REQUESTS = 3
 # write, answered and not judged.
 READ_ACTIONS = frozenset(
     {"read", "list", "search", "inspect_evidence", "status", "doctor", "capabilities"}
-    | {"environment_guide"}
+    | {"environment_guide", "workers", "command"}
 )
 # The answer to a call production would accept (reads, mostly): it confirms rather than
 # contradicts the instruction, so a cautious model is not sent looking for missing records.
@@ -72,6 +73,8 @@ class Case:
     # Recovery: the arguments of an earlier call that the tool refused. The history holds that
     # call and the tool's refusal, and the model's next call is judged.
     refused: dict | None = None
+    # The answer to reads before the judged call, for a case whose write needs what they return.
+    read_result: str = RESULT
 
     @property
     def id(self) -> str:
@@ -100,6 +103,14 @@ EXPERIMENT_CREATE = (
 TASK_CREATE = (
     "Create a research Task for Goal G-1 titled 'Why do we lose early fights?': study 20 "
     "replays of lost games and report the three most common causes."
+)
+# What task.read and task.workers return before an assignment, as far as an assignment uses it.
+ASSIGN_READS = json.dumps(
+    {
+        "ok": True,
+        "record": {"id": "T-5", "status": "accepted", "updated": "2026-11-04T18:20:11.123Z"},
+        "workers": [{"profile": "researcher", "capabilities": ["replays", "xp"], "slots": 1}],
+    }
 )
 ORCHESTRATOR = [
     Case("orchestrator", "claim", "write", CHAMPION_CLAIM),
@@ -137,6 +148,20 @@ ORCHESTRATOR = [
         "abandon",
         "Abandon Task T-9: its xp requests failed three times on missing credits; next step is "
         "to retry after the credit refill.",
+    ),
+    Case(
+        "orchestrator",
+        "task",
+        "message",
+        "Tell the Researcher on Task T-6 to use league L-7's practice division from now on.",
+    ),
+    Case(
+        "orchestrator",
+        "task",
+        "assign",
+        "Assign Task T-5 to the researcher worker. It should start from the T-3 replays. It "
+        "fits because it has replay experience and T-5's dependencies are done.",
+        read_result=ASSIGN_READS,
     ),
     Case("orchestrator", "experiment", "create", EXPERIMENT_CREATE),
     Case(
@@ -356,14 +381,15 @@ def judge(case: Case, call: harness.Call, args: dict) -> tuple[str, str]:
 
 def answer(case: Case, schemas: harness.SchemaSet, tool: str, args: dict | None) -> str:
     """What production returns for a call before the judged one: the tool's refusal when its
-    argument check refuses the call, else RESULT (Hermes's own tools always get RESULT)."""
+    argument check refuses the call, else the case's read result (Hermes's own tools always get
+    RESULT)."""
     spec = next((s for s in catalog.tools_for(case.role) if s.name == tool), None)
     if spec is None:
         return RESULT
     if args is None:
         return json.dumps({"ok": False, "error": "arguments are not a JSON object"})
     _, problems = validate_args(spec, case.role, args)
-    return schemas.refusal(case.role, tool, args) if problems else RESULT
+    return schemas.refusal(case.role, tool, args) if problems else case.read_result
 
 
 def run_case(model: str, host: str, case: Case, schemas: harness.SchemaSet) -> harness.Result:

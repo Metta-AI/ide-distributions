@@ -1,10 +1,12 @@
 """The tool schemas the models see: object fields spell out their keys, every field is
 described, and a field several actions share has one shape."""
 
+import json
+
 import pytest
 
 from research_core.tools import catalog
-from research_core.tools.base import ActionSpec, ToolSpec, field_description, usage
+from research_core.tools.base import ActionSpec, ToolSpec, field_description, usage, validate_args
 
 ROLES = catalog.ROLES
 
@@ -126,3 +128,31 @@ def test_field_description_forms():
 def test_a_refusal_shows_an_object_fields_keys():
     how_to = usage(catalog.TOOLS["claim"], "researcher", "write")
     assert how_to["required"]["evidence"].endswith("Shape: [{type, ref, stance, note?}]")
+
+
+GENERATED_FIELDS = ("operation_id", "assignment_id", "task_updated")
+
+
+@pytest.mark.parametrize("role", ["orchestrator", "researcher"])
+def test_no_schema_or_refusal_offers_a_field_code_fills_in(role):
+    for spec in catalog.tools_for(role):
+        assert not set(GENERATED_FIELDS) & set(spec.schema(role)["parameters"]["properties"])
+        for action in spec.actions_for(role) or [None]:
+            shown = json.dumps(usage(spec, role, action.name if action else None))
+            assert not [name for name in GENERATED_FIELDS if name in shown]
+
+
+def test_a_frozen_schema_may_still_send_them_on_the_actions_that_took_them():
+    task = catalog.TOOLS["task"]
+    args = {
+        "action": "assign",
+        "task": "T-1",
+        "profile": "researcher",
+        "context": "Repair",
+        "rationale": "Fit",
+        **dict.fromkeys(GENERATED_FIELDS, "value"),
+    }
+    assert validate_args(task, "orchestrator", args)[1] == []
+    _, problems = validate_args(task, "orchestrator", {"action": "list", "operation_id": "value"})
+    assert problems == ["operation_id is not a field of list"]
+

@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from typing import Literal
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from research_core.store import admissions
 from research_core.store._common import parse_iso
@@ -23,6 +23,14 @@ from research_core.store.errors import StoreError
 from research_core.tools.base import ToolCall, ToolContext, ToolError, ToolSpec, tool
 
 REQUEST_WAIT_SECONDS = 15
+PENDING_NEXT_STEP = (
+    "Accepted, not done yet. Read the result with task.command and this command_id, or call again "
+    "with the same fields: that will not do it twice."
+)
+REPEAT_NOTE = (
+    "An earlier identical call already did this; it was not done again. Do not call again unless "
+    "you want it done a second time."
+)
 
 CommandState = Literal["pending", "applied", "refused"]
 
@@ -127,7 +135,11 @@ def receipt(store: Store, command_id: str) -> dict:
 
 
 def submit(call: ToolCall) -> dict:
-    return request(call.ctx, call.spec.name, call.args, call.args["operation_id"])
+    """Hand a tool call to the coordinator under the operation id it names, or a generated one."""
+    operation_id = call.get("operation_id")
+    if operation_id:  # a chat whose frozen schema still lists the field
+        return request(call.ctx, call.spec.name, call.args, operation_id)
+    return request_generated(call.ctx, call.spec.name, call.args)
 
 
 def request(ctx: ToolContext, tool: str, args: dict, operation_id: str) -> dict:
@@ -153,45 +165,102 @@ def request(ctx: ToolContext, tool: str, args: dict, operation_id: str) -> dict:
             ):
                 raise StoreError(["operation_id already belongs to a different transition intent"])
         else:
-            issuer_attempt_id = None
-            if (
-                ctx.role == "researcher"
-                and tool == "task"
-                and args["action"] in {"complete", "wait", "ask", "release", "propose_submission"}
-            ):
-                from research_core.store import tasks
-                from research_core.tools import _args as arguments
+            _accept(tx, ctx, tool, args, command_id, payload)
+    return _await_result(ctx, command_id)
 
-                task_id = arguments.record_number(args["task"], "task", "task")
-                tasks.require_holder(ctx.store, task_id, ctx.actor)
-                assignment = ctx.wstore.one(
-                    "SELECT a.current_attempt_id,a.state,execution.status FROM task_assignments a"
-                    " JOIN client_admissions execution ON execution.op_id=a.current_attempt_id"
-                    " WHERE a.session_id=? AND a.task_id=?",
-                    (ctx.actor.id, task_id),
-                )
-                if (
-                    assignment is None
-                    or assignment["state"] != "held"
-                    or assignment["status"] not in {"queued", "running"}
-                ):
-                    raise ToolError("This worker execution no longer has task transition authority")
-                issuer_attempt_id = assignment["current_attempt_id"]
-            tx.execute(
-                "INSERT INTO transition_commands(id,tool,args,role,actor,actor_epoch,"
-                "issuer_attempt_id,created_at) VALUES (?,?,?,?,?,?,?,?)",
-                (
-                    command_id,
-                    tool,
-                    payload,
-                    ctx.role,
-                    str(ctx.actor),
-                    ctx.actor.epoch,
-                    issuer_attempt_id,
-                    tx.at,
-                ),
-            )
-            tx.event("transition.requested", command_id, {"tool": tool})
+
+def request_generated(ctx: ToolContext, tool: str, args: dict) -> dict:
+    """Apply one intent once without an id from the model.
+
+    A tool-call id cannot do it: a call the model repeats after a lost or pending reply has a
+    new one. Arguments alone cannot either: the same message may be meant twice, and the same
+    call must run again after a refusal. What tells them apart is whether the session has been
+    given the first call's finished result. Until then an identical call is a retry and joins
+    that command; afterwards it is a new intent. A retry that finds the work already done says
+    so, in case it was in fact meant as a second one.
+    """
+    fields = {name: value for name, value in args.items() if value not in (None, "")}
+    fields.pop("operation_id", None)
+    payload = json.dumps(fields, sort_keys=True)
+    with admissions.dispatch_lock(ctx.wstore), ctx.store.tx(ctx.actor) as tx:
+        earlier = tx.one(
+            "SELECT id,result FROM transition_commands WHERE reply_seen_at IS NULL AND tool=?"
+            " AND args=? AND role=? AND actor=? AND actor_epoch IS ? ORDER BY rowid DESC LIMIT 1",
+            (tool, payload, ctx.role, str(ctx.actor), ctx.actor.epoch),
+        )
+        if earlier is not None:
+            command_id = earlier["id"]
+        else:
+            command_id = command_identity(ctx, tool, f"generated:{uuid4()}")
+            _accept(tx, ctx, tool, fields, command_id, payload)
+    result = _await_result(ctx, command_id)
+    if CommandReceipt.parse(result).state == "pending":
+        return {**result, "next": PENDING_NEXT_STEP}
+    if earlier is not None and earlier["result"] is not None:
+        result["repeat_of_earlier_call"] = REPEAT_NOTE
+    mark_reply_seen(ctx, command_id)
+    return result
+
+
+def read_command(ctx: ToolContext, command_id: str) -> dict:
+    """``task.command``: a finished result read here has reached the session."""
+    result = receipt(ctx.store, command_id)
+    if CommandReceipt.parse(result).state != "pending":
+        mark_reply_seen(ctx, command_id)
+    return result
+
+
+def mark_reply_seen(ctx: ToolContext, command_id: str) -> None:
+    with ctx.store.tx(ctx.actor) as tx:
+        tx.execute(
+            "UPDATE transition_commands SET reply_seen_at=? WHERE id=? AND reply_seen_at IS NULL",
+            (tx.at, command_id),
+        )
+
+
+def _accept(tx, ctx: ToolContext, tool: str, args: dict, command_id: str, payload: str) -> None:
+    issuer_attempt_id = None
+    if (
+        ctx.role == "researcher"
+        and tool == "task"
+        and args["action"] in {"complete", "wait", "ask", "release", "propose_submission"}
+    ):
+        from research_core.store import tasks
+        from research_core.tools import _args as arguments
+
+        task_id = arguments.record_number(args["task"], "task", "task")
+        tasks.require_holder(ctx.store, task_id, ctx.actor)
+        assignment = ctx.wstore.one(
+            "SELECT a.current_attempt_id,a.state,execution.status FROM task_assignments a"
+            " JOIN client_admissions execution ON execution.op_id=a.current_attempt_id"
+            " WHERE a.session_id=? AND a.task_id=?",
+            (ctx.actor.id, task_id),
+        )
+        if (
+            assignment is None
+            or assignment["state"] != "held"
+            or assignment["status"] not in {"queued", "running"}
+        ):
+            raise ToolError("This worker execution no longer has task transition authority")
+        issuer_attempt_id = assignment["current_attempt_id"]
+    tx.execute(
+        "INSERT INTO transition_commands(id,tool,args,role,actor,actor_epoch,"
+        "issuer_attempt_id,created_at) VALUES (?,?,?,?,?,?,?,?)",
+        (
+            command_id,
+            tool,
+            payload,
+            ctx.role,
+            str(ctx.actor),
+            ctx.actor.epoch,
+            issuer_attempt_id,
+            tx.at,
+        ),
+    )
+    tx.event("transition.requested", command_id, {"tool": tool})
+
+
+def _await_result(ctx: ToolContext, command_id: str) -> dict:
     deadline = time.monotonic() + REQUEST_WAIT_SECONDS
     wait = threading.Event()
     while time.monotonic() < deadline:
@@ -303,19 +372,15 @@ def record_effect(tx, env, result: dict) -> None:
 
 
 def durable_tool(spec: ToolSpec, *, mutations: set[str] | None = None) -> ToolSpec:
-    """Expose caller-stable operation identity on every command-producing tool action."""
+    """Accept an explicit ``operation_id`` on every command-producing tool action.
+
+    ``request_generated`` gives a call its identity, so no schema offers the field; chats whose
+    frozen schema still lists it may send one, and it keeps its meaning.
+    """
     actions = tuple(
         replace(
             action,
-            params={
-                **action.params,
-                "operation_id": {
-                    "type": "string",
-                    "description": "Unique intent ID. Reuse after a lost or pending reply; "
-                    "inspect progress with task.command and the returned command_id.",
-                },
-            },
-            required=(*action.required, "operation_id"),
+            hidden_params={**action.hidden_params, "operation_id": {"type": "string"}},
         )
         if (
             action.name in mutations

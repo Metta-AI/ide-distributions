@@ -1029,6 +1029,30 @@ def read(store: Store, task_id: int | str, *, live_run: bool = False) -> dict[st
     return _record(store, _row(store, _task_number(task_id)), live_run=live_run)
 
 
+def note_seen(
+    store: Store, actor: Actor, session_id: str, records: Sequence[Mapping[str, Any]]
+) -> None:
+    """Record the Task revisions a Session was shown, for :func:`revision_for_assignment`."""
+    with store.tx(actor) as tx:
+        for record in records:
+            tx.execute(
+                "INSERT INTO task_views(session_id,task_id,updated) VALUES (?,?,?)"
+                " ON CONFLICT(session_id,task_id) DO UPDATE SET updated=excluded.updated"
+                " WHERE updated!=excluded.updated",
+                (session_id, _task_number(record["id"]), record["updated"]),
+            )
+
+
+def revision_for_assignment(store: Store, session_id: str, task_id: int) -> str:
+    """The revision an assignment must match: what this Session last saw of the Task. A Session
+    that has seen none chose from elsewhere (its briefing), so there is no older view to protect
+    and the current revision stands."""
+    seen = store.one(
+        "SELECT updated FROM task_views WHERE session_id=? AND task_id=?", (session_id, task_id)
+    )
+    return seen["updated"] if seen is not None else read(store, task_id)["updated"]
+
+
 def list(
     store: Store,
     *,

@@ -18,7 +18,7 @@ from research_core.store import admissions, sessions, tasks
 from research_core.store.registry import TASK_STATUSES, TASK_TYPES, WAIT_KINDS
 from research_core.tools import _args as a
 from research_core.tools.base import ActionSpec, ToolCall, ToolError, ToolSpec
-from research_core.transitions import durable_tool
+from research_core.transitions import durable_tool, read_command, submit
 from research_core.watcher.context import workers
 
 ORCHESTRATOR = frozenset({"orchestrator"})
@@ -303,12 +303,15 @@ def execute(call: ToolCall) -> dict:
     if call.action == "workers":
         return {"kind": "available_workers", "workers": workers(call.ctx.env)}
     if call.action == "assign":
+        n = a.record_number(call.get("task"), "task", "task")
         return Coordinator.reserve(
             call.ctx,
-            task_id=a.record_number(call.get("task"), "task", "task"),
-            task_updated=call.get("task_updated"),
+            task_id=n,
+            task_updated=call.get("task_updated")
+            or tasks.revision_for_assignment(call.ctx.store, call.ctx.hermes_session_id(), n),
             profile=call.get("profile"),
-            assignment_id=call.get("assignment_id"),
+            # The command's id repeats on recovery and differs for a later assignment of the Task.
+            assignment_id=call.get("assignment_id") or call.ctx.env["IDE_TRANSITION_ID"],
             context=call.get("context"),
             rationale=call.get("rationale"),
         )
@@ -324,17 +327,22 @@ def execute(call: ToolCall) -> dict:
 
 
 def dispatch(call: ToolCall) -> dict:
-    if call.action in {"read", "list", "workers", "command"}:
-        if call.action == "command":
-            from research_core.transitions import receipt
+    if call.action == "command":
+        return read_command(call.ctx, call.get("command_id"))
+    if call.action in {"read", "list", "workers"} or call.ctx.coordinator_instance is not None:
+        result = execute(call)
+    else:
+        result = submit(call)
+    remember_seen_revisions(call, result)
+    return result
 
-            return receipt(call.ctx.store, call.get("command_id"))
-        return execute(call)
-    if call.ctx.coordinator_instance is not None:
-        return execute(call)
-    from research_core.transitions import submit
 
-    return submit(call)
+def remember_seen_revisions(call: ToolCall, result: dict) -> None:
+    """Note the Task revisions this result shows the Orchestrator; ``assign`` checks them."""
+    records = result.get("records") or ([result["record"]] if "record" in result else [])
+    session_id = call.ctx.hermes_session_id()
+    if call.ctx.role == "orchestrator" and session_id and records:
+        tasks.note_seen(call.ctx.store, call.ctx.actor, session_id, records)
 
 
 # --- the spec ---------------------------------------------------------------------------------
@@ -369,18 +377,18 @@ SPEC = durable_tool(
                 "Reserve an approved dependency-ready Task for the chosen worker once.",
                 {
                     "task": TASK,
-                    "task_updated": a.string("The exact updated field from task.read/list."),
                     "profile": a.string(
                         "A profile returned by task.workers; choose by capabilities."
-                    ),
-                    "assignment_id": a.string(
-                        "Stable identifier for this assignment; reuse it on retries."
                     ),
                     "context": a.string("The context and instructions this worker needs."),
                     "rationale": a.string("Why this worker fits the task and dependencies."),
                 },
-                ("task", "task_updated", "profile", "assignment_id", "context", "rationale"),
+                ("task", "profile", "context", "rationale"),
                 ORCHESTRATOR,
+                hidden_params={
+                    "task_updated": {"type": "string"},
+                    "assignment_id": {"type": "string"},
+                },
             ),
             ActionSpec(
                 "create",
