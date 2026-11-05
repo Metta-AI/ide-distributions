@@ -57,6 +57,8 @@ class Send(Closed):
     session_id: str
     messages: list[dict[str, JsonValue]]
     scope: Scope
+    context: dict[str, JsonValue] | None = None
+    instructions: str | None = Field(default=None, max_length=64000)
 
 
 class History(Closed):
@@ -721,7 +723,7 @@ class Backend:
             "session_id": params.session_id,
             "message": params.messages[0],
             "actor": "user:aide",
-        }
+        } | params.model_dump(mode="json", include={"context", "instructions"}, exclude_none=True)
         await self.call(self.seam, "POST", "/message", command=True, json=body)
         if request_id not in self.bridges:
             bridge = self.bridge(request_id, params.session_id, params.scope, after)
