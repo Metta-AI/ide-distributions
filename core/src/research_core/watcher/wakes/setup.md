@@ -11,7 +11,7 @@ Payload:
 {payload_json}
 ```
 
-Do this in order, with the setup skill, and end the run when it is done:
+Do this in order, and end the run when it is done:
 
 1. Read where setup stands: `research coworld setup-status` and `workspace.doctor`. The switch
    already registered the Coworld and fetched its source at the pinned commit.

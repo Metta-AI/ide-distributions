@@ -519,7 +519,7 @@ SPEC = tool(
             ActionSpec("divisions", "A league's divisions.", {"league": LEAGUE}, ("league",)),
             ActionSpec(
                 "standings",
-                "The leaderboard of a division, or of every division of a league.",
+                "The leaderboard of a division, or of every division of a league; give one.",
                 {"division": a.string("The Division id (div_...)."), "league": LEAGUE},
                 example_fields=("league",),
             ),
@@ -556,7 +556,7 @@ SPEC = tool(
             ),
             ActionSpec(
                 "episodes",
-                "Episodes of a policy version, or of a league's active policies.",
+                "Episodes of a policy version, or of a league's active policies; give one of them.",
                 {"policy_version": a.string("A policy version id."), "league": LEAGUE},
                 example_fields=("league",),
             ),

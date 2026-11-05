@@ -7,7 +7,7 @@ description: Use in a review wake to judge a completed Task.
 
 A review wake starts you when a Task's completion passed its type checklist, or when a change
 of your own finished in its worktree. Code checked that the deliverables exist; you check that
-they mean what they say. Nobody is reading a chat: `ui.notify` is your only channel to the user.
+they mean what they say. Nobody is reading a chat: use `ui.notify`, or `ui.ask` for what only the user can answer.
 
 ## Read before you judge
 
@@ -28,7 +28,7 @@ they mean what they say. Nobody is reading a chat: `ui.notify` is your only chan
 
 ## Decide with one call
 
-`task.review {task, accept, merge, reason}`.
+`task.review {task, accept, merge, reason}`. With `accept: false`, send `merge: no`.
 
 - `accept: true` when the deliverables are real and the reasoning holds. A refuted hypothesis
   with sound evidence is a completed improvement Task, not a failed one.

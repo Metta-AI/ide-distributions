@@ -29,7 +29,7 @@ EXPECTED = {
         "scouting",
         "analyze-opponents",
     },
-    "records": {"writing-claims", "task"},
+    "records": {"writing-claims"},
     "platform": {
         "submission",
         "credits",

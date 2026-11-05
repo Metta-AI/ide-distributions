@@ -158,7 +158,7 @@ SPEC = tool(
         actions=(
             ActionSpec(
                 "show",
-                "Bring a record (ref) or a client view (view) into view.",
+                "Bring a record (ref) or a client view (view) into view; give exactly one.",
                 {
                     "ref": a.string("A record such as T-3, a platform id or a platform URL."),
                     "view": a.string("A client view id, such as leaderboard."),

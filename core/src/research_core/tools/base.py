@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import sys
 import time
 import traceback
@@ -360,11 +361,23 @@ def drop_unused_empty(spec: ToolSpec, action: str | None, args: Mapping[str, Any
 PLACEHOLDERS = {"string": "<text>", "integer": 1, "number": 1.0, "boolean": True}
 
 
+# The format a description gives, as in "The Task, such as T-3." or 'such as ["C-3"]'.
+SUCH_AS = re.compile(r"""such as \[?"?([\w:./-]*\w)""")
+
+
 def _placeholder(schema: dict) -> Any:
+    """A value that shows the format and that no tool would take for a real record if it were sent
+    as it is: ``<such as T-3>``, not ``T-3``."""
     if "enum" in schema:
         return schema["enum"][0]
+    format_given = SUCH_AS.search(str(schema.get("description", "")))
     if schema.get("type") == "array":
-        return [_placeholder(schema.get("items") or {"type": "string"})]
+        item = schema.get("items") or {"type": "string"}
+        if format_given and item.get("type") == "string":
+            return [f"<such as {format_given[1]}>"]
+        return [_placeholder(item)]
+    if format_given and schema.get("type") == "string":
+        return f"<such as {format_given[1]}>"
     return PLACEHOLDERS.get(schema.get("type", ""), "<value>")
 
 

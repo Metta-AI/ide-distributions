@@ -91,10 +91,6 @@ METHODS = a.obj(
             {
                 "text": a.string("The rule, in words."),
                 "n_min": a.integer("Paired seeds before deciding."),
-                "k": {
-                    "type": "number",
-                    "description": "A positive number; stored, unused by the rule.",
-                },
             },
             required=("text", "n_min"),
             closed=True,
@@ -175,6 +171,12 @@ def handle(call: ToolCall) -> dict:
         records = experiments.search(store, call.get("query"), limit=limit or 20)
         return {"records": records}
     if call.action == "update_run":
+        if call.get("experiment") is not None:
+            experiments.require_run_of(
+                store,
+                call.get("run"),
+                a.record_number(call.get("experiment"), "experiment", "experiment"),
+            )
         record = experiments.update_run(
             store,
             actor,
@@ -377,8 +379,8 @@ def design_from(
 
     Built directly rather than through ``from_dict`` because ``validate`` refuses fewer seeds
     than ``n_min``, and at close time that case is exactly what the decision rule must report
-    as ``n_short`` rather than refuse. ``k`` is not used by the decision rule (``power`` uses
-    it) and the store leaves it optional, so a placeholder stands in when it is absent.
+    as ``n_short`` rather than refuse. The design requires a ``k``, which the decision rule does
+    not read, so a placeholder stands in.
     """
     first = rows[0]
     seeds = {run["seed"] for run in runs if run.get("seed") is not None}
@@ -401,7 +403,7 @@ def design_from(
             )
             for m in methods["metrics"]
         ),
-        k=rule.get("k") or 1.0,
+        k=1.0,
         delta={},
         n_min=rule["n_min"],
     )
@@ -569,6 +571,10 @@ SPEC = tool(
                 "Progress on a run: platform state, episodes done, result rows, validity.",
                 {
                     "run": a.integer("The run id from add_run."),
+                    "experiment": {
+                        **EXPERIMENT,
+                        "description": "Not needed: the run names it. Refused if it is another.",
+                    },
                     "state": a.string("The platform's state of the request."),
                     "episodes_completed": a.integer("Episodes finished so far."),
                     "results": RESULTS,

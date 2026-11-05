@@ -327,10 +327,10 @@ def test_complete_research_task_and_review(call, ctx_factory, goal, code_repo):
     assert reviewed["record"]["merge"] == "not merged: ok"
 
 
-def test_complete_accepts_none_with_a_reason_and_a_checklist_dict(call, goal, code_repo):
+def test_complete_accepts_none_with_a_reason(call, goal, code_repo):
     call("task", task_args())
     claim(call)
-    done = as_researcher(call, complete_args(checklist={"claims": "none: nothing found"}))
+    done = as_researcher(call, complete_args(claims="none: nothing found"))
     assert done["ok"] is True, done
     assert done["record"]["checklist"]["claims"] == "none: nothing found"
 

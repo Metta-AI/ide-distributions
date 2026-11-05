@@ -245,7 +245,8 @@ SPEC = tool(
             "league": a.string("The league id (or its name)."),
             "auto_champion": a.string(
                 "always (default), never or lineage: whether the platform makes this the"
-                " Player's champion once placed.",
+                " Player's champion once placed. lineage: only when the Player's champion in that"
+                " league already has the same policy name.",
                 enum=list(AUTO_CHAMPION),
             ),
             "reason": a.string("Why this Version is submitted now (kept on the champion record)."),

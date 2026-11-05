@@ -53,14 +53,13 @@ build or evaluate), `question`, `permit`, `submission`, `platform` (set for you 
 keeps failing), `user` or `dependency`. Then stop: end the run with no further tool call. That
 is not quitting: the watcher resumes this Session, with its history, when the wait resolves.
 Never poll in a loop and never sleep. On resume, call the tool you were waiting for
-(`xp.status {experiment}` for XP) and continue.
+(`xp.status {experiment}` for XP) and `directive.list`, since your briefing does not update.
 
 ## 6. Complete
 
-`task.complete {task, outcome: "succeeded", checklist, commit, merge, merge_reason,
-submission_candidate, submission_reason, result}`. The checklist keys come from the type
-(`claims`, `experiment`, `versions`, `proposed_tasks`, `commit`, `summary`, `capability`) and
-may be given flat; the tool refuses with every missing item at once, so fix them all and call
+`task.complete {task, outcome: "succeeded", commit, merge, merge_reason, submission_candidate,
+submission_reason, result, ...}`, plus the fields the type's checklist names (`claims`, `experiment`,
+`versions`, `proposed_tasks`, `commit`, `summary`, `capability`); the tool refuses with every missing item at once, so fix them all and call
 again. `commit` is the commit on your branch to merge; `merge: no` needs `merge_reason`. `result`
 is two or three sentences the Orchestrator reads first.
 
@@ -70,8 +69,8 @@ undefined symbol X"`, `next_step: "pin nim 2.0 in MIXIN.md toolchains or patch t
 line 12"`. Bad: `what_failed: "it broke"`, `next_step: "try again"`. Fill `tried` so nobody
 repeats it.
 
-`task.release {task, reason}` requests release when you must not continue (a directive forbids
-the only path). End your run afterward. The workspace stops your recorded run, then returns the Task to scheduling.
+`task.release {task, reason}` when you must not continue, as when a directive forbids the only
+path; tried and it did not work is `outcome: "failed"`. End your run afterward. The workspace stops your recorded run, then returns the Task to scheduling.
 
 ## 7. What happens next
 

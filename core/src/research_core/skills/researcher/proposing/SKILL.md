@@ -25,11 +25,11 @@ priority, depends_on, experiment, ideation_round}`.
   first; `maintenance` for a fix; never `ideation` from an ideation Task.
 - `depends_on` when one must finish first.
 
-An ideation Task delivers two to five proposals: `task.complete {proposed_tasks: ["T-7", "T-8"]}`
+An ideation Task delivers two to five proposals: `task.complete {task, proposed_tasks: ["T-7", "T-8"], result, merge: "no", merge_reason}`
 with the ids `task.propose` returned. Ground every proposal in the Goal's claims and in what was
 tried: `claim.search` with the Goal's tags and `include_retired: true`, `experiment.search` for
 the refuted and inconclusive Experiments too, then `platform.standings` and
-`platform.active_policies {exclude_player: true}` for what the league looks like now.
+`platform.active_policies {league, exclude_player: true}` for what the league looks like now.
 Game-specific levers: see the mixin's `<coworld>-diagnosis` and `<coworld>-ab` skills or docs.
 Rank them: the first proposal is the one you would run.
 

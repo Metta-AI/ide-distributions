@@ -30,7 +30,7 @@ Claims (`writing-claims`), each tagged `standings` or `meta`, the League id and 
 - one claim per shift, with the numbers and their n;
 - one claim per decoded winning mechanism, with `replay` evidence and a transplant tag: `copyable` (works for us as is), `prerequisite-first` (name the missing capability: that is a lever) or `not-copyable` (depends on the opponent's other strengths).
 
-Retire the previous snapshot claim with `claim.retire {status: superseded, superseded_by}`.
+Retire the previous snapshot claim with `claim.retire {claim, status: superseded, superseded_by}`.
 
 ## Propose
 

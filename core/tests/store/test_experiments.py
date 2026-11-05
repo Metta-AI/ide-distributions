@@ -186,7 +186,6 @@ def test_create_reports_every_problem_at_once(coworld_store, session_actor):
         "methods.metrics names must be unique (win_rate repeats)",
         "methods.decision_rule.text is required",
         "methods.decision_rule.n_min must be a positive integer",
-        "methods.decision_rule.k must be a positive number",
         "goal_id: G-7 does not exist",
         "task_id: T-3 does not exist",
         "tags must be a list of words",

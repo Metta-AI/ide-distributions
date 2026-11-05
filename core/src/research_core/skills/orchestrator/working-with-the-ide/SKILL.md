@@ -34,7 +34,7 @@ It writes UI state and never waits on a client.
 - `ui.show {ref}` or `{view}`: bring a record (G-3, X-5, V-7) or a client view into view when
   the user would otherwise have to find it.
 - `ui.panel_set {panel, kind, content}`: a named panel with a declared kind (`markdown`,
-  `record`, `table`, `checklist`, `file`, `link`, `replay`, `html`). Never assume Markdown. A
+  `record`, `table`, `checklist`, `file`, `link`, `replay`, `html`, `agent-context`). Never assume Markdown. A
   `file` panel names a file under the Coworld's `documents/` folder; a `replay` panel a replay
   or a moment in it; `html` only when the client can show it.
 - `ui.notify {text, refs, urgency}`: plain language, informs and never asks, one or two

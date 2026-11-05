@@ -46,6 +46,7 @@ METHODS_REQUIRED_TO_START = ("baseline", "procedure", "metrics", "decision_rule"
 METRIC_KEYS = ("name", "direction", "role", "min_effect", "tolerance")
 METRIC_DIRECTIONS = ("up", "down")
 METRIC_ROLES = ("primary", "guardrail", "performance")
+# ``k`` is no longer offered and nothing reads it; Experiments stored earlier may hold one.
 DECISION_RULE_KEYS = ("text", "n_min", "k")
 MEASUREMENT_KEYS = ("metric", "baseline", "candidate", "n", "effect")
 VERDICTS = ("confirmed", "refuted", "inconclusive")
@@ -277,6 +278,14 @@ def add_run(
             },
         )
     return _run_record(store, run_id)
+
+
+def require_run_of(store: Store, run_id: int, experiment_id: int) -> None:
+    """Refuse a run that belongs to another Experiment than the caller named."""
+    run = store.one("SELECT experiment_id FROM experiment_runs WHERE id = ?", (run_id,))
+    if run is not None and run["experiment_id"] != experiment_id:
+        owner = display_id("X", run["experiment_id"])
+        raise StoreError([f"run {run_id} belongs to {owner}, not X-{experiment_id}"])
 
 
 def update_run(
@@ -616,7 +625,7 @@ def _check_metrics(metrics: Any, problems: list[str]) -> None:
 
 def _check_decision_rule(rule: Any, problems: list[str]) -> None:
     if not isinstance(rule, dict):
-        problems.append("methods.decision_rule must be an object with text and n_min (k optional)")
+        problems.append("methods.decision_rule must be an object with text and n_min")
         return
     _check_unknown_keys(
         rule, DECISION_RULE_KEYS, "methods.decision_rule", "a decision rule field", problems
@@ -627,12 +636,6 @@ def _check_decision_rule(rule: Any, problems: list[str]) -> None:
         problems,
         _is_int(n_min) and n_min >= 1,
         "methods.decision_rule.n_min must be a positive integer",
-    )
-    k = rule.get("k")
-    require(
-        problems,
-        k is None or (_is_number(k) and k > 0),
-        "methods.decision_rule.k must be a positive number",
     )
 
 

@@ -17,8 +17,8 @@ never commit on `main` directly.
    was for.
 2. The log the payload names: full output, exit code, the failing command. A result tail is
    2,000 characters; the log is complete.
-3. `git log main..task/<n>` and `git diff main...task/<n>` in the Coworld's `code/` folder,
-   read-only, to see what the branch changes and what moved on `main` since it branched.
+3. In the Coworld's `code/` folder, read-only: `git log main..task/<n>` and `git diff main...task/<n>`
+   for what the branch changes, and `git log task/<n>..main` for what moved on `main` since it branched.
 
 ## Outcome 1: resolve it yourself
 

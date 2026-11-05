@@ -165,7 +165,7 @@ def test_assignments_reserve_capacity_before_any_worker_starts(tmp_path):
         context="One",
         rationale="Fit",
     )
-    with pytest.raises(StoreError, match="capacity"):
+    with pytest.raises(StoreError, match="slot is taken"):
         Coordinator.reserve(
             ctx,
             task_id=2,
@@ -295,7 +295,7 @@ def test_recovery_replays_old_message_ids_and_counts_a_running_continuation(tmp_
         "new message"
     ]
     second = tasks.create(ctx.store, HARNESS, type="maintenance", title="Two", description="Other")
-    with pytest.raises(StoreError, match="capacity"):
+    with pytest.raises(StoreError, match="slot is taken"):
         Coordinator.reserve(
             ctx,
             task_id=2,

@@ -24,8 +24,8 @@ points (a Version built, an Experiment started), not on a timer.
 
 ## What the IDE shows
 
-- `ui.show {ref}` opens or focuses the record's tab; `ui.show {view}` switches to a client view
-  the capabilities list.
+- `ui.show {ref}` opens or focuses the record's tab; `ui.show {view}` switches to one of the views
+  the client's capabilities list.
 - `ui.panel_set` fills a custom tab: `markdown`, `record`, `table`, `checklist`, `file` (a
   document under the Coworld's `documents/`), `link`, `replay` (an episode, or the moment the
   user is looking at), and `html` only when the capabilities include it; the client sandboxes it.

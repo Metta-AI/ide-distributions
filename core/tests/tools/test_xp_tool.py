@@ -310,7 +310,7 @@ def test_credits_refusal_reports_the_balance_and_sets_no_wait(run, ctx, uploaded
     assert result["credits_refused"]["balance"] == 100.0
     assert result["credits_refused"]["held"] == 0.0
     assert result["credits_refused"]["next_refill_at"]
-    assert "task.wait {kind: credits" in result["next"]
+    assert "task.wait {task, kind: credits" in result["next"]
     assert result["created"] == [] and result["runs"] == []
     assert tasks.read(ctx.store, 1)["waiting_on"] is None
     intent = intents.read(ctx.store, 1)
@@ -324,7 +324,7 @@ def test_credits_refusal_reports_the_balance_and_sets_no_wait(run, ctx, uploaded
     assert (
         intents.read(ctx.store, 1)["state"] == "done" and intents.read(ctx.store, 1)["attempt"] == 2
     )
-    assert "task.wait {kind: xp, ref: [" in retried["next"]
+    assert "task.wait {task, kind: xp," in retried["next"]
     assert tasks.read(ctx.store, 1)["waiting_on"] is None
 
 
@@ -435,7 +435,7 @@ def test_status_backgrounds_a_slow_evaluate_and_resumes(run, ctx, running, mixin
     run("xp", {"action": "request", "experiment": "X-1", "seeds": [1], "arms": ["baseline"]})
     started = run("xp", {"action": "status", "experiment": "X-1"})
     assert started["ok"] is True and started["background"]["pid"] > 0
-    assert "task.wait {kind: process" in started["next"]
+    assert "task.wait {task, kind: process" in started["next"]
     token = started["background"]["resume"]
     assert "rows" not in xp_runs(ctx)[0]["results"]
 

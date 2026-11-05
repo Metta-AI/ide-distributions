@@ -1,8 +1,14 @@
-"""The ``directive`` tool (design B.14): a standing user instruction the briefing always shows."""
+"""The ``directive`` tool (design B.14): a standing user instruction.
+
+A Session sees a directive in its briefing only if the directive was active when that Session's
+prompt was written, or through ``directive.list``. A Researcher already running sees neither on its
+own, so ``add`` and ``update`` name the Tasks in progress, and the Orchestrator tells them with
+``task.message``.
+"""
 
 from __future__ import annotations
 
-from research_core.store import directives
+from research_core.store import directives, tasks
 from research_core.tools import _args as a
 from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolError, ToolSpec, tool
 
@@ -29,6 +35,24 @@ def store_for(ctx: ToolContext, scope: str):
     return ctx.wstore if scope == "workspace" else ctx.store
 
 
+def running_tasks_note(task_ids: list[str]) -> str:
+    return (
+        f"{', '.join(task_ids)} in progress: its Researcher does not see this until you send "
+        "task.message {task, text}. A Task started later gets it in its briefing."
+    )
+
+
+def with_running_tasks_note(ctx: ToolContext, scope: str, result: dict) -> dict:
+    """Add a ``next`` naming the Tasks in progress that the directive covers, if there are any."""
+    if ctx.coworld_or_none() is None:
+        return result
+    goal_id = None if scope == "workspace" else int(scope.removeprefix("goal:"))
+    running = tasks.list(ctx.store, status="in-progress", goal_id=goal_id)
+    if running:
+        result["next"] = running_tasks_note([task["id"] for task in running])
+    return result
+
+
 def handle(call: ToolCall) -> dict:
     ctx, actor = call.ctx, call.ctx.actor
     if call.action == "add":
@@ -40,7 +64,7 @@ def handle(call: ToolCall) -> dict:
             scope=scope,
             source=call.get("source"),
         )
-        return {"record": record}
+        return with_running_tasks_note(ctx, scope, {"record": record})
     if call.action == "list":
         scope = call.get("scope")
         records = []
@@ -61,7 +85,7 @@ def handle(call: ToolCall) -> dict:
         record = directives.update(
             store, actor, directive_id, text=call.get("text"), scope=new_scope
         )
-        return {"record": record}
+        return with_running_tasks_note(ctx, new_scope or record["scope"], {"record": record})
     if call.action == "retire":
         return {"record": directives.retire(store, actor, directive_id)}
     raise AssertionError(call.action)
@@ -72,7 +96,8 @@ SPEC = tool(
         name="directive",
         description=(
             "Directives: standing user instructions, word for word, on the workspace or on one "
-            "Goal. The briefing shows every active directive, so compaction cannot lose them."
+            "Goal. They are stored, so a summary cannot lose them. A Session's briefing shows "
+            "those active when it was written; list shows the current ones."
         ),
         handler=handle,
         roles=BOTH,

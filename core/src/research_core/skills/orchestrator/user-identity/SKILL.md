@@ -14,8 +14,8 @@ and put the credential in the agent-context needs section once.
 
 Reads are always allowed. Writes are allowed whenever they serve the user's request or an active
 Goal. Every write is recorded in the events log as the User identity and reported with a
-`ui.notify` notice that informs and never asks. Nothing gates it; teaching and visibility are
-the protection.
+`ui.notify` notice that informs and never asks. No setting or approval blocks it, so the record
+and the notice are the protection. Before a write the user would be surprised by, ask with `ui.ask`.
 
 ## What needs the User identity
 

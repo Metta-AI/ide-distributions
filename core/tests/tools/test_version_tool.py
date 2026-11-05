@@ -389,7 +389,7 @@ def test_version_create_background_and_resume(lab, monkeypatch):
     started = lab.run("version", {"action": "create", "summary": "Slow"})
     assert started["ok"] is True and "record" not in started
     background = started["background"]
-    assert background["pid"] > 0 and background["resume"] and "task.wait" in started["next"]
+    assert background["pid"] > 0 and background["resume"] and "resume" in started["next"]
     deadline = time.time() + 10
     while not mixin.resume(background["resume"]).finished:
         assert time.time() < deadline, "the detached build never ended"

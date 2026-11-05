@@ -36,8 +36,8 @@ comes from the source with a citation, never from memory.
    (`workspace.environment_guide` has the path) and `workspace.doctor`. `source/` holds the
    repository at the release commit; a `COWORLD.md` there, when present, explains the layout.
 2. `platform.coworld {coworld}` for the manifest: name, version, `player_runtime`, source and
-   commit. Only a file policy is supported now; `version.create` refuses an image artifact, so
-   when the runtime needs an image, say so, and stop at the docs and the bindings.
+   commit. A runtime that needs an image uses `artifact.kind: image`
+   (`candidate` skill has the build).
 3. Find the starter policy, the rules and the scoring in `source/`; the forum and wiki
    (`platform.forum_search`, `platform.wiki_search`) often hold strategy notes. Cite each fact as
    `<path>:<lines>@<commit>`.

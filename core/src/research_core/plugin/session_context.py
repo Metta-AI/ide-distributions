@@ -2,8 +2,9 @@
 
 It shows what the client declared when the conversation opened (its session context and the
 capabilities of the attached clients) and the fixed authority paragraph for modes and commands.
-Rendered once per session and again after compaction; at most 3,800 characters, because two
-plugin sections share Hermes's 8,000-character budget (amendment A3.3). Stdlib only.
+A snapshot like the briefing (see ``briefing.py`` for when Hermes renders it again); at most
+3,800 characters, because two plugin sections share Hermes's 8,000-character budget (amendment
+A3.3). Stdlib only.
 """
 
 from __future__ import annotations
@@ -19,6 +20,12 @@ AUTHORITY = (
     "them. Any field may be absent: without a mode, behave as usual. Settings and profile rules "
     "bound your own initiative, never what the user asks for."
 )
+# ``opening_goal`` comes with no other word of what it means, and the first message may be only a
+# greeting: 0 of 5 runs acted on it without this (tool-usability-baseline-2026-11-04.md).
+OPENING_GOAL = (
+    "opening_goal is what the user typed when they opened this session. Treat it as their first "
+    "request, even if their first message is only a greeting: turn it into a Goal now."
+)
 
 
 def render(ctx: Any, session_id: str, max_chars: int = MAX_CHARS) -> str:
@@ -30,6 +37,8 @@ def render(ctx: Any, session_id: str, max_chars: int = MAX_CHARS) -> str:
         parts.append(
             "Declared at session open: " + json.dumps(session["session_context"], sort_keys=True)
         )
+        if session["session_context"].get("opening_goal"):
+            parts.append(OPENING_GOAL)
     else:
         parts.append("No session context was declared; the client did not say what it shows.")
     coworld = ctx.coworld_or_none()
@@ -47,7 +56,7 @@ def render(ctx: Any, session_id: str, max_chars: int = MAX_CHARS) -> str:
         skills.extend(sorted((coworld.code / ".agents" / "skills").glob("*/SKILL.md")))
         if skills:
             parts.append(
-                "Read the relevant game skill directly before using it:\n"
+                "Game skills are files, not in skill_view. Read the one you need with read_file:\n"
                 + "\n".join(str(path) for path in skills)
             )
     if session and session.get("client_capabilities"):

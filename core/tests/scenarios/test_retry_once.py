@@ -334,7 +334,7 @@ def test_assign_is_refused_when_the_task_changed_after_the_session_read_it(ctx):
     ctx.clock.advance(1)
     edit_as_user(ctx)
     refused = call_applied(ctx, ASSIGN)
-    assert refused["ok"] is False and "read the task before assigning" in refused["error"]
+    assert refused["ok"] is False and "read it with task.read, then assign" in refused["error"]
     assert call(ctx, {"action": "read", "task": "T-1"})["ok"]
     assert call_applied(ctx, ASSIGN)["kind"] == "reserved"
 
@@ -400,7 +400,10 @@ def test_a_result_the_session_never_got_does_not_count_as_seen(ctx, no_wait):
     call(ctx, ASSIGN)
     apply(ctx)
     assert ctx.wstore.one("SELECT count(*) FROM task_assignments")[0] == 0
-    assert "read the task" in ctx.store.q("SELECT result FROM transition_commands")[-1]["result"]
+    assert (
+        "read it with task.read"
+        in ctx.store.q("SELECT result FROM transition_commands")[-1]["result"]
+    )
 
 
 def test_an_accepted_assign_keeps_the_revision_it_was_accepted_with(ctx, no_wait):
@@ -448,7 +451,7 @@ def test_a_planning_wake_counts_as_having_seen_its_tasks(ctx):
     ctx.clock.advance(1)
     edit_as_user(ctx)
     refused = call_applied(ctx, ASSIGN, session=planner["session_id"])
-    assert refused["ok"] is False and "read the task" in refused["error"]
+    assert refused["ok"] is False and "read it with task.read" in refused["error"]
 
 
 def test_a_lost_assign_reply_reserves_once_and_a_second_assign_is_refused(ctx, monkeypatch):
@@ -463,7 +466,7 @@ def test_a_lost_assign_reply_reserves_once_and_a_second_assign_is_refused(ctx, m
     assert ctx.wstore.one("SELECT count(*) FROM task_assignments")[0] == 1
     assert ctx.wstore.one("SELECT count(*) FROM client_admissions")[0] == 1
     second = call_applied(ctx, {**ASSIGN, "rationale": "Reworded"})
-    assert second["ok"] is False and "immutable assignment" in second["error"]
+    assert second["ok"] is False and "already has an assignment" in second["error"]
     assert ctx.wstore.one("SELECT count(*) FROM client_admissions")[0] == 1
 
 
@@ -472,7 +475,7 @@ def test_values_from_a_frozen_schema_still_count(ctx):
     stale = call_applied(
         ctx, {**ASSIGN, "task_updated": "2020-01-01T00:00:00Z", "assignment_id": "named"}
     )
-    assert stale["ok"] is False and "read the task before assigning" in stale["error"]
+    assert stale["ok"] is False and "read it with task.read, then assign" in stale["error"]
     reserved = call_applied(
         ctx, {**ASSIGN, "task_updated": task["updated"], "assignment_id": "named"}
     )

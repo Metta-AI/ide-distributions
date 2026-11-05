@@ -1,10 +1,16 @@
 """The briefing prompt section (design §9, Appendix H; amendments A3.3, A3.4, A7.3, A7.8).
 
-A computed status summary in every Session's system prompt, rendered once per session and
-again after compaction: the workspace status, the last capability check and what is broken,
-the active directives, the champion and recent Versions, this Session's Task, the active Goals,
-any older preference claims (A3.10) and recent claims tagged with active Goals. Every item is one
-line with references, so the agent reads the record it needs with the record tools.
+A computed status summary in every Session's system prompt: the workspace status, the last
+capability check and what is broken, the active directives, the champion and recent Versions, this
+Session's Task, the active Goals, any older preference claims (A3.10) and recent claims tagged
+with active Goals. Every item is one line with references, so the agent reads the record it needs
+with the record tools.
+
+It is a snapshot. Hermes renders it when it builds a Session's prompt, then stores and replays that
+prompt. Only two things render it again: a compaction inside a live agent's turn, and a refresh
+after a release (``frozen_sessions.py``). The gateway's own compaction between turns keeps the
+stored text (``_retain_seeded_system_prompt`` in Hermes). So nothing added since then is in it, and
+its first line says when it was written.
 
 Budget: at most 3,600 characters on the Orchestrator (its two sections share Hermes's
 8,000-character aggregate with the session-context section) and 3,800 on the Researcher
@@ -135,7 +141,7 @@ def render(
         _item("User preferences", _preference_claims, inputs),
         _item("Goal claims", _goal_claims, inputs),
     ]
-    return ctx.scrub(_fit(sections, max_chars))
+    return ctx.scrub(_fit(sections, inputs.now, max_chars))
 
 
 def make_section(role: Role):
@@ -184,20 +190,24 @@ def _item(label: str, build: Any, inputs: Inputs) -> Section:
         return Section(lines=[f"{label}: unavailable: {type(error).__name__}"])
 
 
-def _fit(sections: list[Section], max_chars: int) -> str:
+def _fit(sections: list[Section], now: datetime, max_chars: int) -> str:
     """Cut entries from the lowest-priority section first until the text fits."""
-    text = _text(sections)
+    heading = (
+        f"[briefing] Written {now:%Y-%m-%d %H:%M} UTC and not updated in this Session: read the"
+        " record when the current state matters."
+    )
+    text = _text(heading, sections)
     while len(text) > max_chars:
         cuttable = [section for section in sections if section.remaining > 0]
         if not cuttable:
             return text[: max_chars - len(TRUNCATED) - 1].rstrip() + "\n" + TRUNCATED
         cuttable[-1].cut += 1
-        text = _text(sections)
+        text = _text(heading, sections)
     return text
 
 
-def _text(sections: list[Section]) -> str:
-    lines = ["[briefing]"]
+def _text(heading: str, sections: list[Section]) -> str:
+    lines = [heading]
     for section in sections:
         lines.extend(section.render())
     return "\n".join(lines)

@@ -23,7 +23,7 @@ directives, the briefing and these instructions; load `proposing`. Read what is 
 `claim.search` with the Goal's tags and `include_retired: true`, and `experiment.search` for
 every Experiment under the Goal: confirmed, refuted, inconclusive and abandoned. A refuted claim
 or a failed Experiment is a lead: what changed since, what was not controlled. Read the league
-now: `platform.standings`, `platform.active_policies {exclude_player: true}`, the champion.
+now: `platform.standings`, `platform.active_policies {league, exclude_player: true}`, the champion.
 Game-specific levers and failure vocabulary: see the mixin's `<coworld>-diagnosis` and
 `<coworld>-ab` skills or docs.
 
@@ -40,7 +40,7 @@ End: `task.complete {task, proposed_tasks: ["T-7", "T-8"], result, merge: "no", 
 "ideation changes no code"}`. `result` says in two sentences what the Goal should try first and
 why.
 
-When it fails, `task.complete {outcome: "failed", failure}` with `what_failed` and `next_step`,
+When it fails, `task.complete {task, outcome: "failed", failure}` with `what_failed` and `next_step`,
 plus `error`, `exit_code` and `tried` when they exist. Good: what_failed "the build failed on
 nim 2.2: undefined symbol X", next_step "pin nim 2.0 in MIXIN.md toolchains or patch
 tools/build.sh line 12". Bad: what_failed "it broke", next_step "try again".

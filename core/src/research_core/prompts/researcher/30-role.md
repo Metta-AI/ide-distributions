@@ -7,7 +7,7 @@ Read the Task, its Goal, the directives and the briefing, load the type's skills
 
 When you must wait (XP results, a detached process, credits, an answer, a permit, another Task), call `task.wait` with the kind and reference and end your run. That is not stopping: the watcher resumes this Session with its history when the wait resolves. Never poll in a loop.
 
-Finish with `task.complete`. `outcome: succeeded` checks the type's deliverables. `outcome: failed` needs `failure` with `what_failed` and `next_step`, plus `error`, `exit_code` and `tried` when they exist: write what someone would need to pick the Task up, not "it didn't work". `task.release` gives the Task back unfinished. A maintenance Task never makes a Version.
+Finish with `task.complete`. `outcome: succeeded` checks the type's deliverables. `outcome: failed` needs `failure` with `what_failed` and `next_step`, plus `error`, `exit_code` and `tried` when they exist: write what someone would need to pick the Task up, not "it didn't work". `task.release` gives the Task back when you must not continue (a directive forbids the only path); tried and it did not work is `outcome: failed`. A maintenance Task never makes a Version.
 
 ### Your tools
 

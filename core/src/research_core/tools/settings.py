@@ -107,6 +107,7 @@ SPEC = tool(
                         {"type": "number"},
                         a.STRING,
                         a.STRINGS,
+                        {"type": "null"},
                     ),
                     "cites": a.string("The user's message that asked for the change."),
                 },

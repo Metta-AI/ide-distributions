@@ -39,7 +39,7 @@ from pathlib import Path
 import yaml
 
 import research_core
-from research_core.plugin.session_context import AUTHORITY
+from research_core.plugin.session_context import AUTHORITY, OPENING_GOAL
 from research_core.prompts import build
 from research_core.tools.catalog import Role
 from tests.model import harness
@@ -137,7 +137,13 @@ def skills_list_result(role: Role) -> str:
 
 # A made-up workspace in the format ``plugin/briefing.py`` renders. The ids here are the ones the
 # situations name, so a model reading the briefing finds the records a situation talks about.
-BRIEFING = """[briefing]
+BRIEFING_HEADING = (
+    "[briefing] Written 2026-11-04 18:00 UTC and not updated in this Session: read the record when "
+    "the current state matters."
+)
+BRIEFING = (
+    BRIEFING_HEADING
+    + """
 Workspace: Coworld cow_cogs; paused: no; watcher heartbeat just now; credits: 840.0
 Capability check: 4 minutes ago; 7 of 7 ok
 User identity: available
@@ -154,12 +160,16 @@ V-7 champion: "Baseline with resource cap fix" (2026-10-28)
 Recent claims on active Goals:
 - C-5 (G-1): V-7 loses 60% of late fights after over-extending; 4 of 5 replays, n=5
 - C-2 (G-1): Earlier scouting does not change the win rate against the champion (n=40)"""
+)
 
-NO_COWORLD_BRIEFING = """[briefing]
+NO_COWORLD_BRIEFING = (
+    BRIEFING_HEADING
+    + """
 Workspace: Coworld none; the frontend must open a session for a Coworld; paused: no; watcher heartbeat just now; credits: unknown
 User identity: available
 Directives: none active
 No session Coworld: open a Coworld session to access game work."""
+)
 
 
 def _plugin_section(name: str, text: str) -> str:
@@ -176,6 +186,8 @@ def session_context_section(
     parts = ["[session context]", AUTHORITY]
     if declared:
         parts.append("Declared at session open: " + json.dumps(declared, sort_keys=True))
+        if declared.get("opening_goal"):
+            parts.append(OPENING_GOAL)
     else:
         parts.append("No session context was declared; the client did not say what it shows.")
     if has_coworld:
@@ -189,7 +201,10 @@ def session_context_section(
             "Custom research tools already carry this session's binding."
         )
         paths = [f"{COWORLD_CODE}/mixin/skills/cogs-{name}/SKILL.md" for name in BINDINGS]
-        parts.append("Read the relevant game skill directly before using it:\n" + "\n".join(paths))
+        parts.append(
+            "Game skills are files, not in skill_view. Read the one you need with read_file:\n"
+            + "\n".join(paths)
+        )
     if capabilities:
         parts.append("Attached clients can show: " + json.dumps(capabilities, sort_keys=True))
     else:

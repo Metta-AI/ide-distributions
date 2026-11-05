@@ -25,6 +25,7 @@ from typing import Any
 
 from research_core.store import settings
 from research_core.tools.base import error_payload
+from research_core.tools.directive import running_tasks_note
 from research_core.tools.settings import describe
 from tests.fixtures.fakegame_repo import fixture_files
 from tests.model import usability_context
@@ -163,6 +164,19 @@ def _directives(situation: Situation) -> list[dict]:
         }
         for directive_id, text, scope in rows
     ]
+
+
+def directive_added(situation: Situation, args: dict) -> dict:
+    """``directive.add`` with T-8 in progress, as the fixture's briefing has it."""
+    record = {
+        "id": "W-2",
+        "scope": "workspace",
+        "text": args.get("text"),
+        "status": "active",
+        "source": args.get("source"),
+        **_timestamps(),
+    }
+    return {"record": record, "next": running_tasks_note(["T-8"])}
 
 
 def directive_list(situation: Situation, args: dict) -> dict:
@@ -1292,6 +1306,7 @@ ACTIONS: dict[str, Callable[[Situation, dict], dict]] = {
     "goal.read": goal_read,
     "goal.list": goal_list,
     "directive.list": directive_list,
+    "directive.add": directive_added,
     "settings.read": settings_read,
     "task.read": task_read,
     "task.list": task_list,

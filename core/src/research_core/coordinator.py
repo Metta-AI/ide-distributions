@@ -81,6 +81,7 @@ WAKE_INSTRUCTIONS = (
 )
 
 ACTOR = Actor.user("client-dispatch")
+RELEASE_NEXT = "Your run will be stopped, then the Task goes back to scheduling; end your run now"
 REPLAY_MARGIN_S = 300
 
 
@@ -1788,8 +1789,9 @@ class Coordinator:
                 ) != (op_id, task_updated, rationale, context):
                     raise StoreError(
                         [
-                            "task already has an immutable assignment; "
-                            "reconcile its owner before reassigning"
+                            "this Task already has an assignment with other details, and an "
+                            "assignment cannot be changed; send task.message to tell its worker, "
+                            "or wait until the worker has finished or released it"
                         ]
                     )
                 return {
@@ -1800,13 +1802,25 @@ class Coordinator:
                 }
             task = tasks.read(ctx.store, task_id)
             if task["updated"] != task_updated:
-                raise StoreError(["task revision changed; read the task before assigning"])
+                raise StoreError(
+                    ["the Task changed after you last read it; read it with task.read, then assign"]
+                )
             dispatchable = {task["id"] for task in tasks.dispatchable(ctx.store)}
             if task["id"] not in dispatchable:
-                raise StoreError(["task is not approved and dependency-ready for assignment"])
+                raise StoreError(
+                    [
+                        "only an accepted Task whose dependencies are done can be assigned; "
+                        "read it with task.read"
+                    ]
+                )
             occupied = admissions.reserved_workers(ctx.wstore)
             if occupied >= int(settings.get([ctx.wstore, ctx.store], "max_researchers")):
-                raise StoreError(["research capacity is reserved; wait for a worker to settle"])
+                raise StoreError(
+                    [
+                        "every Researcher slot is taken (max_researchers); assign this when a "
+                        "running Task ends"
+                    ]
+                )
             session_id = mint_session_id()
             # The prompt is rendered from the exact task revision the session saw.
             text = (
@@ -1907,7 +1921,7 @@ class Coordinator:
                     {
                         "kind": "release_pending",
                         "record": tasks.read(ctx.store, task_id),
-                        "reason": "The coordinator stops the run before releasing task ownership",
+                        "reason": RELEASE_NEXT,
                     },
                 )
                 tx.event(
@@ -1918,7 +1932,7 @@ class Coordinator:
         return {
             "kind": "release_pending",
             "record": tasks.read(ctx.store, task_id),
-            "reason": "The coordinator stops the run before releasing task ownership",
+            "reason": RELEASE_NEXT,
         }
 
     def finish_assignments(self, store: Store) -> None:

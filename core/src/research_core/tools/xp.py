@@ -363,7 +363,7 @@ def _credits_refused(
     refused = {"balance": error.balance, "held": error.held, "next_refill_at": error.next_refill_at}
     if ctx.role == "researcher":
         next_step = (
-            "task.wait {kind: credits, detail: 'XP requests for "
+            "task.wait {task, kind: credits, detail: 'XP requests for "
             f"{record['id']}', ref: {plan['episodes']}}} and end your run; the watcher resumes you"
             " when the balance covers it"
         )
@@ -391,8 +391,9 @@ def _next_after_request(ctx: ToolContext, record: dict, pending_ids: list[str]) 
         )
     if ctx.role == "researcher":
         return (
-            f"task.wait {{kind: xp, ref: {json.dumps(pending_ids)}}} and end your run; the watcher"
-            " resumes you when they finish, then xp.status stores the rows"
+            f"task.wait {{task, kind: xp, detail: 'XP requests for {record['id']}', ref:"
+            f" {json.dumps(pending_ids)}}} and end your run; the watcher resumes you when they"
+            " finish, then xp.status stores the rows"
         )
     return (
         f"xp.status {{experiment: {record['id']}}} refreshes the runs and stores the rows once the"
@@ -520,9 +521,9 @@ def _finish_evaluate(
                 "output_tail": result.output_tail,
             },
             "next": (
-                f"evaluate is still running (pid {result.pid}); task.wait {{kind: process, ref:"
-                f" {result.pid}}} and end your run, or call xp.status {{resume: <token>}} when"
-                " it is done"
+                f"evaluate is still running (pid {result.pid}); a Researcher calls task.wait"
+                f" {{task, kind: process, detail: 'evaluate', ref: {result.pid}}} and ends its"
+                " run; when it has ended, xp.status {resume: <token>} finishes it"
             ),
         }
     results = dict(run.get("results") or {})
@@ -610,7 +611,10 @@ def _report(record: dict, note: str | None = None) -> dict:
             f"experiment.close {{experiment: {record['id']}}} applies the decision rule"
         )
     elif pending:
-        report["next"] = f"{len(pending)} requests still run; task.wait {{kind: xp}} or try later"
+        report["next"] = (
+            f"{len(pending)} requests still run; a Researcher calls task.wait {{task, kind: xp,"
+            " detail, ref}} and ends its run, an Orchestrator tries later"
+        )
     return report
 
 
@@ -662,14 +666,18 @@ SPEC = tool(
                     },
                     "episodes": a.integer("Episodes per request (default 1)."),
                     "league": a.string("A league id the platform fills the other seats from."),
-                    "opponents": a.strings("Policy version ids for the other seats."),
+                    "opponents": a.strings(
+                        "Policy version ids for the other seats. For a comparison, always "
+                        "pin them, so both arms meet the same roster."
+                    ),
                     "arms": a.strings("candidate and/or baseline (default both)."),
                 },
                 ("experiment",),
             ),
             ActionSpec(
                 "status",
-                "Refresh the runs, download finished results and store the evaluate rows.",
+                "Refresh the runs, download finished results and store the evaluate rows. Give "
+                "experiment, request or resume.",
                 {
                     "experiment": EXPERIMENT,
                     "request": a.string("One platform request id instead of the Experiment."),
