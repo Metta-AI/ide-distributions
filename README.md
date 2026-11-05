@@ -92,7 +92,7 @@ and `IDE_TOOL_CALL_CONTEXT` narrow or change a run (see `test_write_actions.py`)
 with the fake platform, so the system prompt, tool list, hooks and tools are the real ones. It ends
 with `test_the_agreed_rate`: at least 95% of calls valid on the first try, after one refusal and
 after three. This is the check to pass before calling the tools reliable. Run it in the pinned
-image, from the repository root (about $4 and 10 minutes at the default 10 repeats):
+image, from the repository root (about $4 and 10 to 20 minutes at the default 10 repeats):
 
 ```bash
 out=$(mktemp -d) && chmod 777 "$out"  # the container's user writes here

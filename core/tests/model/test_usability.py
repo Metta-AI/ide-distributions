@@ -469,7 +469,7 @@ class FakeReplies:
         ),
         # Another write ends the run: production would have done it.
         (
-            [[("task", {"action": "message", "task": "T-1", "text": "x", "operation_id": "o"})]],
+            [[("task", {"action": "message", "task": "T-1", "text": "x"})]],
             "wrong_act",
             None,
             [],

@@ -833,8 +833,8 @@ CREDITS_REFUSAL = json.dumps(
         "created": [],
         "reconciled": [],
         "runs": [],
-        "next": "task.wait {task, kind: credits, detail: 'XP requests for X-5: need 2.00 credits'} and "
-        "end your run; the watcher resumes you when the balance covers it",
+        "next": "task.wait {task, kind: credits, detail: 'XP requests for X-5: need 2.00 credits'} "
+        "and end your run; the watcher resumes you when the balance covers it",
     }
 )
 

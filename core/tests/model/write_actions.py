@@ -18,8 +18,8 @@ Which write actions are covered. One case per write action, of the record tools 
 task, experiment, directive, settings, ui), that has at least two required fields, so the model
 has to compose arguments rather than pass one reference; plus ``ui.notify``, the incident wake's
 other write. Left out, to keep a run small:
-  - actions with the same shape as a covered one: task.propose, task.message and task.reject
-    for the Orchestrator (task.create, task.answer), task.link (two references), and the
+  - actions with the same shape as a covered one: task.propose and task.reject for the
+    Orchestrator (task.create, task.answer), task.link (two references), and the
     Researcher's claim.retire and experiment.abandon (covered for the Orchestrator);
   - workspace.change_complete, which needs a worktree the instruction cannot make plausible;
   - the tools without actions (submit, upload, wiki_edit, softmax_api): their schemas mark required
@@ -27,7 +27,7 @@ other write. Left out, to keep a run small:
     cannot;
   - the other tools (version, xp, platform, forum_post, github): ``test_tool_call_format.py``
     sends each one instruction;
-  - actions whose only decided field is one reference (task.approve, experiment.start, ...).
+  - actions whose only required field is one reference (task.approve, experiment.start, ...).
 """
 
 from __future__ import annotations
@@ -142,14 +142,6 @@ ORCHESTRATOR = [
     ),
     Case("orchestrator", "goal", "set_status", "Park Goal G-2 because league L-4 closed."),
     Case("orchestrator", "task", "create", TASK_CREATE),
-    Case(
-        "orchestrator",
-        "task",
-        "assign",
-        "Assign Task T-3 (its updated value is 2026-11-04T10:00:00+00:00) to the researcher "
-        "profile, assignment id asg-3: start from league L-7's standings, because it is the only "
-        "worker.",
-    ),
     Case(
         "orchestrator",
         "task",

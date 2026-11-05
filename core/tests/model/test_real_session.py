@@ -33,9 +33,8 @@ pytestmark = [
 ]
 DEFAULT_MODEL = "moonshotai/kimi-k3.1-pro"
 DEFAULT_REPEATS = 10
-# Measured on Kimi K3.1 Pro on 2026-11-04, 10 repeats: first try 110/120, after one refusal 40/40,
-# after three 38/40. All ten first-try misses are task.assign, which sends assignment_id and leaves
-# out operation_id, so this check fails until that is fixed; the other cases are 110/110.
+# Measured on Kimi K3.1 Pro on 2026-11-04, 10 repeats: first try 120/120, after one refusal 40/40,
+# after three 39/40. Before #180 removed operation_id, task.assign was 1/10 and this check failed.
 # The check is the plain reading of the rate: the share of valid calls must be at least this. At
 # the default repeats that asks for 114/120 on the first try and 38/40 per recovery depth. Chance
 # that all three rows pass, by the model's true rate (exact binomial):

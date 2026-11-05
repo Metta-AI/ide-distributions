@@ -517,8 +517,9 @@ def test_offline_forum_and_wiki_have_the_real_keys(world, call):  # noqa: F811
         assert differences(real, _read(f"platform.{args['action']}", args)) == [], args
 
 
-def test_offline_the_credits_refusal_is_the_real_one(world):
+def test_offline_the_credits_refusal_is_the_real_one(world, monkeypatch):
     """The first wrong mock: a Researcher's refusal carries the wait to make, with its detail."""
+    monkeypatch.setattr("research_core.platform.credits.estimate", lambda *_, **__: 2.0)
     ctx = world["ctx"]
     ctx = type(ctx).from_env("researcher", ctx.env)
     error = CreditsRefused("not enough credits", balance=4.0, held=36.0, next_refill_at="soon")
