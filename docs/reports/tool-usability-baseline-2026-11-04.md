@@ -3,6 +3,12 @@
 How easy the research tools and skills are to find, read and use for Kimi K3.1 Pro, measured
 before other branches change them. Measured at commit `f6a1e11c`. No tool or skill was changed.
 
+**These numbers predate the test's realistic reads.** In this run every read got one placeholder
+line. The test now answers each read in the shape the real tool gives (`usability_reads.py`), but
+that was added afterwards and could not be measured, because the OpenRouter key has run out. **Rerun
+before comparing anything with this baseline.** Until then a difference may come from the test and
+not from the tools, and the comparison says so (see "Comparing a later run").
+
 ## The short version
 
 - **Finding is mostly fine.** The model reached the right tool and action in 831 of 880 runs, and
@@ -12,9 +18,10 @@ before other branches change them. Measured at commit `f6a1e11c`. No tool or ski
   were valid at the first try. Most refusals trace to a few lines of our own text that show a call
   without one of its required fields, or to one habit. Findings 1 to 3 cover 23 of the 36 refusals.
 - **Reading is not the problem.** Asked about each skill or tool alone, the model answered 690 of
-  690 questions correctly. The failures are about what it does in a session, so a before/after
-  test of wording needs the findability part, not the reading part.
-- **More skill reading is not an obvious goal.** Ten situations where a skill was wanted had it
+  690 questions correctly. These are look-up questions with the text in front of it, so this shows
+  no failure of reading and little more. The failures are about what it does in a session, so a
+  before/after test of wording needs the findability part, not the reading part.
+- **More skill reading is not an obvious goal.** Eleven situations where a skill was wanted had it
   opened in 0 of 5 runs and still went right 5 of 5. In the plain situations, opening an accepted
   skill made no measurable difference to the outcome (369/385 with, 98/105 without, p = 0.30). In
   the hard ones it went with better outcomes (122/136 against 32/44, p = 0.012), but that is a
@@ -31,7 +38,7 @@ in a session: an index in the prompt and `skill_view` to open one.
 | Part | Sample | Scored by |
 |---|---|---|
 | Findability and usability | 176 situations (137 plain, 39 hard; 120 Orchestrator, 56 Researcher), 5 repeats, 880 runs, 1,968 requests | The first call, the call that settled the run, skills opened, the tool's own argument check, and the argument rule of the situation (127 runs) |
-| Comprehension | 46 items (28 skills, 17 tools, plus the Researcher's `task`), 3 questions each, 5 repeats, 690 answers | Answers read and scored against the source |
+| Comprehension | 46 items (28 skills, 17 tools, plus the Researcher's `task`), 3 questions each, 5 repeats, 690 answers | Each answer matched against patterns written from the source |
 | Self report | The same 46 items, 3 repeats, 138 reviews | The model's own rating. Weighted low, and each complaint was checked against the code |
 | Size | Every skill and tool | Bytes, and real tokens from the difference in OpenRouter's `prompt_tokens` |
 
@@ -47,20 +54,18 @@ on totals across situations.
 
 **Completeness.** Every cell is full: all 176 situations have 5 counted runs, all 46 items have 15
 answers and 3 reviews, and all 46 sizes have a token count. No saved run has a host error or an
-OpenRouter 402, which the test would have left out of every rate as `host_error`. The word "402" in
-the saved runs is only the model quoting the fixture's XP credits refusal, in `r-wait-credits`. No
-paid rerun followed the last counted run, because the key ran out; nothing here depends on one.
+OpenRouter 402, which the test would have left out of every rate as `host_error`. The number 402 in
+the saved runs' calls is only the model quoting the fixture's XP credits refusal, in `r-wait-credits`
+and `r-hard-wait-credits-args`. No paid rerun followed the last counted run, because the key ran out; nothing here depends on one.
 
 ## Limits
 
-1. **Every read returned the same placeholder.** A read, `terminal` or similar call gets one fixed
-   line ("As the request describes; nothing further to add."). So an Experiment or Task the model
-   looks up never shows any state. The model notices: `task.complete` runs carry operation ids like
-   `fail-t-21-tool-stubs` and one said "All record tools return the same stub response". This
-   hurts long Researcher runs most. Results marked "weak test" below should not be read as tool
-   failures. Realistic reads are the first improvement to make to this test. They were not added
-   here, because the OpenRouter key had too little money left to measure again, and a baseline must
-   match the code that produced it.
+1. **Every read returned the same placeholder.** In this run a read, `terminal` or similar call got
+   one fixed line ("As the request describes; nothing further to add."). So an Experiment or Task
+   the model looked up never showed any state. The model noticed: `task.complete` runs carry
+   operation ids like `fail-t-21-tool-stubs`, and 6 runs mention a stub, one saying "All record tools (experiment.read, xp.status, task.read) return the same stub response".
+   This hurt long Researcher runs most. Results marked "weak test" below should not be read as tool
+   failures. Later code answers each read with `usability_reads.py`; the baseline was not rerun.
 2. **The world is a fixture.** One briefing, one Goal, one Coworld (`cogs`), scripted refusals.
 3. **The plain tier is near its ceiling** (662/685), so it can show a regression better than an
    improvement. The hard tier (169/195) is where gains will show.
@@ -72,12 +77,20 @@ paid rerun followed the last counted run, because the key ran out; nothing here 
    `recursive/flint-v1.0:free`; this test uses Kimi, as the task asked, and Kimi gets the
    Kimi-gated "Execution discipline" prompt section.
 6. **Self reports have 3 repeats**, against 5 for everything else.
-7. **Two mocks were wrong after the redo.** The `xp` credits refusal fixture lacks the real `next`
-   text from `core/src/research_core/tools/xp.py` (`_credits_refused`), which tells a Researcher to
-   call `task.wait`, so `r-hard-wait-credits-args` at 3/5 is unfairly low. The `task.claim` mock
-   returned `task` and `messages`, where the real result has `record`, `worktree`, `branch`,
-   `instructions` and `pending_messages`. Reads of the Task or Goal right after a claim were common,
-   and should not be taken as a fault until this is fixed.
+7. **Two mocks were wrong in this run.** The `xp` credits refusal fixture lacked the real `next` text
+   from `core/src/research_core/tools/xp.py` (`_credits_refused`), which tells a Researcher to call
+   `task.wait`, so `r-hard-wait-credits-args` at 3/5 is unfairly low. The `task.claim` mock returned
+   `task` and `messages`, where the real result has `record`, `worktree`, `branch`, `instructions`
+   and `pending_messages`. Reads of the Task or Goal right after a claim were common, and should not
+   be taken as a fault. Both are fixed in later code, not measured.
+8. **Judging changed after this run, in three small ways.** A call the checks refuse now gets its
+   refusal and the run goes on, where it could end as `wrong_act`: one of the 30 here is that case
+   (`r-candidate`, `experiment.create` with an empty `methods.candidate`). A store check's refusal
+   is now answered as a refusal, where the model was told it had worked. And `delegate_task`'s text
+   now matches what a real session froze, one sentence shorter.
+9. **Refusals inside a tool's own code are not reproduced.** The test runs the argument check and,
+   for four actions, the store's checks. A rule such as "standings needs a division or a league",
+   which the tool's code enforces, gets no refusal here.
 
 ## Headline numbers
 
@@ -89,12 +102,12 @@ paid rerun followed the last counted run, because the key ran out; nothing here 
 | Plain | 685 | 662 | | 649/663 | | 385/490 | |
 | Hard | 195 | 169 | | 137/150 | 124/127 | 136/180 | |
 
-Outcomes: right 831, `wrong_act` 30, words where a call was wanted 9, stopped at the request limit
-10. "Right call first" is low for the Researcher because its Task text tells it to load skills and
+Outcomes: right 831, `wrong_act` 30 (one of them a call production refuses: Limits, item 8), words
+where a call was wanted 9, stopped at the request limit 10. "Right call first" is low for the Researcher because its Task text tells it to load skills and
 read first, which is what it should do, so that column is not a failure rate for that role.
 
 The prompt before any call is 22,551 tokens for the Orchestrator and 21,107 for the Researcher. The
-skill index is 2,038 and 1,580 bytes of that. A Researcher run reads a mean of 2,055 tokens of
+skill index takes 2,038 and 1,580 bytes of that. A Researcher run reads a mean of 2,055 tokens of
 skills (highest 5,950), an Orchestrator run 777 (highest 3,526).
 
 ## Findings: behaviour measured
@@ -127,9 +140,10 @@ paths here and below are under `core/src/research_core/`, and a skill's `<name>/
 - **Evidence:** the hint says `task.wait {kind: process, ref: <pid>}`, but `task.wait` requires
   `detail` (`tools/task.py:483`). `r-wait-build` was valid at first try 3/5, with 4 refusals for
   `detail`, on runs that opened no skill. Over `r-wait-build` and `r-hard-wait-build-args`, 6 of 10
-  runs waited and 4 called `version.create` with the resume token at once, while the build was
-  still running. The hint offers resume first; `candidate/SKILL.md:29` says a Researcher must wait,
-  but none of these 10 runs had it open.
+  runs waited and 4 called `version.create` while the build was still running: 2 at once with the
+  resume token, 1 at once without it, which would start the build again, and 1 with the token after
+  three refused waits. The hint offers resume first; `candidate/SKILL.md:29` says a Researcher must
+  wait, but none of these 10 runs had it open.
 - **Fix:** add `detail` to the hint, and make it depend on the role as `_credits_refused` in
   `tools/xp.py` does: a Researcher gets only the wait. The hints at `tools/xp.py:394`, `:523` and
   `:613` have the same form without `detail`. No refusal was measured from those, but they should
@@ -146,14 +160,16 @@ paths here and below are under `core/src/research_core/`, and a skill's `<name>/
 
 ### 4. A session's opening goal is ignored: 0 of 5 create a Goal
 
-- **Files:** `core/src/research_core/plugin/turn.py:77`,
+- **Files:** `core/src/research_core/plugin/session_context.py:31-33`, also
+  `core/src/research_core/plugin/turn.py:77`,
   `core/src/research_core/skills/orchestrator/client-web-ide/SKILL.md:53`.
-- **Evidence:** `o-hard-opening-goal`, where the user says "Hello!" and the context carries
-  `opening_goal`. 5/5 replied in words, asking what to work on. `client-web-ide` was opened 2/5,
+- **Evidence:** `o-hard-opening-goal`, where the user says "Hello!" and the session context declared
+  at open carries `opening_goal`. 5/5 replied in words, asking what to work on. `client-web-ide` was opened 2/5,
   and neither of those runs acted on it. The only explanation of the field is line 53 of that
   skill, so the context shows the value with no word of what it means.
-- **Fix:** have `turn.py` label the value where it renders it, for example "what the user typed
-  when opening this session; treat it as their first request". This is one fixture with a greeting
+- **Fix:** label the value where it is rendered, in `session_context.py` (the path this situation
+  uses) and in `turn.py`, for example "what the user typed when opening this session; treat it as
+  their first request". This is one fixture with a greeting
   as the first message, the hardest form of this case.
 
 ### 5. A Researcher told to stop fails the Task instead of releasing it
@@ -217,8 +233,8 @@ paths here and below are under `core/src/research_core/`, and a skill's `<name>/
 
 - **File:** `core/src/research_core/task_types/improvement.md:42-45`, also
   `task_types/research.md:23`.
-- **Evidence:** `writing-claims` opened 186 times in 880 runs, 146 where no situation wanted it;
-  `candidate` 66 times, 56 unwanted; Researcher means of 7.31 calls before acting and 2.25 skills
+- **Evidence:** `writing-claims` opened 186 times in 880 runs, 146 of them in situations that did not
+  list it; `candidate` 66 times, 56 of them; Researcher means of 7.31 calls before acting and 2.25 skills
   per run, against 2.27 and 0.82. The placeholder reads (Limits, item 1) inflate those long runs, so
   the size of the effect is unknown; the loading itself is what the text instructs.
 - **Fix:** tie each skill to the step that needs it: "load `candidate` before building, `experiment`
@@ -231,7 +247,7 @@ reads, `experiment.create` for an Experiment the model could not see). Same for 
 
 | Situation | Right | What happened |
 |---|---:|---|
-| `r-candidate` | 0/5 | limit 2, `experiment.create` 2, `task.complete` 1 |
+| `r-candidate` | 0/5 | limit 2, `experiment.create` 2 (one refused: Limits, item 8), `task.complete` 1 |
 | `r-run-eval-field` | 1/5 | `experiment.create` 2, `task.complete` 2 |
 | `r-experiment-start` | 2/5 | limit 2, `experiment.update` 1 |
 | `r-hard-xp-field-args` | 2/5 | `experiment.create` 2, `task.complete` 1 |
@@ -243,7 +259,8 @@ reads, `experiment.create` for an Experiment the model could not see). Same for 
 
 - Skill wanted, opened 0/5, right 5/5, so the tool list is enough: `o-task-message`,
   `o-task-workers`, `o-coworld-switch`, `o-platform-replay`, `o-platform-champion`,
-  `o-schema-newer`, `r-start`, `r-wait-xp`, `r-propose-followup`, `r-hard-resume-build`.
+  `o-schema-newer`, `o-hard-after-xp-stop`, `r-start`, `r-wait-xp`, `r-propose-followup`,
+  `r-hard-resume-build`. In the last, 3 runs were refused once for `summary` first (table below).
 - Hard cases that held: a prompt injection in a forum post was resisted 5/5, a plain greeting was
   answered in words 5/5, and the model stopped after an XP request 5/5. `o-hard-setting-not-directive`
   went right, with the right arguments.
@@ -259,17 +276,17 @@ of the 3 self reports raised it.
 | `tools/settings.py:105` | `value`: "null clears a nullable setting", but the schema's `anyOf` leaves out null (3/3) | Schema; `validate_args` skips None | Allow null in the schema |
 | `tools/experiment.py:96` | `decision_rule.k`: "stored, unused by the rule" (3/3 would cut it) | `experiment.py:380`: the power check uses it, the rule does not | Say what it is for |
 | `tools/submit.py:247`, `submission/SKILL.md:38` | `lineage` is never defined (3/3) | Only behaviour is in `platform/fake.py:630`: champion if the policy name already is | Define it, after checking the real platform |
-| `tools/platform.py:72,259`, `tools/ui.py:105`, `tools/version.py:392`, `tools/xp.py:417` | "Exactly one of" rules sit behind fields all marked optional | Lines read | State the rule in the action's text |
-| `store/tasks.py:878`, `review/SKILL.md` | `merge` is required even with `accept: false`; the skill is silent. Models sent `merge: no` 5/5, so nothing failed | Code | One sentence in the skill |
+| `tools/platform.py:72,259`, `tools/ui.py:105`, `tools/version.py:392`, `tools/xp.py:417` | "One of these" rules sit behind fields all marked optional | Lines read | State the rule in the action's text |
+| `store/tasks.py:878`, `review/SKILL.md` | `merge` is required even with `accept: false`; the skill is silent. Models sent `merge: no` 5/5 in `o-hard-review-reopen`, so nothing failed | Code | One sentence in the skill |
 | Researcher `task` schema | The nested `checklist` duplicates the flat fields (3/3); the handler merges both | `handle_complete` | Drop one form, saves schema tokens |
 | `task/SKILL.md`, `task` schema | `failure.tried` is a string in the schema, a list in the skill's example; the validator accepts a list | Code | Match them |
-| `writing-claims/SKILL.md:14` | "links do not change" sits beside `add_evidence` (2/3) | Text | Separate evidence from links |
+| `writing-claims/SKILL.md:14` | "links do not change" sits beside `add_evidence` (3/3) | Text | Separate evidence from links |
 | `review/SKILL.md:10` | "`ui.notify` is your only channel", yet `ui.ask` applies in mode ask (2/3) | Text | Correct it |
 | `user-identity/SKILL.md:17` | "Nothing gates it" yet `ui.ask` if surprised (3/3) | Text | Correct it |
 | `merge-conflicts/SKILL.md:20` | `git log main..task/<n>` and `git diff main...task/<n>` do not show what moved on `main` (1/3) | git's rules | Add `task/<n>..main` |
 | `calibrate-noise/SKILL.md` | Promises guardrail tolerances and never derives them; `k` undefined (3/3) | Text | Derive them or drop the promise |
-| `working-with-the-ide/SKILL.md` | The panel kind list omits `agent-context`, which the schema has (1/3) | Schema | Add it |
-| `coworld-source/SKILL.md`, `survey/SKILL.md` | "source map" and "taint" are never defined (3/3) | grep | Define them |
+| `working-with-the-ide/SKILL.md:36-37` | The panel kind list omits `agent-context`, which the schema has and line 53 of the same skill uses (1/3) | Schema | Add it |
+| `coworld-source/SKILL.md:16`, `survey/SKILL.md:20,30` | "source map" is never defined and "taint" only by example (3/3) | grep | Define them |
 | `goals-and-tasks/SKILL.md`, `client-web-ide/SKILL.md` | "Retry unchanged after uncertainty" is too terse; "a client view the capabilities list" misreads (3/3 each) | Text | Reword |
 
 Found by reading the text alone, also true, not raised by the model:
@@ -279,13 +296,16 @@ Found by reading the text alone, also true, not raised by the model:
 | `watcher/wakes/setup.md:14` | "with the setup skill": no such skill exists | Remove or add it |
 | `mixin-from-scratch/SKILL.md:39` | Says `version.create` refuses an image artifact; `candidate` and `store/versions.py` (`ARTIFACT_KINDS`: file, image) say otherwise. Stale | Update |
 | `goals-and-tasks/SKILL.md:31` | "Repairs ... the only Tasks that may have no Goal"; the store allows any maintenance Task. The model repeats this as fact in the comprehension test | Correct it |
-| `candidate/SKILL.md:29-30` | `version.create {resume}` omits the required `summary`. `r-hard-resume-build` valid at first try 2/5, 3 refusals for this, all recovered | Add it. This one has measured evidence but costs one retry |
-| `core/tests/model/hermes_builtin_tools.json` | Holds Hermes 0.21.6's tool text; the pin is 0.22.6, with different `terminal` and `skill_view` descriptions | Refresh it. Left for the task that owns that harness |
+| `candidate/SKILL.md:29-30` | The call is written `version.create {resume}`, without the required `summary`; only line 29 adds "with the same arguments". `r-hard-resume-build` valid at first try 2/5, 3 refusals for this, all recovered | Add it. This one has measured evidence but costs one retry |
+| `core/tests/model/hermes_builtin_tools.json` | On `main` it holds Hermes 0.21.6's tool text; the pin is 0.22.6, with different `terminal` and `skill_view` descriptions | The unmerged `tools/model-test-gaps` branch refreshes it |
 
-Other refusals, each 1 or few and without a clear cause in our text: `claim.search` without `query`
-4 and `experiment.search` 1 (all in `r-propose-ideation`), `platform.forum_list` with `league` 1,
+Other refusals, each 1 or few and without a clear cause in our text: `claim.search` with an empty or
+missing `query` 4 and `experiment.search` with an empty one 1 (all in `r-propose-ideation`, listing
+what exists), `platform.forum_list` with `league` 1,
 `task.answer` and `task.propose` without `operation_id` 1 each, `experiment.search` with
-`related_experiments` 1, `experiment.create` with an empty `methods.candidate` 1.
+`related_experiments` 1, `experiment.create` with an empty `methods.candidate` 1. That last one may
+come from our text: `experiment/SKILL.md:21` and `diagnose/SKILL.md:16` say to leave it empty, and
+it has to be left out.
 
 ## Self-report complaints not upheld
 
@@ -362,14 +382,18 @@ number below), rather than the wrong one.
 | `run-eval` (30) | `working-a-task` 2, `candidate` 2, `experiment` 1 |
 | `environment` (15) | nothing 2, `working-a-task` 1 |
 | `submission` (40) | `candidate` 1, `working-a-task` 1 |
+| `merge-conflicts` (15) | `repair` 1 |
+| `softmax-api-routes` (20) | `working-a-task` 1 |
+| `user-identity` (10) | nothing 1 |
+| `diagnose` (5) | nothing 1 |
 
 Names that do not exist: the binding names in finding 8, and `method.survey` and
 `method.replay-diagnosis` once each.
 
 ## Per tool
 
-Sizes are alone, with no other tool beside them. Counts add up each action the tool's situations
-want. A tool can be right at a low "first" rate because the model reads first; that is not a fault.
+Sizes are alone, with no other tool beside them. Counts add up the situations whose first-listed act
+is one of the tool's actions. A tool can be right at a low "first" rate because the model reads first; that is not a fault.
 
 | Tool | Bytes | Tokens | Right call reached | Right call first | Valid at first try | Clarity | Comprehension |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -412,6 +436,7 @@ Never called: none.
 | `claim.write` | 18/20 | `task.complete` 1, limit 1 |
 | `goal.set_status` | 14/15 | `task.abandon` 1 |
 | `experiment.close` | 14/15 | `task.complete` 1 |
+| Answer in words (`text`) | 19/20 | `experiment.close` 1 |
 
 ## Comparing a later run
 
@@ -423,17 +448,25 @@ OPENROUTER_API_KEY=... IDE_HERMES_SRC=/path/to/hermes-agent \
 The run compares itself with `core/tests/model/usability_baseline.json` and prints the headline
 counts, then only what passes Fisher's exact test (p < 0.01 for a situation, p < 0.05 for a whole
 skill or tool, since about 180 situations would otherwise show differences by chance). Each situation
-and text carries a hash, so a changed one is reported as changed and not compared.
+and text carries a hash, so a changed one is reported as changed and not compared. 31 situations are
+already marked this way, because the fix to the reads changed their fixtures. `meta.reads` records
+which reads a run used: this baseline says `placeholder`, so the first comparison opens by saying the
+two are not comparable as a change in the tools. Write a new baseline from that rerun with
+`USABILITY_WRITE_BASELINE=1`, leaving tools and skills as they are, then compare later changes with it.
 
 `USABILITY_SITUATIONS` runs a few situations and `USABILITY_PARTS` runs one part; `USABILITY_RUN_DIR`
 resumes a stopped run; `USABILITY_WRITE_BASELINE=1` replaces the baseline. The headline counts are
 meaningless on a narrowed run, because they only add up what ran. The per-situation lines still hold.
 
-The file itself holds counts, hashes and sizes only. The raw runs were not committed.
+The file holds counts, hashes and sizes only. The raw runs were not committed, so a few figures here
+rest on them and cannot be checked from the file: each refused call, the cross-tab of skill opening
+and outcome, the tokens of skills read, and the costs of runs that were not kept.
 
 ## What it cost
 
-The 880 kept runs cost $25.63 and comprehension, self reports and sizes $4.83, so **a full repeat is
-about $30.50**, or about $0.15 a situation. 96% of prompt tokens came from the cache. Wall time was
-not measured cleanly, since the kept runs came from several resumed sessions. Reaching this baseline
-cost more, about $45, for a pilot, a partial run, and the first full run with the errors in "Limits".
+The 880 kept runs cost $25.63 (about $0.15 a situation) and comprehension, self reports and sizes
+$4.83, so this run's **full repeat is about $30.50**. Expect the next one to cost more, because real
+reads are longer than one line. 96% of prompt tokens came from the cache. Wall time was not measured
+cleanly, since the kept runs came from several resumed sessions. Reaching this baseline cost more:
+the saved runs add up to about $47.50 (a partial run $11.12, the first full run with the errors in
+"Limits" $25.53, the 148 redone runs $5.97, the other parts $4.83), and a pilot on top was not saved.
