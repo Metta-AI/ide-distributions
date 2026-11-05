@@ -191,18 +191,12 @@ class Coordinator:
                     observed[snapshot["run_id"]] = self.native.status(
                         snapshot["run_id"], profile=profile
                     )
-                context_turn = (
-                    "canonical_request" in request
-                    and len(request["canonical_request"]["messages"]) > 1
-                )
                 if (
-                    context_turn
+                    "canonical_request" in request
                     and snapshot["run_id"]
                     and not observed[snapshot["run_id"]].terminal
                 ):
-                    raise RunsBusy(
-                        "Structured context waits for the active turn", code="session_busy"
-                    )
+                    raise RunsBusy("Canonical input waits for the active turn", code="session_busy")
                 if (
                     row["origin"] in {"client", "answer", "continuation"}
                     and (

@@ -3,7 +3,9 @@
 import json
 
 
-def inject_context(*, request: dict, session_id: str = "", **_) -> dict | None:
+def inject_context(*, request: dict, session_id: str = "", task_id: str = "", **_) -> dict | None:
+    # Hermes keeps task_id stable when compression rotates its live session_id.
+    session_id = task_id or session_id
     if not session_id:
         return None
     from research_core import layout

@@ -219,8 +219,8 @@ preceded optionally by plain-text system/developer messages or user messages nam
 `softmax_page_context`. Page data uses the named user form. Other prefix shapes return
 `unsupported` before acceptance. The final user keeps its structured attachments.
 The owned request middleware injects the current prefix into each model call while native
-conversation history remains authoritative. Context turns wait for the active turn instead of
-steering it. Full retained messages are pushed during work; the native HTTP API
+conversation history remains authoritative. All canonical inputs wait for the active turn instead
+of steering it. Full retained messages are pushed during work; the native HTTP API
 exposes persisted messages rather than raw OpenAI completion chunks. Pending approvals and
 clarifications are generation-fenced. Commands persist their identities before dispatch.
 A saved reply replays exactly; interrupted dispatch returns `unavailable` with

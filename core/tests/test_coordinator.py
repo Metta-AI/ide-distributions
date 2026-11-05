@@ -307,16 +307,16 @@ def test_recovery_replays_old_message_ids_and_counts_a_running_continuation(tmp_
         )
 
 
-def test_canonical_context_waits_for_active_turn_and_keeps_native_history(tmp_path):
+@pytest.mark.parametrize("with_context", [False, True])
+def test_canonical_input_waits_for_active_turn_and_keeps_native_history(tmp_path, with_context):
     ctx = make_ctx(tmp_path)
     native = FakeHermesRuns()
     first = chat(ctx)
     coordinator = Coordinator(ctx.workspace, native)
     active = coordinator.start(**first)
-    messages = [
-        {"role": "user", "name": "softmax_page_context", "content": "page data"},
-        {"role": "user", "content": [{"type": "text", "text": "next question"}]},
-    ]
+    messages = [{"role": "user", "content": [{"type": "text", "text": "next question"}]}]
+    if with_context:
+        messages.insert(0, {"role": "user", "name": "softmax_page_context", "content": "page data"})
     request = {**first, "text": messages, "idempotency_key": "next-input"}
     op_id = admissions.enqueue(
         ctx.wstore,

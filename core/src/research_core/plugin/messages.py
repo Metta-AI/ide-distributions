@@ -2,7 +2,12 @@
 
 
 def record_native_message(
-    *, session_id: str, conversation_history: list, user_message: object = None, **_
+    *,
+    session_id: str,
+    conversation_history: list,
+    user_message: object = None,
+    task_id: str = "",
+    **_,
 ) -> None:
     """Bind application metadata to the native row ID supplied by the pinned observer hook."""
     from research_core import layout
@@ -14,6 +19,8 @@ def record_native_message(
         message for message in reversed(conversation_history) if message["role"] == "user"
     )
     native_id = current["_row_id"]
+    # Match the durable admission even when compression rotates the live session.
+    session_id = task_id or session_id
     workspace = layout.from_env(profile_env())
     store = Store.open(workspace.store_path, kind="workspace")
     try:

@@ -6,6 +6,7 @@ import pytest
 
 from research_core.aide_messages import context_message
 from research_core.plugin.aide_context import inject_context
+from research_core.plugin.messages import record_native_message
 from research_core.store import admissions, sessions
 from tests.test_serve import HARNESS, make_ctx
 
@@ -35,6 +36,9 @@ def test_context_is_bound_to_one_session_and_survives_tool_loops(tmp_path, monke
     native = {"messages": [*prior, user], "model": "model"}
     projected = inject_context(request=native, session_id="s")["request"]
     assert projected == {"messages": [*prior, prefix, user], "model": "model"}
+    assert (
+        inject_context(request=native, session_id="compressed", task_id="s")["request"] == projected
+    )
     assert native["messages"] == [*prior, user]
     assert inject_context(request=projected, session_id="s") is None
     assert inject_context(request=native, session_id="other") is None
@@ -42,6 +46,13 @@ def test_context_is_bound_to_one_session_and_survives_tool_loops(tmp_path, monke
     assert inject_context(request={"messages": [*prior, user, tool]}, session_id="s")["request"][
         "messages"
     ] == [*prior, prefix, user, tool]
+    record_native_message(
+        session_id="compressed", task_id="s", conversation_history=[{**user, "_row_id": 73}]
+    )
+    assert (
+        ctx.wstore.one("SELECT native_message_id FROM client_admissions WHERE op_id=?", (key,))[0]
+        == 73
+    )
     with ctx.wstore.tx(HARNESS) as tx:
         tx.execute(
             "INSERT INTO client_admissions(op_id,kind,request,session_id,message,payload,"
