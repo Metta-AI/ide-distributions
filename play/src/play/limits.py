@@ -11,8 +11,7 @@ DEFAULT_EPISODES = 5
 MAX_WAIT_SECONDS = (
     60  # practice_status waits at most this long, so the user is never left unanswered
 )
-# The steps of one user request, each a step on its task card; the Mind's step names (rungs) are
-# fixed by the records schema (bodies.GoalStep), so each step is filed under the nearest one.
+# The steps of one user request on its task card: the step's stored name, and its plain label.
 STEPS = {
     "understand": ("reflect", "Understand what you asked for"),
     "change": ("implement", "Change the program"),

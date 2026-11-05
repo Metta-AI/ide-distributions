@@ -1,6 +1,22 @@
 # play
 
-Play is the user's Softmax cogent on one coworld. One profile, `play` (this folder), does the
+**Not hosted now.** Metta #30416 (2026-11-03) retired Play's hosted runtime and its release path,
+so production can no longer select this profile. Metta kept users' Play volumes and files, and its
+rankings, program details and replays; Play's chat, tasks, notes and Mind panels show as
+unavailable. Whether Play comes back has not been decided, so this folder stays and CI still tests
+it. Text here describes the profile, not a running service, and may lag the current game pages.
+
+`.github/workflows/release-play.yml` was deleted because it dispatched a workflow #30416 removed,
+so it failed on every push under `play/`. To release Play again, restore it from git history
+(`git log --diff-filter=D -- .github/workflows/release-play.yml`) together with a metta workflow
+to dispatch.
+
+`builder/` is the earlier builder profile. It never runs: the `play` profile no longer creates
+cards and nothing hosts it now. Its files still describe that flow, and are kept with the rest
+until Play's future is decided.
+
+Play is the user's Softmax cogent. It builds programs for GotA and Generals, and talks about
+any coworld. One profile, `play` (this folder), does the
 whole loop itself: it changes the user's program, saves each change as a new version, practices
 it, reports the results in plain words and releases a version only when the user says yes to it.
 It has only its own tools and the `memory` toolset: no raw file, terminal or Kanban tools.
@@ -14,15 +30,10 @@ Existing GoTA files stay in the workspace root; Generals files and journals live
 `generals/`. `game.json` records which supported game the source tools currently edit.
 Fetch the selected league's starter before switching games or requesting practice.
 
-`builder/` is the earlier builder profile. The hosted Play runtime still installs it
-(metta `devops/hermes-fleet/applications/play/runtime_definition.py` lists both profiles, and
-the image's prepare and check steps expect it), but the `play` profile no longer creates cards,
-so it never runs. Removing it needs that metta change.
-
 ## Tools
 
 The `play` plugin (`plugins/play`, code in `src/play`) registers these tools with JSON schemas.
-Each one runs `python -m play <tool>` in the profile venv on the `softmax_tool` client in
+Each one except `fresh_start` (in the Hermes process) runs `python -m play <tool>` in the profile venv on the `softmax_tool` client in
 `src/ide_research_core` (play's own vendored copy of the former shared package): the credential is installed in
 the profile-local Softmax home before each CLI call, and every mutating call checks with
 `whoami` that the credential is the Player `RESEARCH_PLAYER_ID`.
@@ -33,15 +44,14 @@ the profile-local Softmax home before each CLI call, and every mutating call che
 | `program_show` | The program now (or the starter before the first change), its name, its last version and whether it changed since. |
 | `program_edit` | Applies `{find, replace}` edits (each `find` exactly once; `edit_not_found` / `edit_ambiguous` otherwise) to the program now or the starter, then runs the same check and write as `program_change`. |
 | `program_change` | Writes `program.bas` from a full new text after a static check (`src/play/basic.py`: size, closed blocks, bassy statements, and the selected game's countable limits). A problem writes nothing and returns `program_invalid` with each problem by line; names the starter never uses come back as warnings. Returns the diff. |
-| `league_status` | Read-only, free: the live league's newest round, each division's top scores, the user's own rank and score, what changed since the last look (a small `league_snapshot.json` in the workspace) and their latest league game. |
-| `program_versions` | Every uploaded version (what changed, practice summaries, released or not) and the diff of the program now against the last version or any version. |
+| `league_status` | Read-only, free: the live league's last finished round, each division's top scores, the user's own rank and score, what changed since the last look (a small `league_snapshot.json` in the workspace) and their latest league game. |
+| `program_versions` | Every uploaded version (what changed, practice summaries, whether this workspace recorded releasing it) and the diff of the program now against the last version or any version. |
 | `program_upload` | `coworld upload-policy --file program.bas --name <name> --title <change>`; returns "towerless v2". An unchanged file returns its existing version. |
-| `practice_request` | One private `POST /v2/experience-requests` of 5 games by default (at most 20), titled "Practice: towerless v2". |
+| `practice_request` | One private `POST /v2/experience-requests` of 5 games by default (at most 20), titled "Practice: towerless v2". The same program and attempt return the first request and its counts, with `already: true`. |
 | `practice_status` | The request's progress (optionally waiting up to 60 s); once over, each game's result from its `results.json` in plain words, a summary against the previous version's practice, what the results can and cannot measure, and a watch link per game. |
-| `program_release` | `coworld submit <name>:v<N> --league L --player P` for a version the user names, once, and only with `user_said_yes: true`. |
-| `task_update` | Keeps one task card per user request in the existing workspace journal: six steps from understanding the request to the release question, then an outcome. |
-| `name_keep` | Keeps the name the user just gave the cogent, so the game page shows it in the chat header. Called once, silently, after each naming; it changes nothing else. |
-| `fresh_start` | Only when the user asks to start over: empties the profile's `memories/MEMORY.md` and `memories/USER.md` so the next conversation is a first meeting. Needs `confirm: true`; touches nothing else. |
+| `program_release` | `coworld submit <name>:v<N> --league L --player P` for a version the user names, once, and only with `user_said_yes: true`. Retires the player's other programs in that league. |
+| `task_update` | Keeps one private task card per user request in the workspace journal: six steps from understanding the request to the release question, then an outcome. |
+| `fresh_start` | Only when the user says yes to forgetting: empties the profile's `memories/MEMORY.md` and `memories/USER.md` so the next conversation is a first meeting. Needs `confirm: true`; touches nothing else. |
 
 Tools name programs as the user does: a name and a version number. The platform's policy name
 is the user's name, or, when someone else already has that name, the name plus the first 8
@@ -51,14 +61,15 @@ suffixed form fits the platform's 64.
 
 ### The program workspace
 
-`$PLAY_WORKSPACE` holds `program.bas`, `starter/`, `journal.json` (the program's name, every
-version with what it changed, its practices and their summaries, its release, and the current
-task card), `versions/<platform name>/v<N>.bas` (a copy of each uploaded file, for diffs) and
-`practice/<request>/` (the downloaded results and replays).
+`$PLAY_WORKSPACE` holds `game.json`, `league_snapshot.json` and, for GotA, `program.bas`,
+`starter/`, `journal.json` (the program's name, every version with what it changed, its practices
+and their summaries, its release, and the current task card), `versions/<platform name>/v<N>.bas`
+(a copy of each uploaded file, for diffs) and `practice/<request>/` (the downloaded results and
+replays). For Generals those GotA items live under `generals/`.
 
 ### The league
 
-`starter_fetch`, `practice_request`, and `program_release` require the `league` argument.
+`starter_fetch`, `league_status`, `practice_request`, and `program_release` require the `league` argument.
 The league is always explicit for platform actions. `game.json` records the fetched contract
 for source editing; it never supplies a default league for practice or release.
 
@@ -69,9 +80,10 @@ for source editing; it never supplies a default league for practice or release.
 An exhausted account-credit balance is returned as a `credit_denied` refusal.
 Practice and release each use the league explicitly supplied for that operation.
 
-`src/play/program.py` uses private members of the vendored `SoftmaxClient` (`_league_coworld`,
-`_cli`, `_require_player`, `_line_value`); `tests/test_program.py` runs every one of those paths
-through the real client with a fake CLI, so a rename in `src/ide_research_core` fails `test (play)`.
+`src/play/program.py` uses private members of the vendored `src/ide_research_core`
+(`SoftmaxClient._league_coworld` and `_cli`, `client._line_value`, `xp._error_detail` and
+`xp._completed`); `tests/test_program.py` runs every one of those paths through the real client with
+a fake CLI, so a rename there fails `test (play)`.
 
 ## Install
 
@@ -94,7 +106,7 @@ HERMES_HOME=<play profile dir> PLAY_WORKSPACE=<dir> python3 <play profile dir>/s
 ```bash
 cd play
 uv sync --frozen
-uv run pytest -q             # model-free: tools, schemas, refusals, sync check
+uv run pytest -q             # model-free: tools, schemas, refusals
 uv run pytest -q -m hermes   # with a real Hermes install: clean-export install and registration
 ```
 

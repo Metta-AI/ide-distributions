@@ -2,7 +2,7 @@
 
 Each handler runs ``python -m play <tool>`` in the profile venv (where coworld and softmax-cli
 are installed) and returns its envelope: ``{"ok": true, "data": ...}`` or ``{"ok": false,
-"error": {"reason", "message", "details"?}}``. A coach refusal is data with ``outcome:
+"error": {"reason", "message", "details"?}}``. A credit refusal is data with ``outcome:
 "refused"``, not an error (``play.program``).
 """
 
@@ -45,14 +45,14 @@ TOOLS = {
             "player": {
                 "type": "string",
                 "pattern": r"^[A-Za-z0-9_-]+$",
-                "description": "Manifest player id. Omit for the coworld's starter (baseline).",
+                "description": "Manifest player id. Omit for the game's starter.",
             },
         },
         ["league"],
     ),
     "league_status": (
         (
-            "Read-only look at the live league, free of credits: the newest round and its state, "
+            "Read-only look at the live league, free of credits: the last finished round, "
             "each division's top scores, this user's own rank and score, what changed since you "
             "last looked, and their latest league game. Anything the platform could not answer is "
             "listed under unavailable; say nothing about it."
@@ -84,7 +84,8 @@ TOOLS = {
             "Replace the program with a full new text (use program_edit for a small change). The "
             "text is checked first (the selected game’s size and array limits, closed BASIC blocks, "
             "and the compile limits it can count); on a problem nothing is written and the error lists each "
-            "problem by line. Returns the diff and warnings about names the starter never uses."
+            "problem by line. Text the same as now returns no_change. Returns the diff and "
+            "warnings about names the starter never uses."
         ),
         {
             "text": {
@@ -114,6 +115,7 @@ TOOLS = {
                 "type": "array",
                 "minItems": 1,
                 "maxItems": 50,
+                "description": "The edits, applied in order.",
                 "items": {
                     "type": "object",
                     "properties": {
@@ -143,8 +145,8 @@ TOOLS = {
     "program_versions": (
         (
             "List all your programs and their versions on the platform, with what each version "
-            "of the program changed, its practice results and whether it was released, and how "
-            "the program now differs from its last version, or from the version `program` names."
+            "of the program changed, its practice results and whether this workspace recorded "
+            "releasing it (not whether it is playing now), and how the program now differs from its last version, or from the version `program` names."
         ),
         {"program": PROGRAM},
         [],
@@ -169,8 +171,8 @@ TOOLS = {
         (
             "Request private practice games for an uploaded version; the program plays the "
             "chosen seats and players the platform draws from the league fill the rest. "
-            "Repeating the same arguments returns the same request; raise attempt only to play "
-            "the same practice again. " + REFUSAL
+            "The same program and attempt return the first request, with its own game count and "
+            "seats and already: true, whatever you ask now; raise attempt to play again. " + REFUSAL
         ),
         {
             "league": {"type": "string", "description": "The league for this operation."},
@@ -193,7 +195,12 @@ TOOLS = {
                 "default": [0],
                 "description": "Zero-based seats within the selected variant. Generals: 2-8 players; GotA: 0-4 red, 5-9 blue.",
             },
-            "attempt": {"type": "integer", "minimum": 1, "default": 1},
+            "attempt": {
+                "type": "integer",
+                "minimum": 1,
+                "default": 1,
+                "description": "1 for the first run; raise it to play the same version again.",
+            },
         },
         ["league"],
     ),
@@ -224,7 +231,7 @@ TOOLS = {
         (
             "Release a version of the program to the league. Call only after the user said yes "
             "to releasing exactly this version. Idempotent: a version already released is "
-            "reported as released. " + REFUSAL
+            "reported as released."
         ),
         {
             "league": {"type": "string", "description": "The league for this operation."},
@@ -234,6 +241,7 @@ TOOLS = {
                 "description": 'The exact version the user said yes to, as they name it: "towerless v2".',
             },
             "user_said_yes": {
+                "type": "boolean",
                 "const": True,
                 "description": "True only because the user said to release this version.",
             },
@@ -242,7 +250,7 @@ TOOLS = {
     ),
     "task_update": (
         (
-            "Keep the existing workspace task card up to date. "
+            "Keep your own task card in the workspace up to date; the user does not see it. "
             "Pass title to start the card for a new request, then "
             "update each step as it runs and ends; pass outcome to finish the card. Write in "
             "plain words."
@@ -254,8 +262,16 @@ TOOLS = {
                 "maxLength": 120,
                 "description": "Starts a new card: the request in a few plain words.",
             },
-            "step": {"enum": list(STEPS)},
-            "status": {"enum": list(STEP_STATUS)},
+            "step": {
+                "type": "string",
+                "enum": list(STEPS),
+                "description": "Which of the six steps of the request this update is about.",
+            },
+            "status": {
+                "type": "string",
+                "enum": list(STEP_STATUS),
+                "description": "running when the step starts; done, failed or skipped when it ends.",
+            },
             "detail": {
                 "type": "string",
                 "minLength": 1,
@@ -276,25 +292,18 @@ TOOLS = {
         },
         ["step", "status", "detail"],
     ),
-    "name_keep": (
-        (
-            "Keep the name the user just gave you, so the game page shows it in your chat header. "
-            "Call it once, right after they name you or rename you, silently: never mention it or that you saved the name to the user. It changes nothing else."
-        ),
-        {"name": {"type": "string", "minLength": 1, "maxLength": 60, "description": "The name, as they said it."}},
-        ["name"],
-    ),
     "fresh_start": (
         (
             "Forget this user so that the next conversation is a first meeting: empties your "
             "own notes and your notes about them. It does not touch the program workspace, "
             "uploaded programs, credentials or anything else. Call only when the user has "
-            "explicitly asked in this conversation to start over, and never otherwise."
+            "said yes in this conversation to forgetting your notes, and never otherwise."
         ),
         {
             "confirm": {
+                "type": "boolean",
                 "const": True,
-                "description": "True only because the user explicitly asked to start over.",
+                "description": "True only because the user said yes to forgetting your notes.",
             }
         },
         ["confirm"],

@@ -31,7 +31,6 @@ PLAY_TOOLS = {
         ["step", "status", "detail"],
         {"title", "step", "status", "detail", "version", "outcome"},
     ),
-    "name_keep": (["name"], {"name"}),
     "fresh_start": (["confirm"], {"confirm"}),
 }
 
@@ -63,8 +62,20 @@ def test_register_lists_exactly_the_play_tools_with_their_schemas():
         jsonschema.Draft202012Validator.check_schema(parameters)
         assert parameters["type"] == "object" and parameters["additionalProperties"] is False
         assert parameters["required"] == required and set(parameters["properties"]) == properties
-    for name in ("practice_request", "program_release"):
-        assert "account credits" in ctx.tools[name]["description"].lower()
+    assert "account credits" in ctx.tools["practice_request"]["description"].lower()
+
+
+def test_every_tool_field_has_a_type_and_a_description():
+    # Hermes coerces a string argument by the field's declared type; a field with no type (a bare
+    # const or enum) reaches the tool as the string the model sent.
+    def fields(properties):
+        for name, field in properties.items():
+            yield name, field
+            yield from fields(field.get("items", {}).get("properties", {}))
+
+    for tool in plugin.TOOLS:
+        for name, field in fields(plugin.schema(tool)["parameters"]["properties"]):
+            assert "type" in field and field.get("description"), (tool, name)
 
 
 def test_the_readme_tool_table_lists_every_registered_tool():

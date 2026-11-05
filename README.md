@@ -8,7 +8,7 @@ a third, `play/`, stands alone.
 | [`core/`](core/) | `research-core`, the shared package: the record store, the record and platform tools, the Hermes plugin wiring, the watcher, the platform client (real and fake), the `research` CLI, the prompt parts and the skills. |
 | [`orchestrator/`](orchestrator/README.md) | The research lead: the profile the user talks to. Plans Goals and Tasks, answers the Researchers, makes and submits policy Versions, runs the watcher. |
 | [`researcher/`](researcher/README.md) | A research worker. Each Session does one Task in the background and speaks only to the Orchestrator. |
-| [`play/`](play/README.md) | Play: the user's own program on one coworld. Independent of the research profiles; it keeps its own vendored copy of the former shared code. |
+| [`play/`](play/README.md) | Play: the user's own program, not hosted now (see its README). Independent of the research profiles; it keeps its own vendored copy of the former shared code. |
 
 The research profiles follow the
 [IDE profile refactor design](docs/designs/ide-profile-refactor-2026-10-28-final.html) (open it

@@ -1,8 +1,7 @@
 """A practice's games in words a beginner reads: who won, native scores, game length, and the change
 against the previous version's practice.
 
-GotA writes one ``results.json`` per game (polyworld ``examples/gods_of_the_arena``; recorded
-samples in ``researcher/tests/fixtures``): ``scores`` (glory per seat), ``ticks``, ``seed``,
+GotA writes one ``results.json`` per game (polyworld ``examples/gods_of_the_arena``): ``scores`` (glory per seat), ``ticks``, ``seed``,
 ``outcome`` (``RedTeam``, ``BlueTeam``, ``draw`` or ``time_limit``), ``banked_gold``, ``returned``
 and ``total_xp`` (lifetime XP per seat). Seats 0-4 are Red and 5-9 are Blue. Glory is the winning
 heroes' XP per simulated minute; losers, draws and time-limit games give 0. Nothing else is in the

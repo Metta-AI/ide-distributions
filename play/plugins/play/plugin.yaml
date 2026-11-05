@@ -1,6 +1,6 @@
 name: play
 version: 0.1.0
-description: The user's own program on one coworld - starter, checked changes, versions, private practice with plain results, release and the task card.
+description: The user's own program - starter, checked changes, versions, private practice with plain results, release and the task card.
 author: ide-distributions
 provides_tools:
   - starter_fetch
@@ -14,5 +14,4 @@ provides_tools:
   - practice_status
   - program_release
   - task_update
-  - name_keep
   - fresh_start
