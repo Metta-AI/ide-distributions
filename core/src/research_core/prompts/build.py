@@ -217,11 +217,7 @@ def render_tools(role: Role) -> str:
             continue  # on the line of the tool it came from
         if spec.actions is not None:
             names = [action.name for action in spec.grouped_actions(role)]
-            names += [
-                f"`{spec.name}_{action.name}`"
-                for action in spec.actions_for(role)
-                if action.own_tool
-            ]
+            names += [f"`{name}`" for name in spec.own_tools(role)]
             lines.append(f"- `{spec.name}`: {', '.join(names)}")
         else:
             lines.append(f"- `{spec.name}` (inputs: {', '.join(spec.params) or 'none'})")

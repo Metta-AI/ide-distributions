@@ -34,7 +34,7 @@ class ProcessDied(BaseException):
     """The gateway stops between accepting a command and returning its reply."""
 
 
-def call(ctx, args, *, session="planner", role="orchestrator", epoch=None):
+def call(ctx, args, *, session="planner", role="orchestrator", epoch=None, tool="task"):
     """One tool call from a fresh process: its own context and store connections."""
     env = {
         "IDE_WORKSPACE": str(ctx.ws.root),
@@ -45,7 +45,7 @@ def call(ctx, args, *, session="planner", role="orchestrator", epoch=None):
         env["IDE_LEASE_EPOCH"] = str(epoch)
     tool_ctx = ToolContext.from_env(role, env)
     try:
-        return json.loads(run_tool("task", args, tool_ctx))
+        return json.loads(run_tool(tool, args, tool_ctx))
     finally:
         tool_ctx.store.close()
         tool_ctx.wstore.close()
@@ -112,6 +112,18 @@ def test_a_repeat_after_a_pending_reply_joins_the_command(ctx, no_wait):
     finished = call(ctx, CREATE)
     assert finished["ok"] and finished["command_id"] == first["command_id"]
     assert count(ctx, "tasks") == 2  # make_task's and this one
+
+
+def test_a_repeat_through_the_other_form_of_the_tool_joins_the_command(ctx, no_wait):
+    """An action with a tool of its own: both forms are the same intent, in either field order."""
+    grouped = {"action": "propose", "type": "maintenance", "title": "Repair", "description": "Fix"}
+    first = call(ctx, grouped)
+    flat = {"description": "Fix", "title": "Repair", "type": "maintenance"}
+    second = call(ctx, flat, tool="task_propose")
+    assert second["command_id"] == first["command_id"]
+    apply(ctx)
+    assert call(ctx, flat, tool="task_propose")["command_id"] == first["command_id"]
+    assert count(ctx, "tasks") == 1
 
 
 def test_a_repeat_after_the_gateway_died_returns_the_earlier_result(ctx, monkeypatch):

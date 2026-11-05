@@ -139,8 +139,8 @@ RESULTS = {
 DESIGN = {
     "summary": a.string("What is being tested, in at most 40 words."),
     "tags": a.strings("Keywords from the shared vocabulary; the lever is a tag."),
-    "hypothesis": {**HYPOTHESIS, "description": "start needs every part."},
-    "methods": {**METHODS, "description": "start needs all but candidate."},
+    "hypothesis": {**HYPOTHESIS, "description": "experiment.start needs every part."},
+    "methods": {**METHODS, "description": "experiment.start needs all but candidate."},
     "related_claims": a.strings("Claims it builds on, such as C-12."),
     "related_experiments": a.strings("Experiments it follows, such as X-4."),
 }
@@ -572,7 +572,7 @@ SPEC = tool(
                 "update_run",
                 "Progress on a run: platform state, episodes done, result rows, validity.",
                 {
-                    "run": a.integer("The run id from add_run."),
+                    "run": a.integer("The run id from experiment_add_run."),
                     "experiment": {
                         **EXPERIMENT,
                         "description": "Not needed: the run names it. Refused if it is another.",

@@ -617,7 +617,7 @@ def _report(record: dict, note: str | None = None) -> dict:
     elif pending:
         report["next"] = (
             f"{len(pending)} requests still run; a Researcher calls task_wait {{task, kind: xp,"
-            " detail, ref}} and ends its run, an Orchestrator tries later"
+            " detail, ref} and ends its run, an Orchestrator tries later"
         )
     return report
 

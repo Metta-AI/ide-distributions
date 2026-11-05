@@ -533,7 +533,8 @@ SPEC = durable_tool(
                 "release",
                 "Give the Task back unfinished because you must not continue, such as when a "
                 "directive forbids the only path; your run is stopped, then it goes back to "
-                "scheduling. If you tried and it did not work, use complete with outcome failed.",
+                "scheduling. If you tried and it did not work, use task.complete with outcome "
+                "failed.",
                 {"task": TASK, "reason": a.string("Why you must not continue.")},
                 ("task", "reason"),
                 RESEARCHER,

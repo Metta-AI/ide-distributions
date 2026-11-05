@@ -346,7 +346,7 @@ QUESTIONS: dict[str, list[Question]] = {
     "skill:working-a-task": [
         q("What do you do when your claim is refused?", r"end", r"run"),
         q("How long is result?", r"(two or three|2\s*(-|–|or|to)\s*3) sentences"),
-        q("After task.wait, what must you do?", r"end|stop"),
+        q("After task_wait, what must you do?", r"end|stop"),
     ],
     "skill:client-coplay": [
         q("About how often is a progress line due?", r"30 seconds"),

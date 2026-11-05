@@ -11,8 +11,8 @@ decisions is `docs/plans/ide-profile-refactor/`.
   profile puts `core/src` on `sys.path`, from the path `prepare.py` records). Everything the plugin
   touches in process must import without third-party packages: `layout`, `refs`, `store/*`,
   `plugin/*`, `tools/base.py` and the in-process tools (`goal`, `task`, `directive`, `claim`,
-  `settings`, `ui`, and the tools split from their actions). `core/tests/test_tool_budget.py` enforces it. The catalog imports every tool
-  module, and a module that fails to import stops whatever asked for the tools: the prompt build,
+  `settings`, `ui`, and the tools split from their actions). `core/tests/test_tool_budget.py`
+  enforces it. The catalog imports every tool module, and a module that fails to import stops whatever asked for the tools: the prompt build,
   the tests or, on a gateway, the plugin (`test_broken_tool_module_real.py`: Hermes logs "Failed to
   load plugin" and serves on, with none of that profile's tools or hooks).
 - **The workspace environment** (`$IDE_WORKSPACE/tools/venv`, built by `prepare.py` from the
@@ -118,7 +118,8 @@ nowhere.
   `<tool>_<action>`, a flat tool with the action's fields, whose schema marks the required ones
   required, which a multi-action schema cannot. It runs the same handler, as the same grouped call.
   The grouped tool stops offering the action and still runs a call that names it, because stored
-  chats show that shape. Prompts and skills name the flat tool. Thirteen actions have one: the ones
+  chats show that shape; refusing such a call, it shows the flat tool. Prompts and skills name the
+  flat tool (`test_tool_signatures.py` checks), and telemetry reports the grouped tool and action. Thirteen actions have one: the ones
   weak models got wrong and `claim_write`. It costs prompt size and counts against
   `catalog.TOOL_BUDGET`, so add one only for a measured failure. Measured on 2026-11-05 against the
   grouped form, 6 to 10 repeats per case: Kimi K3 first try 81/216 against 185/216, Kimi K3.1

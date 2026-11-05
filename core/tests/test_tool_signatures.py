@@ -4,6 +4,8 @@ The prompts, skills, task types and wake prompts show calls in this short form, 
 
     `tool.action {a, b: value, c?, d | e, f {g, h}, ...}`
 
+or ``tool_action {...}`` for an action with a tool of its own.
+
 - ``a`` is a field; ``b: value`` a field with an example value; ``c?`` an optional field.
 - ``d | e`` means one of the two.
 - ``f {g, h}``, ``f: {g, h}`` or ``f: [{g, h}]`` lists the keys of an object field or a list of
@@ -379,3 +381,20 @@ def enum_problems(signature: Signature) -> list[str]:
 
 def test_every_example_value_is_one_the_field_accepts():
     assert [p for signature in shipped_signatures() for p in enum_problems(signature)] == []
+
+
+def test_no_agent_text_names_an_action_that_has_its_own_tool_in_the_old_form():
+    """The grouped tool still runs such a call, but a model must be taught the flat tool."""
+    old_forms = [
+        f"{spec.split_from[0]}.{spec.split_from[1]}"
+        for spec in catalog.TOOLS.values()
+        if spec.split_from is not None
+    ]
+    pattern = re.compile(rf"(?<![\w.])(?:{'|'.join(map(re.escape, old_forms))})(?!\w)")
+    found = [
+        f"{path.relative_to(CORE)}: {match[0]}"
+        for folder in SOURCES
+        for path in sorted((CORE / folder).rglob("*.md"))
+        for match in pattern.finditer(path.read_text())
+    ]
+    assert found == []

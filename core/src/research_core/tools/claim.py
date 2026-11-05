@@ -19,7 +19,7 @@ BOTH = frozenset({"orchestrator", "researcher"})
 CLAIM = a.string("The claim, such as C-3.")
 # No enum: a mixin may register more evidence types (evidence_types.register_type).
 EVIDENCE_TYPE = a.string("The evidence type, such as code or claim.")
-EVIDENCE_REF = a.string("The reference, in the type's format (listed under evidence.ref).")
+EVIDENCE_REF = a.string("The reference, in the type's format (see claim_write's evidence.ref).")
 STANCE = a.string("How the evidence bears on the claim.", enum=list(claims.STANCES))
 NOTE = a.string("What the evidence shows, in a few words.")
 EVIDENCE_LINK = a.obj(

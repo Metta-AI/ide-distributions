@@ -7,7 +7,7 @@ judging is the same (``write_actions.is_judged`` and ``judge``), read from the S
 messages. A run is stopped as soon as the judged call is seen, so a case costs what it took to
 get there, and what is judged is the call a model composes, not what the real tool then answered:
 that also depends on the seeded records (a Researcher's Session holds its Task but has no worker
-execution, so the real ``task.ask`` refuses it). ``test_real_session.py`` runs the cases.
+execution, so the real ``task_ask`` refuses it). ``test_real_session.py`` runs the cases.
 
 A recovery case needs refused calls already in the history, and the runs API takes only text
 history, so those rows are written into the profile's ``state.db`` before the first run, in the

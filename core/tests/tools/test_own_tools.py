@@ -2,6 +2,8 @@
 
 import json
 
+import pytest
+
 from research_core.tools import catalog
 from research_core.tools.base import run_tool, usage
 
@@ -80,3 +82,62 @@ def test_a_refusals_example_keeps_the_actions_extra_fields():
 def test_a_refusal_of_a_call_without_action_lists_only_what_the_grouped_tool_offers():
     shown = usage(tools()["claim"], "orchestrator", None)["actions"]
     assert "write" not in shown and "search" in shown
+
+
+def test_a_refusal_from_an_own_tool_shows_the_flat_call_and_no_action(ctx_factory):
+    refused = json.loads(run_tool("task_ask", {}, ctx_factory("researcher")))
+    assert refused["usage"]["example"] == {"task": "<such as T-3>", "question": "<text>"}
+    assert "action" not in refused["context"]
+    assert "action" not in refused["error"]
+
+
+def test_an_own_tool_refuses_a_call_naming_an_action(ctx_factory):
+    sent = {"action": "write", **CLAIM}
+    refused = json.loads(run_tool("claim_write", sent, ctx_factory("orchestrator")))
+    assert refused["ok"] is False
+    assert "unknown field 'action'" in refused["problems"]
+
+
+def test_a_refused_old_call_is_shown_the_own_tool(ctx_factory):
+    refused = json.loads(run_tool("claim", {"action": "add_evidence"}, ctx_factory("orchestrator")))
+    assert refused["error"].startswith("claim_add_evidence was not run")
+    assert refused["context"]["tool"] == "claim_add_evidence"
+    assert "action" not in refused["usage"].get("example", {})
+
+
+def test_a_call_without_action_is_told_about_the_own_tools(ctx_factory):
+    refused = json.loads(run_tool("claim", {}, ctx_factory("orchestrator")))
+    assert refused["usage"]["own_tools"] == ["claim_write", "claim_add_evidence"]
+    assert "usage.own_tools" in refused["error"]
+
+
+@pytest.mark.parametrize(
+    ("args", "outcome"), [(CLAIM, "succeeded"), ({"body": "x"}, "validation_rejected")]
+)
+def test_telemetry_reports_an_own_tool_as_the_grouped_tool_and_action(
+    ctx_factory, capsys, args, outcome
+):
+    ctx = ctx_factory("orchestrator")
+    capsys.readouterr()
+    run_tool("claim_write", args, ctx)
+    (event,) = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    assert (event["tool"], event["action"], event["outcome"]) == ("claim", "write", outcome)
+
+
+def test_telemetry_does_not_name_an_own_tool_the_role_lacks(ctx_factory, capsys):
+    ctx = ctx_factory("orchestrator")
+    capsys.readouterr()
+    run_tool("task_wait", {}, ctx)
+    (event,) = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    assert (event["tool"], event["action"], event["outcome"]) == ("unknown", None, "unknown_tool")
+
+
+def test_own_tool_text_stands_alone():
+    """Its description and fields do not say action, and name no other action bare."""
+    for spec in tools().values():
+        if spec.split_from is None:
+            continue
+        schema = spec.schema(next(iter(sorted(spec.roles))))
+        fields = [p.get("description", "") for p in schema["parameters"]["properties"].values()]
+        for text in (schema["description"], *fields):
+            assert "action" not in text.lower(), (spec.name, text)

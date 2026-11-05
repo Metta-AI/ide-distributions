@@ -221,6 +221,8 @@ line on stderr. This is enabled without a feature flag or collector. Span `start
 `end_time` replace custom elapsed fields. Existing dashboards querying `workspace_startup`,
 `workspace_intake`, or `workspace_tool` need migration to these spans; old events are removed.
 Console JSON is diagnostic output, not the OTLP wire format.
+A tool of an action's own reports as the grouped tool and action it stands for: `claim_write` as
+`gen_ai.tool.name` `claim` and `tool.action` `write`, the same as a `claim` call naming `write`.
 
 To export to any OTLP/HTTP backend or an OpenTelemetry Collector, configure
 `OTEL_EXPORTER_OTLP_ENDPOINT` (base URL) or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (full trace URL)

@@ -151,8 +151,8 @@ SPEC = tool(
     ToolSpec(
         name="ui",
         description=(
-            "What the user sees: bring a record or view into view, set a panel, send a notice, "
-            "or ask a question the UI answers. Writes UI state; never waits on a client. Nobody "
+            "What the user sees in a client. Bring a record or view into view, send a notice, or "
+            "ask a question the UI answers. Writes UI state; never waits on a client. Nobody "
             "reads a wake's chat, so a wake reports with a notice."
         ),
         handler=handle,
