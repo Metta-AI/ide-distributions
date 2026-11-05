@@ -9,6 +9,7 @@ transaction inside the same file, after a copy of the original is saved next to 
 
 from __future__ import annotations
 
+import json
 import re
 import secrets
 import sqlite3
@@ -114,8 +115,20 @@ def user_version(conn: sqlite3.Connection) -> int:
     return conn.execute("PRAGMA user_version").fetchone()[0]
 
 
+def _aide_receipt_messages(request_json: str) -> str:
+    from research_core.aide_messages import context_message
+
+    request = json.loads(request_json)
+    messages = [request["message"]]
+    if "context" in request:
+        messages.insert(0, context_message(request["context"]))
+    return json.dumps(messages, separators=(",", ":"), ensure_ascii=False)
+
+
 def _run_migration(conn: sqlite3.Connection, number: int, path: Path) -> None:
     """The statements of one migration and its version stamp; the caller owns the transaction."""
+    if number == 10 and path.parent.name == "workspace":
+        conn.create_function("aide_receipt_messages", 1, _aide_receipt_messages, deterministic=True)
     for statement in split_statements(path.read_text()):
         conn.execute(statement)
     conn.execute(f"PRAGMA user_version = {number}")

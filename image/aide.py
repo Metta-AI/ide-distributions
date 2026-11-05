@@ -4,6 +4,7 @@ import asyncio
 import hashlib
 import json
 import logging
+import sys
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
@@ -14,6 +15,9 @@ from jsonschema import Draft202012Validator, FormatChecker
 from pydantic import BaseModel, ConfigDict, model_validator
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed, InvalidStatus
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "core/src"))
+from research_core.aide_messages import supported_messages  # noqa: E402
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +59,28 @@ class Application:
 
     async def execute(self, request):
         self.validate("Request", request)
+        if request["method"] == "chat.send":
+            response = await self.seam.post(
+                "/aide-command",
+                json={
+                    "request_id": request["id"],
+                    "method": "chat.send",
+                    "params": request["params"],
+                },
+            )
+            response.raise_for_status()
+            receipt = response.json()
+            if receipt["state"] == "recorded":
+                self.validate("chat_sendResult", receipt["result"])
+                return receipt["result"]
+            if receipt["state"] == "id_reused":
+                return {
+                    "error": {
+                        "code": -32000,
+                        "message": "Request identity was reused",
+                        "data": {"code": "id_reused"},
+                    }
+                }
         command = request["method"] in {
             "session.open",
             "chat.cancel",
@@ -483,16 +509,47 @@ class Application:
             return {"applied": True}
         if method == "chat.send":
             messages = params["messages"]
+            if not supported_messages(messages):
+                return {
+                    "error": {
+                        "code": -32000,
+                        "message": (
+                            "Supported input is plain developer/system or named page context "
+                            "followed by one "
+                            "user message, without extra message fields"
+                        ),
+                        "data": {"code": "unsupported"},
+                    }
+                }
+            if len(messages) > 1:
+                models = await self.seam.get("/models")
+                if not models.is_success:
+                    return self.refusal(models)
+                profile = next(
+                    profile
+                    for profile in models.json()["profiles"]
+                    if profile["profile"] == row["profile"]
+                )
+                if profile["provider"] != "openrouter" or any(
+                    fallback["provider"] != "openrouter" for fallback in profile["fallbacks"]
+                ):
+                    return {
+                        "error": {
+                            "code": -32000,
+                            "message": (
+                                "Structured context requires the configured "
+                                "OpenRouter Chat Completions transport"
+                            ),
+                            "data": {"code": "unsupported"},
+                        }
+                    }
             response = await self.seam.post(
                 "/message",
                 json={
                     "op_id": request["id"],
                     "canonical_request": params,
                     "session_id": session_id,
-                    "message": next(
-                        (m for m in messages if m["role"] == "user"),
-                        {"role": "user", "content": "Continue."},
-                    ),
+                    "message": messages[-1],
                     "messages": messages,
                     "context": {"contract_version": 1, **scope.model_dump()},
                     "actor": "user:aide",
@@ -550,19 +607,30 @@ class Application:
         )
         contextual.raise_for_status()
         messages = contextual.json()["data"]
-        items = [
-            {
-                "id": str(m["id"]),
-                "session_id": session_id,
-                **({"request_id": m["request_id"]} if "request_id" in m else {}),
-                "message": {
-                    k: v
-                    for k, v in m.items()
-                    if k in {"role", "content", "tool_calls", "tool_call_id", "name"}
-                },
-            }
-            for m in messages
-        ]
+        items = []
+        for message in messages:
+            if "client_messages" in message:
+                items.extend(
+                    {
+                        "id": f"{message['request_id']}:{index}",
+                        "request_id": message["request_id"],
+                        "session_id": session_id,
+                        "message": original,
+                    }
+                    for index, original in enumerate(message["client_messages"])
+                )
+            else:
+                items.append(
+                    {
+                        "id": str(message["id"]),
+                        "session_id": session_id,
+                        "message": {
+                            key: value
+                            for key, value in message.items()
+                            if key in {"role", "content", "tool_calls", "tool_call_id", "name"}
+                        },
+                    }
+                )
         for admission in snapshot["records"]["admissions"]:
             if admission["run_id"] is None:
                 items.extend(

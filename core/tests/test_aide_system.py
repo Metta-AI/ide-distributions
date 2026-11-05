@@ -337,17 +337,30 @@ def test_worker_pending_inputs_and_responses_use_own_native_profile(tmp_path):
         worker.join(timeout=10)
 
 
-def test_canonical_ordered_content_arrays_are_json_serialized_at_durable_intake(tmp_path):
+def test_canonical_ordered_content_arrays_are_json_serialized_at_durable_intake(
+    tmp_path, monkeypatch
+):
     import json
 
     ctx = make_ctx(tmp_path, coworld=False)
-    server = SeamServer(ws=ctx.workspace, hermes=FakeHermesRuns(), env=dict(ctx.env))
+    from research_core.profile_models import Profile
+
+    server = SeamServer(
+        ws=ctx.workspace,
+        hermes=FakeHermesRuns(),
+        env=dict(ctx.env),
+        profiles=[
+            Profile(
+                "orchestrator", "orchestrator", Path(__file__).resolve().parents[2] / "orchestrator"
+            )
+        ],
+    )
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     scope = {"scope": "workspace", "coworld": None, "league": None}
     request_id = str(uuid4())
     messages = [
-        {"role": "developer", "content": [{"type": "text", "text": "Context"}]},
+        {"role": "developer", "content": "Context"},
         {"role": "user", "content": [{"type": "text", "text": "Visible input"}]},
     ]
 
@@ -362,19 +375,20 @@ def test_canonical_ordered_content_arrays_are_json_serialized_at_durable_intake(
                     "params": {"scope": scope},
                 }
             )
-            reply = await app.execute(
-                {
-                    "jsonrpc": "2.0",
-                    "id": request_id,
-                    "method": "chat.send",
-                    "params": {
-                        "session_id": opened["session"]["id"],
-                        "scope": scope,
-                        "messages": messages,
-                    },
-                }
-            )
+            request = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "method": "chat.send",
+                "params": {
+                    "session_id": opened["session"]["id"],
+                    "scope": scope,
+                    "messages": messages,
+                },
+            }
+            reply = await app.execute(request)
             assert reply["accepted"]
+            monkeypatch.setattr(aide, "supported_messages", lambda _: False)
+            assert await app.execute(request) == reply
 
     try:
         asyncio.run(check())

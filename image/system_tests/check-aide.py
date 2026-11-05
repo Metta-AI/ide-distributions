@@ -129,7 +129,10 @@ async def main():
         )
         history = await call("chat.history", {"session_id": session["id"], "scope": scope})
         assert [item["message"] for item in history["items"][-2:]] == batch, history
-        long_batch = [{"role": "user", "content": f"history-{i}"} for i in range(55)]
+        long_batch = [
+            {"role": "developer" if i < 54 else "user", "content": f"history-{i}"}
+            for i in range(55)
+        ]
         await call(
             "chat.send", {"session_id": session["id"], "scope": scope, "messages": long_batch}
         )
@@ -148,7 +151,7 @@ async def main():
         for batch_index in range(2):
             messages = [
                 {
-                    "role": "user",
+                    "role": "developer" if i < 19 else "user",
                     "content": f"{batch_index}:{i}:" + "x" * (50000 - len(f"{batch_index}:{i}:")),
                 }
                 for i in range(20)

@@ -477,11 +477,13 @@ def test_attempt_pointer_migration_preserves_live_authority_or_first_queued_succ
     assert conn.execute("SELECT current_attempt_id FROM task_assignments").fetchone()[0] == expected
 
 
-def test_canonical_receipts_preserve_accepted_open_and_message_identity(tmp_path):
+@pytest.mark.parametrize("context", [None, {"label": "café 雪", "nested": {"z": 3, "a": None}}])
+def test_canonical_receipts_preserve_accepted_open_and_message_identity(tmp_path, context):
     import json
     from uuid import NAMESPACE_URL, uuid4, uuid5
 
     from research_core import intake
+    from research_core.aide_messages import context_message
     from research_core.store.actors import Actor
     from research_core.store.db import Store
     from research_core.store.errors import StoreError
@@ -506,6 +508,7 @@ def test_canonical_receipts_preserve_accepted_open_and_message_identity(tmp_path
             "session_id": "s",
             "message": message,
             "actor": "user:ide-next",
+            **({"context": context} if context is not None else {}),
         }
         conn.execute(
             "INSERT INTO client_admissions"
@@ -515,10 +518,11 @@ def test_canonical_receipts_preserve_accepted_open_and_message_identity(tmp_path
         )
     conn.close()
     with Store.open(path, kind="workspace") as store:
+        messages = ([context_message(context)] if context is not None else []) + [message]
         for kind, request_id in ids.items():
             canonical = {
                 "scope": scope,
-                **({"session_id": "s", "messages": [message]} if kind == "message" else {}),
+                **({"session_id": "s", "messages": messages} if kind == "message" else {}),
             }
             receipt = intake.accept(
                 store,

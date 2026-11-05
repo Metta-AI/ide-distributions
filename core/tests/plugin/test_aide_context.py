@@ -1,0 +1,53 @@
+"""Owned middleware preserves native history and the current input's role and media."""
+
+import json
+
+import pytest
+
+from research_core.aide_messages import context_message
+from research_core.plugin.aide_context import inject_context
+from research_core.store import admissions, sessions
+from tests.test_serve import HARNESS, make_ctx
+
+
+def test_context_is_bound_to_one_session_and_survives_tool_loops(tmp_path, monkeypatch):
+    ctx = make_ctx(tmp_path)
+    monkeypatch.setattr("research_core.plugin.executor.profile_env", lambda: ctx.env)
+    sessions.register(ctx.wstore, HARNESS, session_id="s", profile="orchestrator", kind="chat")
+    prefix = context_message({"label": "café 雪"})
+    user = {"role": "user", "content": [{"type": "text", "text": "question"}]}
+    key = admissions.enqueue(
+        ctx.wstore,
+        HARNESS,
+        key="input",
+        session_id="s",
+        profile="orchestrator",
+        text="question",
+        origin="client",
+    )
+    request = {"canonical_request": {"messages": [prefix, user]}}
+    with ctx.wstore.tx(HARNESS) as tx:
+        tx.execute(
+            "UPDATE client_admissions SET request=?,dispatch_started=1 WHERE op_id=?",
+            (json.dumps(request), key),
+        )
+    prior = [{"role": "user", "content": "old"}, {"role": "assistant", "content": "reply"}]
+    native = {"messages": [*prior, user], "model": "model"}
+    projected = inject_context(request=native, session_id="s")["request"]
+    assert projected == {"messages": [*prior, prefix, user], "model": "model"}
+    assert native["messages"] == [*prior, user]
+    assert inject_context(request=projected, session_id="s") is None
+    assert inject_context(request=native, session_id="other") is None
+    tool = {"role": "tool", "tool_call_id": "call", "content": "result"}
+    assert inject_context(request={"messages": [*prior, user, tool]}, session_id="s")["request"][
+        "messages"
+    ] == [*prior, prefix, user, tool]
+    with ctx.wstore.tx(HARNESS) as tx:
+        tx.execute(
+            "INSERT INTO client_admissions(op_id,kind,request,session_id,message,payload,"
+            "status,created_at,dispatch_started) VALUES ('second','message',?,'s','','{}',"
+            "'queued','t',1)",
+            (json.dumps(request),),
+        )
+    with pytest.raises(AssertionError, match="one serialized"):
+        inject_context(request=native, session_id="s")

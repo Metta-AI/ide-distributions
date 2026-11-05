@@ -305,3 +305,46 @@ def test_recovery_replays_old_message_ids_and_counts_a_running_continuation(tmp_
             context="work",
             rationale="fit",
         )
+
+
+def test_canonical_context_waits_for_active_turn_and_keeps_native_history(tmp_path):
+    ctx = make_ctx(tmp_path)
+    native = FakeHermesRuns()
+    first = chat(ctx)
+    coordinator = Coordinator(ctx.workspace, native)
+    active = coordinator.start(**first)
+    messages = [
+        {"role": "user", "name": "softmax_page_context", "content": "page data"},
+        {"role": "user", "content": [{"type": "text", "text": "next question"}]},
+    ]
+    request = {**first, "text": messages, "idempotency_key": "next-input"}
+    op_id = admissions.enqueue(
+        ctx.wstore,
+        HARNESS,
+        key="next-input",
+        session_id=first["session_id"],
+        profile="orchestrator",
+        text="next question",
+        origin="client",
+    )
+    with ctx.wstore.tx(HARNESS) as tx:
+        tx.execute(
+            "UPDATE client_admissions SET request=?,payload=? WHERE op_id=?",
+            (
+                json.dumps({"canonical_request": {"messages": messages}}),
+                json.dumps({"input": messages, "instructions": None, "context": None}),
+                op_id,
+            ),
+        )
+    with pytest.raises(RunsBusy, match="waits for the active turn"):
+        coordinator.start(**request)
+    assert len(native.runs) == 1
+    assert (
+        ctx.wstore.one("SELECT dispatch_started FROM client_admissions WHERE op_id=?", (op_id,))[0]
+        == 0
+    )
+    native.complete(active)
+    run = coordinator.start(**request)
+    assert run != active
+    starts = [call for call in native.calls if call[0] == "start"]
+    assert starts[-1][1]["text"] == [messages[-1]]

@@ -152,6 +152,7 @@ class Coordinator:
             )
             row = store.one("SELECT * FROM client_admissions WHERE op_id=?", (op_id,))
             payload = json.loads(row["payload"])
+            request = json.loads(row["request"])
             if (row["session_id"], payload["input"], payload["instructions"]) != (
                 session_id,
                 text,
@@ -189,6 +190,18 @@ class Coordinator:
                 if snapshot["run_id"] not in observed and snapshot["run_id"]:
                     observed[snapshot["run_id"]] = self.native.status(
                         snapshot["run_id"], profile=profile
+                    )
+                context_turn = (
+                    "canonical_request" in request
+                    and len(request["canonical_request"]["messages"]) > 1
+                )
+                if (
+                    context_turn
+                    and snapshot["run_id"]
+                    and not observed[snapshot["run_id"]].terminal
+                ):
+                    raise RunsBusy(
+                        "Structured context waits for the active turn", code="session_busy"
                     )
                 if (
                     row["origin"] in {"client", "answer", "continuation"}
@@ -520,7 +533,9 @@ class Coordinator:
             run_id = self.native.start(
                 profile=profile,
                 session_id=session_id,
-                text=text,
+                text=[text[-1]]
+                if isinstance(text, list) and len(text) > 1 and "canonical_request" in request
+                else text,
                 instructions=instructions,
                 idempotency_key=idempotency_key,
             )

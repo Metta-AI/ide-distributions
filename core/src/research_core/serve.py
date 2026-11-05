@@ -888,10 +888,16 @@ class SeamServer:
                     json.loads(row["payload"])["context"],
                     json.loads(row["request"])["message"]["content"],
                     row["op_id"],
+                    json.loads(row["canonical_messages"])
+                    if row["canonical_messages"] is not None
+                    else [json.loads(row["request"])["message"]],
                 )
                 for row in stores.wstore.q(
-                    "SELECT op_id,native_message_id,payload,request FROM client_admissions"
-                    " WHERE session_id=? AND native_message_id IS NOT NULL AND origin='client'",
+                    "SELECT a.op_id,a.native_message_id,a.payload,a.request,"
+                    "r.messages AS canonical_messages"
+                    " FROM client_admissions a LEFT JOIN aide_receipts r ON r.request_id=a.op_id"
+                    " WHERE a.session_id=? AND a.native_message_id IS NOT NULL"
+                    " AND a.origin='client'",
                     (session_id,),
                 )
             }
@@ -905,7 +911,10 @@ class SeamServer:
                             else {}
                         ),
                         **(
-                            {"request_id": admissions_by_message[message["id"]][2]}
+                            {
+                                "request_id": admissions_by_message[message["id"]][2],
+                                "client_messages": admissions_by_message[message["id"]][3],
+                            }
                             if message["id"] in admissions_by_message
                             else {}
                         ),

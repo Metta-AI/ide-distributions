@@ -27,6 +27,9 @@ def make_register(role: Role) -> Callable[[Any], None]:
         from research_core.plugin.messages import record_native_message
 
         ctx.register_hook("pre_api_request", record_native_message)
+        from research_core.plugin.aide_context import inject_context
+
+        ctx.register_middleware("llm_request", inject_context)
 
         for spec in tools_for(role):
             ctx.register_tool(

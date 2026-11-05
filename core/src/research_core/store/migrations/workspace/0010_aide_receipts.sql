@@ -12,7 +12,7 @@ SELECT a.op_id, a.session_id,
                    'coworld', s.coworld_id, 'league', json_extract(s.session_context, '$.league')),
        CASE WHEN json_type(a.request, '$.messages') = 'array'
             THEN json_extract(a.request, '$.messages')
-            ELSE json_array(json_extract(a.request, '$.message')) END
+            ELSE aide_receipt_messages(a.request) END
 FROM client_admissions a JOIN sessions s ON s.id = a.session_id
 WHERE a.kind = 'message' AND a.origin = 'client'
   AND json_type(a.request, '$.message') = 'object';
