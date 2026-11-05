@@ -129,7 +129,8 @@ The Hermes behaviour this depends on is listed in the module's docstring and exe
 
 `research serve` is the sole native admission owner. Its periodic loop runs watcher observations;
 no cron job is involved. `task.workers` and `task.assign` let the
-Orchestrator choose a worker and commit context, rationale, and task revision before execution.
+Orchestrator choose a worker and commit context and rationale before execution; the coordinator
+records the task revision the session last saw.
 The workspace admission ledger records every chat, worker, continuation, and event-wake start.
 UI answers and their delivery inputs commit together; retrying the same answer returns its receipt.
 

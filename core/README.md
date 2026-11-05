@@ -84,6 +84,20 @@ naming the intent and the inputs, a high-urgency notice, nothing sent. `user_req
 always sends again. The listing's `player_file_content_hash` is served to team callers only, so
 it is not used for recovery. Fake faults: `lookup=503|403|unavailable|not_found`.
 
+## One intent, applied once
+
+Commands (`transitions.py`, spec: `docs/specs/workspace-orchestration.md`) get their identity from
+code. The pinned Hermes never runs a call again itself and drops identical calls in one response,
+so a retry is always the model's new call: a new tool-call id, the same arguments, sometimes after
+a restart's "effect is UNKNOWN" notice. So a tool-call id cannot recognise a retry, and arguments
+alone cannot separate it from a deliberate second action or a call after a refusal.
+`request_generated` uses what can: an identical call joins the session's command whose finished
+result has not been returned to it yet, and is a new intent afterwards. An interrupt ends a
+call's wait with its pending receipt, so its retry joins too.
+`core/tests/scenarios/test_retry_once.py` runs these cases. `ActionSpec.hidden_params` are the
+fields such code fills in: accepted from chats whose frozen schema still lists them, offered
+nowhere.
+
 ## Add a tool, a record or a skill
 
 - **Tool:** a module under `tools/` with `SPEC = tool(ToolSpec(...))`, listed in

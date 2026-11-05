@@ -61,6 +61,7 @@ def main() -> None:
                 "orchestrator",
                 {
                     "IDE_WORKSPACE": str(Path(temporary) / str(index)),
+                    "IDE_COWORLD_ID": "eval",
                     "IDE_SESSION_ID": "planning-eval",
                     "IDE_RESEARCHER_PROFILES": ",".join(WORKERS),
                     "IDE_RESEARCHER_CAPABILITIES": json.dumps(WORKERS),
@@ -82,8 +83,7 @@ def main() -> None:
                 "slots": 1,
                 "instruction": "The task and worker descriptions are complete. "
                 "Use task.assign exactly once now; "
-                "do not read or execute tools first. Set task_updated to the exact updated "
-                "field. Choose the appropriate specialist.",
+                "do not read or execute tools first. Choose the appropriate specialist.",
             }
             request = urllib.request.Request(
                 "https://openrouter.ai/api/v1/chat/completions",
@@ -95,7 +95,7 @@ def main() -> None:
                             {"role": "user", "content": json.dumps(prompt)},
                         ],
                         "tools": [{"type": "function", "function": SPEC.schema("orchestrator")}],
-                        "tool_choice": {"type": "function", "function": {"name": "task"}},
+                        "tool_choice": "required",
                         "provider": {"only": ["Moonshot AI"], "allow_fallbacks": False},
                     }
                 ).encode(),

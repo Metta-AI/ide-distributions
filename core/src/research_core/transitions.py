@@ -13,7 +13,7 @@ import time
 from dataclasses import dataclass, replace
 from datetime import timedelta
 from typing import Literal
-from uuid import NAMESPACE_URL, uuid5
+from uuid import NAMESPACE_URL, uuid4, uuid5
 
 from research_core.store import admissions
 from research_core.store._common import parse_iso
@@ -23,6 +23,17 @@ from research_core.store.errors import StoreError
 from research_core.tools.base import ToolCall, ToolContext, ToolError, ToolSpec, tool
 
 REQUEST_WAIT_SECONDS = 15
+# How long Hermes waits for a tool thread after an interrupt before it abandons the call and,
+# later, clears the interrupt (agent/tool_executor.py).
+HERMES_INTERRUPT_GRACE_SECONDS = 3
+PENDING_NEXT_STEP = (
+    "Accepted, not done yet. Read the result with task.command and this command_id, or call again "
+    "with the same fields: that will not do it twice."
+)
+REPEAT_NOTE = (
+    "This call did nothing: an earlier identical call already did it, once. If you are retrying, "
+    "you are done. If you want it done a second time, make this same call again and it will run."
+)
 
 CommandState = Literal["pending", "applied", "refused"]
 
@@ -127,7 +138,14 @@ def receipt(store: Store, command_id: str) -> dict:
 
 
 def submit(call: ToolCall) -> dict:
-    return request(call.ctx, call.spec.name, call.args, call.args["operation_id"])
+    """Hand a tool call to the coordinator under the operation id it names, or a generated one."""
+    operation_id = call.get("operation_id")
+    if operation_id:  # a chat whose frozen schema still lists the field
+        result = request(call.ctx, call.spec.name, call.args, operation_id)
+        if CommandReceipt.parse(result).state != "pending":
+            note_delivery(call.ctx, result)
+        return result
+    return request_generated(call.ctx, call.spec.name, call.args)
 
 
 def request(ctx: ToolContext, tool: str, args: dict, operation_id: str) -> dict:
@@ -153,48 +171,147 @@ def request(ctx: ToolContext, tool: str, args: dict, operation_id: str) -> dict:
             ):
                 raise StoreError(["operation_id already belongs to a different transition intent"])
         else:
-            issuer_attempt_id = None
-            if (
-                ctx.role == "researcher"
-                and tool == "task"
-                and args["action"] in {"complete", "wait", "ask", "release", "propose_submission"}
-            ):
-                from research_core.store import tasks
-                from research_core.tools import _args as arguments
+            _accept(tx, ctx, tool, args, command_id, payload)
+    return _await_result(ctx, command_id)
 
-                task_id = arguments.record_number(args["task"], "task", "task")
-                tasks.require_holder(ctx.store, task_id, ctx.actor)
-                assignment = ctx.wstore.one(
-                    "SELECT a.current_attempt_id,a.state,execution.status FROM task_assignments a"
-                    " JOIN client_admissions execution ON execution.op_id=a.current_attempt_id"
-                    " WHERE a.session_id=? AND a.task_id=?",
-                    (ctx.actor.id, task_id),
-                )
-                if (
-                    assignment is None
-                    or assignment["state"] != "held"
-                    or assignment["status"] not in {"queued", "running"}
-                ):
-                    raise ToolError("This worker execution no longer has task transition authority")
-                issuer_attempt_id = assignment["current_attempt_id"]
-            tx.execute(
-                "INSERT INTO transition_commands(id,tool,args,role,actor,actor_epoch,"
-                "issuer_attempt_id,created_at) VALUES (?,?,?,?,?,?,?,?)",
-                (
-                    command_id,
-                    tool,
-                    payload,
-                    ctx.role,
-                    str(ctx.actor),
-                    ctx.actor.epoch,
-                    issuer_attempt_id,
-                    tx.at,
-                ),
-            )
-            tx.event("transition.requested", command_id, {"tool": tool})
+
+def request_generated(ctx: ToolContext, tool: str, args: dict) -> dict:
+    """Apply one intent once without an id from the model.
+
+    A tool-call id cannot do it: a call the model repeats after a lost or pending reply has a
+    new one. Arguments alone cannot either: the same message may be meant twice, and the same
+    call must run again after a refusal. What tells them apart is whether the session has been
+    given the first call's finished result. Until then an identical call is a retry and joins
+    that command; afterwards it is a new intent. A retry that finds the work already done says
+    so, in case it was in fact meant as a second one.
+    """
+    fields = {name: value for name, value in args.items() if value not in (None, "")}
+    fields.pop("operation_id", None)
+    payload = json.dumps(fields, sort_keys=True)
+    started = time.monotonic()
+    with admissions.dispatch_lock(ctx.wstore), ctx.store.tx(ctx.actor) as tx:
+        earlier = tx.one(
+            "SELECT id FROM transition_commands WHERE reply_seen_at IS NULL AND tool=?"
+            " AND args=? AND role=? AND actor=? AND actor_epoch IS ? ORDER BY rowid DESC LIMIT 1",
+            (tool, payload, ctx.role, str(ctx.actor), ctx.actor.epoch),
+        )
+        if earlier is not None:
+            command_id = earlier["id"]
+        else:
+            command_id = command_identity(ctx, tool, f"generated:{uuid4()}")
+            _accept(tx, ctx, tool, fields, command_id, payload)
+    # A lock cannot be waited on and an interrupt watched at once, and by the end of a long wait
+    # Hermes may have abandoned this call and cleared its interrupt. Then the reply may be lost.
+    maybe_abandoned = time.monotonic() - started >= HERMES_INTERRUPT_GRACE_SECONDS
+    result = _await_result(ctx, command_id)
+    state = CommandReceipt.parse(result).state
+    if state == "pending":
+        return {**result, "next": PENDING_NEXT_STEP}
+    if state == "applied" and earlier is not None:
+        result["repeat_of_earlier_call"] = REPEAT_NOTE
+    if not maybe_abandoned:
+        note_delivery(ctx, result)
+    return result
+
+
+def read_command(ctx: ToolContext, command_id: str) -> dict:
+    """``task.command``: a finished result read here reaches the session."""
+    result = receipt(ctx.store, command_id)
+    if CommandReceipt.parse(result).state != "pending":
+        note_delivery(ctx, result)
+    return result
+
+
+def note_delivery(ctx: ToolContext, result: dict) -> None:
+    """Record that the session that issued this finished command is being given its result: an
+    identical call is a new intent from now on, and the Task revisions it shows count as seen.
+    Both commit together, so neither can fail after the other. Another session's read changes
+    nothing, and neither does repeating a read of a delivered command. Under an interrupt Hermes
+    may discard this reply, so it stays unmarked: at worst a deliberate repeat gets REPEAT_NOTE."""
+    command_id = result["command_id"]
+    command = ctx.store.one(
+        "SELECT tool,reply_seen_at FROM transition_commands WHERE id=? AND actor=?",
+        (command_id, str(ctx.actor)),
+    )
+    if command is None or command["reply_seen_at"] is not None or _hermes_interrupted():
+        return
+    from research_core.tools import task
+
+    with ctx.store.atomic(ctx.actor) as tx:
+        tx.execute("UPDATE transition_commands SET reply_seen_at=? WHERE id=?", (tx.at, command_id))
+        if command["tool"] == "task":
+            task.remember_seen_revisions(ctx, result)
+
+
+def _accept(tx, ctx: ToolContext, tool: str, args: dict, command_id: str, payload: str) -> None:
+    from research_core.store import tasks
+    from research_core.tools import _args as arguments
+
+    issuer_attempt_id = None
+    task_updated = None
+    if tool == "task" and args["action"] == "assign" and not args.get("task_updated"):
+        # Fixed now: what the session sees while this waits must not change what it chose from.
+        task_updated = tasks.revision_for_assignment(
+            ctx.store,
+            ctx.hermes_session_id(),
+            arguments.record_number(args["task"], "task", "task"),
+        )
+    if (
+        ctx.role == "researcher"
+        and tool == "task"
+        and args["action"] in {"complete", "wait", "ask", "release", "propose_submission"}
+    ):
+        task_id = arguments.record_number(args["task"], "task", "task")
+        tasks.require_holder(ctx.store, task_id, ctx.actor)
+        assignment = ctx.wstore.one(
+            "SELECT a.current_attempt_id,a.state,execution.status FROM task_assignments a"
+            " JOIN client_admissions execution ON execution.op_id=a.current_attempt_id"
+            " WHERE a.session_id=? AND a.task_id=?",
+            (ctx.actor.id, task_id),
+        )
+        if (
+            assignment is None
+            or assignment["state"] != "held"
+            or assignment["status"] not in {"queued", "running"}
+        ):
+            raise ToolError("This worker execution no longer has task transition authority")
+        issuer_attempt_id = assignment["current_attempt_id"]
+    tx.execute(
+        "INSERT INTO transition_commands(id,tool,args,role,actor,actor_epoch,"
+        "issuer_attempt_id,created_at,task_updated) VALUES (?,?,?,?,?,?,?,?,?)",
+        (
+            command_id,
+            tool,
+            payload,
+            ctx.role,
+            str(ctx.actor),
+            ctx.actor.epoch,
+            issuer_attempt_id,
+            tx.at,
+            task_updated,
+        ),
+    )
+    tx.event("transition.requested", command_id, {"tool": tool})
+
+
+def _hermes_interrupted() -> bool:
+    try:
+        from tools.interrupt import is_interrupted
+    except ImportError:  # outside Hermes: tests, the CLI and workspace-executor subprocesses
+        return False
+    return is_interrupted()
+
+
+def _await_result(ctx: ToolContext, command_id: str) -> dict:
+    """The command's result, or its pending receipt after a short wait.
+
+    An interrupt ends the wait at once: Hermes abandons a thread still running after a short grace
+    period and tells the model the call was cancelled, and it clears the interrupt later, so this
+    thread must not stay to record a finished result nobody will get. A pending reply marks nothing.
+    """
     deadline = time.monotonic() + REQUEST_WAIT_SECONDS
     wait = threading.Event()
-    while time.monotonic() < deadline:
+    while time.monotonic() < deadline and not _hermes_interrupted():
         result = receipt(ctx.store, command_id)
         if CommandReceipt.parse(result).state != "pending":
             return result
@@ -241,6 +358,8 @@ def apply(ctx, instance_id: str) -> None:
         if session is not None:
             tool_ctx.env = {**tool_ctx.env, "HERMES_PROFILE_NAME": session["profile"]}
         args = json.loads(command["args"])
+        if command["task_updated"]:
+            args["task_updated"] = command["task_updated"]
         with CommandApplication(store, command["id"]):
             # Lock order is admission lock, then Coworld writer, everywhere.
             with admissions.dispatch_lock(ctx.wstore), store.atomic(actor) as tx:
@@ -303,19 +422,15 @@ def record_effect(tx, env, result: dict) -> None:
 
 
 def durable_tool(spec: ToolSpec, *, mutations: set[str] | None = None) -> ToolSpec:
-    """Expose caller-stable operation identity on every command-producing tool action."""
+    """Accept an explicit ``operation_id`` on every command-producing tool action.
+
+    ``request_generated`` gives a call its identity, so no schema offers the field; chats whose
+    frozen schema still lists it may send one, and it keeps its meaning.
+    """
     actions = tuple(
         replace(
             action,
-            params={
-                **action.params,
-                "operation_id": {
-                    "type": "string",
-                    "description": "Unique intent ID. Reuse after a lost or pending reply; "
-                    "inspect progress with task.command and the returned command_id.",
-                },
-            },
-            required=(*action.required, "operation_id"),
+            hidden_params={**action.hidden_params, "operation_id": {"type": "string"}},
         )
         if (
             action.name in mutations

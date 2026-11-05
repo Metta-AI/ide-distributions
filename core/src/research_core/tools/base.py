@@ -66,6 +66,9 @@ class ActionSpec:
     # Fields the handler needs in some form beyond ``required`` ("ref or view", "goal unless
     # type is maintenance"): a refusal's example call includes them so copying it can succeed.
     example_fields: tuple[str, ...] = ()
+    # Fields a call may still carry but no schema or refusal offers: code fills them in now, and
+    # a chat keeps the tool schema it started with, so an open one may send them for a while.
+    hidden_params: dict[str, dict] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -118,9 +121,22 @@ class ToolSpec:
             properties.setdefault(name, schema)
         return properties
 
-    def accepted(self, action: ActionSpec | None) -> dict[str, dict]:
-        """The fields one call may carry: the action's own inputs plus the tool's common ones."""
+    def offered(self, action: ActionSpec | None) -> dict[str, dict]:
+        """The fields a model is told about: the action's own inputs plus the tool's common ones."""
         return {**(action.params if action else {}), **self.params}
+
+    def accepted(self, action: ActionSpec | None) -> dict[str, dict]:
+        """The fields one call may carry: the offered ones plus the action's hidden ones."""
+        return {**self.offered(action), **(action.hidden_params if action else {})}
+
+    def checked_fields(self, role: Role) -> dict[str, dict]:
+        """The shapes arguments are checked against: the offered fields, then the hidden ones."""
+        hidden = {
+            name: schema
+            for action in self.actions or ()
+            for name, schema in action.hidden_params.items()
+        }
+        return {**hidden, **self.properties(role)}
 
     def schema(self, role: Role) -> dict:
         """The OpenAI function body Hermes registers: name, description, parameters."""
@@ -284,7 +300,9 @@ def validate_args(
         else:
             action_name = str(raw)
             required.extend(spec.action(action_name).required)  # type: ignore[union-attr]
-    known = set(properties) | {name for action in spec.actions or () for name in action.params}
+    known = set(properties) | {
+        name for action in spec.actions or () for name in (*action.params, *action.hidden_params)
+    }
     accepted = spec.accepted(spec.action(action_name)) if action_name else None
     for name, value in args.items():
         if name not in known:
@@ -297,8 +315,9 @@ def validate_args(
     for name in required:
         if args.get(name) in (None, ""):
             problems.append(f"{name} is required" + (f" for {action_name}" if action_name else ""))
+    checked = spec.checked_fields(role)
     for name, value in args.items():
-        schema = properties.get(name)
+        schema = checked.get(name)
         unused = accepted is not None and name not in accepted
         if schema is None or value is None or (unused and value == ""):
             continue  # an empty placeholder for another action's field is dropped, not checked
@@ -316,7 +335,7 @@ def validate_args(
 
 def coerce_args(spec: ToolSpec, role: Role, args: Mapping[str, Any]) -> dict:
     """Integers given for string fields (record ids) become strings; everything else is kept."""
-    properties = spec.properties(role)
+    properties = spec.checked_fields(role)
     out = dict(args)
     for name, value in args.items():
         schema = properties.get(name)
@@ -396,7 +415,7 @@ def usage(spec: ToolSpec, role: Role, action: str | None) -> dict:
             }
         }
     selected = spec.action(action) if action else None
-    schemas = spec.accepted(selected)
+    schemas = spec.offered(selected)
     required = [*(selected.required if selected else ()), *spec.required]
     optional = [name for name in schemas if name not in required]
     names = [*required, *(selected.example_fields if selected else ())]
