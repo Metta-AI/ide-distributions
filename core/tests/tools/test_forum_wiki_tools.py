@@ -1,3 +1,5 @@
+import pytest
+
 import research_core.tools.forum_post  # noqa: F401
 import research_core.tools.settings  # noqa: F401
 import research_core.tools.wiki_edit  # noqa: F401
@@ -40,6 +42,34 @@ def test_never_setting_still_runs_a_user_request(call):
         "wiki_edit", {"wiki": "w", "page": "p", "title": "T", "body": "B", "cites": "msg-2"}
     )
     assert allowed["ok"] is True and allowed["edit"]["conflict"] is False
+
+
+@pytest.mark.parametrize("cites", ["G-3", "Goal G-3", "G-3, T-4"])
+def test_citing_a_record_is_not_a_user_request(call, cites):
+    set_setting(call, "platform_writes.forum", "never")
+    args = {"action": "post", "title": "t", "body": "b", "cites": cites}
+    refused = call("forum_post", args)
+    assert refused["ok"] is False and "is a record" in refused["error"]
+    set_setting(call, "platform_writes.forum", "ask")
+    assert call("forum_post", args)["context"].get("ask_user") is True
+
+
+def test_a_researcher_cannot_claim_a_user_request(call):
+    set_setting(call, "platform_writes.wiki", "never")
+    refused = call(
+        "wiki_edit",
+        {"wiki": "w", "page": "p", "title": "T", "body": "B", "cites": "the user asked"},
+        role="researcher",
+    )
+    assert refused["ok"] is False and refused["context"].get("ask_orchestrator") is True
+    assert "cites" not in refused["error"]
+
+
+def test_a_sentence_that_mentions_a_record_is_a_user_request(call):
+    set_setting(call, "platform_writes.forum", "never")
+    cited = "the user asked: please post what T-3 found"
+    out = call("forum_post", {"action": "post", "title": "t", "body": "b", "cites": cited})
+    assert out["ok"] is True
 
 
 def test_wiki_conflict_and_user_identity_notice(call, ctx_factory):

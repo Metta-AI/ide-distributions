@@ -34,7 +34,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from research_core import task_types
+from research_core import refs, task_types
 from research_core.store import settings
 from research_core.store._common import (
     display_id,
@@ -1234,7 +1234,7 @@ def _approval(
     gated = type in settings.get(store, "approval_required.task_types")
     if actor.is_user or not gated:
         return str(actor), None
-    if cites:
+    if cites and not refs.names_only_records(cites):
         return f"user via {actor} citing {cites}", None
     return None, (
         f"approval_required.task_types names {type}: only the user approves a {type} Task;"
