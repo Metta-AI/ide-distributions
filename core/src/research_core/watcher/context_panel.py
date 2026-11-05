@@ -22,6 +22,7 @@ from datetime import timedelta
 from typing import TYPE_CHECKING, Any
 
 from research_core import environment_guide
+from research_core.platform.identity import PLAYER_ID_VAR
 from research_core.store import (
     capabilities,
     champion,
@@ -38,6 +39,7 @@ from research_core.store.db import Store
 if TYPE_CHECKING:  # pragma: no cover
     from research_core.watcher.context import TickContext
 
+from research_core.tools.base import PLAYER_ID_META
 from research_core.tools.ui import AGENT_CONTEXT_PANEL, coworld_conversation
 
 PANEL = AGENT_CONTEXT_PANEL
@@ -62,7 +64,7 @@ def compute(ctx: TickContext) -> dict[str, Any]:
     computed: dict[str, Any] = {
         "coworld": None if active is None else {k: active[k] for k in COWORLD_FIELDS},
         "image": environment_guide.image_info(env),
-        "player": env.get("SOFTMAX_PLAYER_ID"),
+        "player": env.get(PLAYER_ID_VAR) or ctx.meta(PLAYER_ID_META),
         "user_identity_available": bool(env.get("SOFTMAX_USER_CREDENTIAL")),
         "paused": bool(settings.get(ctx.wstore, "paused")),
         "heartbeat": {"alive": alive, "has_work": ctx.meta("has_work") == "1"},

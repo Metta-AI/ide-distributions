@@ -19,7 +19,6 @@ import pytest
 from research_core.platform.errors import (
     CreditsRefused,
     IdentityUnavailable,
-    NotAvailable,
     PlatformError,
 )
 from research_core.platform.fake import FakePlatform
@@ -750,11 +749,40 @@ def test_policy_versions_without_a_name_lists_mine(platform, server):
     assert params["player_id"] == "ply_me"
 
 
-def test_policy_file_is_not_available(platform, server):
-    with pytest.raises(NotAvailable) as info:
+def file_ticket(content: bytes, content_hash: str | None = None) -> Reply:
+    return reply(
+        json={
+            "policy_version_id": PV_ID,
+            "content_hash": content_hash or hashlib.sha256(content).hexdigest(),
+            "size_bytes": len(content),
+            "download_url": "http://storage.test/policy?signature=secret",
+            "expires_in_seconds": 300,
+        }
+    )
+
+
+def test_policy_file_follows_the_presigned_url(platform, server):
+    server.on("GET", f"/observatory/v2/policy-files/{PV_ID}/download", file_ticket(b"bytes"))
+    server.on("GET", "/policy", reply(content=b"bytes"))
+    assert platform.policy_file(PV_ID) == b"bytes"
+    assert server.calls[0].headers["authorization"] == "Bearer cga_player"
+    assert "authorization" not in server.calls[1].headers  # the URL carries its own signature
+
+
+def test_policy_file_refuses_bytes_that_do_not_match_the_hash(platform, server):
+    server.on("GET", f"/observatory/v2/policy-files/{PV_ID}/download", file_ticket(b"a", "0" * 64))
+    server.on("GET", "/policy", reply(content=b"a"))
+    with pytest.raises(PlatformError) as info:
         platform.policy_file(PV_ID)
-    assert not info.value.retryable and "attach the file" in info.value.detail
-    assert server.calls == []
+    assert not info.value.retryable and "does not match" in info.value.detail
+
+
+def test_policy_file_of_an_image_policy_is_a_409(platform, server):
+    no_file = reply(409, json={"detail": "Policy version has no player file"})
+    server.on("GET", f"/observatory/v2/policy-files/{PV_ID}/download", no_file)
+    with pytest.raises(PlatformError) as info:
+        platform.policy_file(PV_ID)
+    assert info.value.status == 409 and not info.value.retryable
 
 
 def test_episodes(platform, server):
@@ -880,6 +908,57 @@ def test_wiki_edit_conflict_is_a_result_not_an_error(platform, server):
         "idempotency_key": "k3",
         "base_revision_id": "rev_2",
     }
+
+
+def test_wiki_edit_with_no_base_creates_a_page(platform, server):
+    edited = {"page": WIKI_PAGE, "revision": {**WIKI_REVISION, "id": "rev_1", "note": None}}
+    server.on("PUT", "/observatory/v2/wikis/fakegame/pages/strategy", reply(json=edited))
+    result = platform.wiki_edit(
+        "fakegame",
+        "strategy",
+        title="Strategy",
+        body="first",
+        base_revision_id=None,
+        idempotency_key="k5",
+    )
+    assert result["conflict"] is False and result["revision"]["id"] == "rev_1"
+    assert server.body(0) == {"title": "Strategy", "body": "first", "idempotency_key": "k5"}
+
+
+def test_a_post_to_a_named_forum_uses_its_route(platform, server):
+    server.on("POST", "/observatory/v2/forums/fakegame/posts", reply(201, json=POST))
+    post = platform.forum_post(title="Hello", body="hi", idempotency_key="k1", slug="fakegame")
+    assert post["id"] == "post_1" and post["identity"] == "player"
+    assert server.body(0) == {
+        "title": "Hello",
+        "idempotency_key": "k1",
+        "content_format": "markdown",
+        "body": "hi",
+    }
+
+
+def test_uploads_and_submissions_name_the_player_whoami_gives(server, env):
+    """Hosting does not set SOFTMAX_PLAYER_ID, so the Player comes from the credential, once."""
+    me = {
+        "user_email": "me@example.test",
+        "subject_type": "player",
+        "subject_id": "ply_from_token",
+        "owner_user_id": "user_1",
+    }
+    server.on("GET", "/observatory/whoami", reply(json=me))
+    without_id = {k: v for k, v in env.items() if k != "SOFTMAX_PLAYER_ID"}
+    with RealPlatform(without_id) as platform:
+        assert platform._player_id() == "ply_from_token"
+        assert platform._player_id() == "ply_from_token"
+    assert server.paths() == ["GET /observatory/whoami"]
+
+
+def test_a_credential_that_is_not_a_players_names_no_player(server, env):
+    me = {"subject_type": "user", "subject_id": "user_1", "user_email": "me@example.test"}
+    server.on("GET", "/observatory/whoami", reply(json=me))
+    without_id = {k: v for k, v in env.items() if k != "SOFTMAX_PLAYER_ID"}
+    with RealPlatform(without_id) as platform:
+        assert platform._player_id() is None
 
 
 def test_wiki_read_history_search_and_edit(platform, server):

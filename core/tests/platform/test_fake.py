@@ -478,10 +478,15 @@ def test_fault_platform_down(tmp_path):
 
 def test_forum_posts_comments_votes_and_idempotency(tmp_path):
     platform = make(tmp_path)
-    post = platform.forum_post(title="Opening book", body="Patience wins.", idempotency_key="p1")
-    again = platform.forum_post(title="other", body="other", idempotency_key="p1")
+    forum = "league_fake"
+    post = platform.forum_post(
+        title="Opening book", body="Patience wins.", idempotency_key="p1", slug=forum
+    )
+    again = platform.forum_post(title="other", body="other", idempotency_key="p1", slug=forum)
     assert again["id"] == post["id"] and post["identity"] == "player"
-    other = platform.forum_post(title="Noise", body="Board terms.", idempotency_key="p2")
+    other = platform.forum_post(
+        title="Noise", body="Board terms.", idempotency_key="p2", slug=forum
+    )
     comment = platform.forum_comment(post["id"], body="Agreed.", idempotency_key="c1")
     assert comment["post_id"] == post["id"]
     vote = platform.forum_vote(post["id"], 1)
@@ -490,9 +495,10 @@ def test_forum_posts_comments_votes_and_idempotency(tmp_path):
         platform.forum_vote(post["id"], 0, comment_id=comment["id"])["comment_id"] == comment["id"]
     )
 
-    listed = platform.forum_list("league_fake")
+    listed = platform.forum_list(forum)
     assert [p["id"] for p in listed] == [post["id"], other["id"]]  # by score, then date
-    assert [p["id"] for p in platform.forum_list("x", sort="new")] == [other["id"], post["id"]]
+    assert [p["id"] for p in platform.forum_list(forum, sort="new")] == [other["id"], post["id"]]
+    assert platform.forum_list("another") == []
     assert [hit["post"]["id"] for hit in platform.forum_search("patience")] == [post["id"]]
     text = platform.forum_read(post["id"])
     assert text.startswith("# Opening book") and "- (Autoresearch) Agreed." in text

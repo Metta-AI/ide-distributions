@@ -22,6 +22,12 @@ def test_read_all_lists_every_key_with_its_spec(call):
     assert mode["scope"] == "coworld" and mode["enum"] == ["ask", "autonomous"]
 
 
+def test_an_update_citing_a_record_is_refused(call):
+    args = {"action": "update", "key": "paused", "value": True, "cites": "G-3"}
+    refused = call("settings", args)
+    assert refused["ok"] is False and "not the record G-3" in refused["error"]
+
+
 def test_read_one_key(call):
     result = call("settings", {"action": "read", "key": "max_researchers"})
     assert result["record"]["key"] == "max_researchers" and result["record"]["value"] == 2

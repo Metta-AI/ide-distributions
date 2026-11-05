@@ -3,10 +3,11 @@
 The escape hatch for routes no tool covers (the ``softmax-api-routes`` skill lists them). The
 path is relative to ``/observatory``; the call runs as the Player, or as the User when the
 Orchestrator asks (the Researcher is Player only). Every call is logged as a
-``platform.request`` event in the Coworld store (method, path, identity, outcome, status), so
-frequent routes can become proper tools. A non-GET call made as the User first writes a notice
-(workspace store): "Acted as your User identity: <METHOD> <path>" (A4.7) — the user learns of
-anything done in their name. Runs in the workspace environment.
+``platform.request`` event (method, path, identity, outcome, status) in the Coworld store, or the
+workspace store for a Session with no Coworld, so frequent routes can become proper tools. A write
+made as the User leaves a notice (workspace store) once its outcome is known: "Acted as your User
+identity: <METHOD> <path>" (A4.7), or "may have acted" when the platform gave no clear answer. The
+user learns of anything done in their name. Runs in the workspace environment.
 """
 
 from __future__ import annotations
@@ -30,15 +31,6 @@ def handle(call: ToolCall) -> dict:
     if method not in METHODS:
         raise ToolError(f"method must be one of {', '.join(METHODS)}, not {method!r}")
     route = f"{method} {path}"
-    if identity == "user" and method not in READ_METHODS:
-        coworld = ctx.coworld_or_none()
-        notices.add(
-            ctx.wstore,
-            ctx.actor,
-            coworld_id=coworld.coworld_id if coworld else None,
-            text=f"Acted as your User identity: {method} {path}",
-            refs=(),
-        )
     platform = ctx.platform()
     try:
         response = call_platform(
@@ -49,9 +41,25 @@ def handle(call: ToolCall) -> dict:
         )
     except ToolError as error:
         _log(call, method, path, identity, outcome="error", status=error.context.get("status"))
+        if error.context.get("retryable"):
+            _notice_user_write(call, method, path, identity, "May have acted")
         raise
     _log(call, method, path, identity, outcome="ok", status=None)
+    _notice_user_write(call, method, path, identity, "Acted")
     return {"method": method, "path": path, "identity": identity, "response": response}
+
+
+def _notice_user_write(call: ToolCall, method: str, path: str, identity: str, verb: str) -> None:
+    if identity != "user" or method in READ_METHODS:
+        return
+    coworld = call.ctx.coworld_or_none()
+    notices.add(
+        call.ctx.wstore,
+        call.ctx.actor,
+        coworld_id=coworld.coworld_id if coworld else None,
+        text=f"{verb} as your User identity: {method} {path}",
+        refs=(),
+    )
 
 
 def normalise_path(path: object) -> str:
@@ -65,7 +73,8 @@ def normalise_path(path: object) -> str:
 def _log(
     call: ToolCall, method: str, path: str, identity: str, *, outcome: str, status: int | None
 ) -> None:
-    with call.ctx.store.tx(call.ctx.actor) as tx:
+    store = call.ctx.store if call.ctx.coworld_or_none() else call.ctx.wstore
+    with store.tx(call.ctx.actor) as tx:
         tx.event(
             "platform.request",
             f"{method} {path}",
@@ -86,7 +95,7 @@ SPEC = tool(
             "Call any Softmax Observatory route with authentication handled, for routes no tool "
             "covers (see the softmax-api-routes skill). Paths are relative to /observatory. "
             "Runs as the Player; the Orchestrator may name identity user, which notifies the "
-            "user for every non-GET call. Every call is logged."
+            "user of every write. Every call is logged."
         ),
         handler=handle,
         roles=BOTH,

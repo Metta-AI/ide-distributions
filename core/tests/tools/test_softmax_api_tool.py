@@ -10,6 +10,7 @@ import pytest
 import research_core.tools.softmax_api as softmax_api  # noqa: F401  (registers the tool)
 from research_core.platform import fake
 from research_core.store import notices
+from research_core.tools.base import run_tool
 
 LEAGUE = fake.LEAGUE_ID
 POLICY = json.dumps({"parameters": {"aggression": 3, "patience": 5}}).encode()
@@ -33,6 +34,23 @@ def membership_id(platform) -> str:
     submission = platform.submit(league_id=LEAGUE, policy_version_id=version.id)
     platform.memberships(league_id=LEAGUE)
     return submission.membership_id
+
+
+def test_a_call_with_no_coworld_is_logged_in_the_workspace_store(ctx_factory):
+    ctx = ctx_factory(coworld=None)
+    out = json.loads(run_tool("softmax_api", {"method": "GET", "path": "/whoami"}, ctx))
+    assert out["ok"] is True, out
+    assert request_events(ctx.wstore)[-1]["path"] == "/whoami"
+
+
+def test_a_refused_write_as_the_user_says_nothing_was_done(call, ctx_factory):
+    ctx = ctx_factory()
+    out = call(
+        "softmax_api",
+        {"method": "POST", "path": "/v2/nope", "identity": "user", "json": {"a": 1}},
+    )
+    assert out["ok"] is False and out["context"]["status"] == 404
+    assert not [n for n in notices.unread(ctx.wstore) if "User identity" in n["text"]]
 
 
 def test_spec_is_flat_and_workspace_for_both_roles():

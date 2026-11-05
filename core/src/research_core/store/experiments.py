@@ -820,7 +820,9 @@ def candidate_of(store: Store, experiment_id: int, methods: dict[str, Any]) -> s
     methods then lock) the one Version built for the Experiment; None when that is not one."""
     if methods.get("candidate"):
         return methods["candidate"]
-    built = [v["id"] for v in _versions_tested(store, experiment_id, methods) if v["role"] == "built"]
+    built = [
+        v["id"] for v in _versions_tested(store, experiment_id, methods) if v["role"] == "built"
+    ]
     return built[0] if len(built) == 1 else None
 
 

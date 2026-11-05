@@ -1,9 +1,12 @@
+import json
+
 import pytest
 
 import research_core.tools.forum_post  # noqa: F401
 import research_core.tools.settings  # noqa: F401
 import research_core.tools.wiki_edit  # noqa: F401
 from research_core.store import notices
+from research_core.tools.base import ToolContext, run_tool
 
 
 def set_setting(call, key, value):
@@ -72,6 +75,47 @@ def test_a_sentence_that_mentions_a_record_is_a_user_request(call):
     assert out["ok"] is True
 
 
+def test_a_post_lands_in_the_coworlds_forum_and_shows_in_its_list(call, ctx_factory):
+    ctx_factory()
+    post = call("forum_post", {"action": "post", "title": "Hello", "body": "First"})
+    assert post["ok"] is True, post
+    listed = call("platform", {"action": "forum_list"})
+    assert [row["id"] for row in listed["posts"]] == [post["post"]["id"]]
+    elsewhere = call(
+        "forum_post", {"action": "post", "title": "Hi", "body": "Second", "slug": "other"}
+    )
+    assert elsewhere["ok"] is True
+    assert len(call("platform", {"action": "forum_list"})["posts"]) == 1
+
+
+def test_a_changed_title_or_identity_is_a_new_write(call):
+    first = {"wiki": "w", "page": "p", "title": "T", "body": "B"}
+    assert call("wiki_edit", first)["ok"] is True
+    retitled = call("wiki_edit", {**first, "title": "New title"})
+    assert "reconciled" not in retitled  # it reached the platform: here a conflict, base unset
+    assert retitled["conflict"] is True
+    args = {"action": "post", "title": "t", "body": "b"}
+    assert call("forum_post", args)["ok"] is True
+    as_user = call("forum_post", {**args, "identity": "user"})
+    assert "reconciled" not in as_user
+
+
+def test_a_crash_before_the_notice_still_tells_the_user_on_retry(ctx_factory, monkeypatch):
+    ctx = ctx_factory()
+    user_ctx = ToolContext.from_env("orchestrator", dict(ctx.env, SOFTMAX_USER_CREDENTIAL="tok"))
+    args = {"action": "post", "title": "t", "body": "b", "identity": "user"}
+
+    def crash(*_, **__):
+        raise RuntimeError("crash")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("research_core.tools._writes.notices.add", crash)
+        assert json.loads(run_tool("forum_post", args, user_ctx))["ok"] is False
+    assert json.loads(run_tool("forum_post", args, user_ctx))["ok"] is True
+    shown = notices.unread(ctx.wstore, limit=50, coworld_id="cow_fake")
+    assert any("Acted as your User" in n["text"] for n in shown)
+
+
 def test_wiki_conflict_and_user_identity_notice(call, ctx_factory):
     first = call("wiki_edit", {"wiki": "w", "page": "p", "title": "T", "body": "v1"})
     assert first["ok"] is True
@@ -83,10 +127,6 @@ def test_wiki_conflict_and_user_identity_notice(call, ctx_factory):
     ctx = ctx_factory("orchestrator")
     before = len(notices.unread(ctx.wstore, limit=50, coworld_id="cow_fake"))
     env = dict(ctx.env, SOFTMAX_USER_CREDENTIAL="user-token")
-    import json
-
-    from research_core.tools.base import ToolContext, run_tool
-
     user_ctx = ToolContext.from_env("orchestrator", env)
     out = json.loads(
         run_tool(

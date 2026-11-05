@@ -136,7 +136,11 @@ def _wait_on_platform(ctx: ToolContext, route: str, error: PlatformError) -> dic
 
     except (StoreError, ToolError) as problem:
         return {"waiting": False, "wait_skipped": "; ".join(problem.problems) or str(problem)}
-    return {"waiting": True, "task": f"T-{task_id}"}
+    return {
+        "waiting": True,
+        "task": f"T-{task_id}",
+        "next": "end your run; the watcher resumes you when the route answers again",
+    }
 
 
 def _held_task_id(ctx: ToolContext) -> int | None:

@@ -14,7 +14,6 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from research_core import refs
 from research_core.store._common import json_field, parse_iso, parse_json, require
 from research_core.store.errors import StoreError
 from research_core.store.registry import TASK_TYPES
@@ -243,7 +242,7 @@ def update(store: Store, actor: Actor, key: str, value: Any, *, cites: str) -> d
     problems.extend(validate_value(found, value))
     require(
         problems,
-        isinstance(cites, str) and cites.strip() and not refs.names_only_records(cites),
+        isinstance(cites, str) and cites.strip(),
         "cites is required: the reference of the user's message that asked for the change",
     )
     if problems:
