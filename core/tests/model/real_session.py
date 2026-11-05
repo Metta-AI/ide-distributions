@@ -14,9 +14,10 @@ history, so those rows are written into the profile's ``state.db`` before the fi
 shape Hermes stores them.
 
 That history also differs from a refusal inside one turn: the run's input adds a user message
-after the refused calls. The direct tests' recovery cases send the mid-turn shape, with the real
-context when ``IDE_TOOL_CALL_CONTEXT`` is set. Both are worth knowing; they do not measure the same
-thing, and the mid-turn rate is much lower.
+after the refused calls. To measure one turn, ``test_mid_turn_recovery.py`` gives the gateway a
+``ForcingProxy``, which answers a conversation's first requests with the broken calls, so the
+refusals, hooks and loop guard are the real ones. Both are worth knowing; they do not measure the
+same thing, and the mid-turn rate is much lower without ``repeats.without_repeated_refusals``.
 
 No ``research serve`` runs: its coordinator would start Researchers for the Tasks these cases
 create, and a chat turn reaches the gateway the same way. Each case gets its own Coworld with
@@ -49,6 +50,7 @@ from research_core.watcher.hermes_api import HermesRuns, RunsUnavailable, mint_s
 from tests.fixtures.fakegame_repo import COWORLD_ID, make_fakegame_repo
 from tests.hermes.test_spike_s1 import REPO, Host, SecretEnv, free_port, hermes_python, run
 from tests.model import harness, write_actions
+from tests.model.forcing_proxy import ForcedCall, ForcingProxy
 from tests.model.write_actions import Case
 
 HOST_LABEL = "real session"
@@ -173,6 +175,9 @@ class RealGateway:
     model: str
     host: Host | None = field(default=None, repr=False)
     runs: HermesRuns | None = None
+    # When set, recovery cases are forced in one turn through this proxy (``forcing_proxy.py``),
+    # rather than seeded before a new user message.
+    forcing: ForcingProxy | None = field(default=None, repr=False)
 
     def start(self) -> None:
         self.host = Host(
@@ -187,6 +192,7 @@ class RealGateway:
                 "IDE_PLATFORM": "fake",
                 "SOFTMAX_PLAYER_ID": FAKE_PLAYER_ID,
                 "IDE_RESEARCHER_PROFILES": "researcher",
+                **({"OPENROUTER_BASE_URL": self.forcing.start()} if self.forcing else {}),
             },
         )
         self.host.home.mkdir(parents=True)
@@ -323,6 +329,12 @@ class RealGateway:
             assert time.monotonic() < deadline, f"run {run_id} did not end"
             time.sleep(POLL_S)
 
+    def force_refusals(self, case: Case, text: str) -> str:
+        """Script the case's refused calls; returns the message whose conversation gets them."""
+        marked = f"{text} (request {next(RUN_NUMBERS)})"
+        self.forcing.scripts[marked] = [ForcedCall(case.tool, case.refused)] * case.refusals
+        return marked
+
     def run_case(self, model: str, case: Case) -> harness.Result:
         """Start a run for the case and read the Session until the judged call shows up."""
         result = harness.Result(model, HOST_LABEL, case.label, "wrong_tool")
@@ -330,9 +342,12 @@ class RealGateway:
         text = case.instruction.replace("<run>", str(next(RUN_NUMBERS)))
         seeded = 0
         if case.refused is not None:
-            self.seed_refusals(session_id, case, case.instruction)
             seeded = 1 + 2 * case.refusals
-            text = "Please go on with that request."
+            if self.forcing:
+                text = self.force_refusals(case, text)
+            else:
+                self.seed_refusals(session_id, case, case.instruction)
+                text = "Please go on with that request."
         started = time.monotonic()
         run_id = self.runs.start(
             profile=case.role,
