@@ -41,8 +41,10 @@ when you call the script). With `IDE_WORKSPACE` unset the workspace defaults to
    the Orchestrator's compaction settings, the tool-result prune trigger, the disabled Hermes
    toolsets), removes retired keys, points every profile at the
    active Coworld (`skills.external_dirs`, `skills.trusted_project_dirs`, `terminal.cwd`), and
-   applies shipped values only where the owner kept an earlier default; it never changes the
-   model, but adds the OpenRouter host pins for the Kimi models (`provider_routing.models`,
+   applies shipped values only where the owner kept an earlier default; it does not change the
+   model (the one exception: an Orchestrator on `moonshotai/kimi-k3` with no recorded model
+   change moves once to `moonshotai/kimi-k3.1-pro`, see `contract/CONTRACT.md`, "Profile
+   models"), but adds the OpenRouter host pins for the Kimi models (`provider_routing.models`,
    Moonshot only) unless the owner set routing for that model or for every model
    (Hermes applies a per-model entry over the rules for every model, so route a Kimi model
    differently with an entry under `provider_routing.models`);
