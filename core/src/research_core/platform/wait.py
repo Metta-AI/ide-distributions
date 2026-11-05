@@ -84,7 +84,7 @@ def identity_for(ctx: ToolContext, requested: str | None) -> Identity:
     if identity == "user" and ctx.role == "researcher":
         raise ToolError(
             "the Researcher acts as the Player only; the User identity belongs to the "
-            "Orchestrator (ask through task.ask or task.message)",
+            "Orchestrator (ask through task_ask)",
             identity="user",
             role=ctx.role,
         )

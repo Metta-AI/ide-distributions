@@ -33,7 +33,7 @@ Claims (`writing-claims`) tagged `opponent`, the policy version id, the Player i
 
 ## Counters
 
-For each exploitable weakness, write the counter as a hypothesis: `experiment.create` with `if_true` and `if_false` naming the metric and `methods.procedure` saying the evaluation pins this opponent (`xp.request {experiment, opponents: [<policy version id>]}` on both arms), then `task.propose {goal, type: improvement, title, description, experiment: X-n}`. A counter that only works against one opponent needs a guardrail against the field (`run-eval`, the guardrail rung).
+For each exploitable weakness, write the counter as a hypothesis: `experiment_create` with `if_true` and `if_false` naming the metric and `methods.procedure` saying the evaluation pins this opponent (`xp.request {experiment, opponents: [<policy version id>]}` on both arms), then `task_propose {goal, type: improvement, title, description, experiment: X-n}`. A counter that only works against one opponent needs a guardrail against the field (`run-eval`, the guardrail rung).
 
 ## Failure handling
 

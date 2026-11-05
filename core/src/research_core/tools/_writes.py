@@ -33,7 +33,7 @@ def setting_allows(call: ToolCall, key: str) -> None:
                 setting=key,
             )
         raise ToolError(
-            f"{key} is 'ask': propose the post through your Task (task.ask or the result of "
+            f"{key} is 'ask': propose the post through your Task (task_ask or the result of "
             "task.complete) and let the Orchestrator decide",
             ask_orchestrator=True,
             setting=key,

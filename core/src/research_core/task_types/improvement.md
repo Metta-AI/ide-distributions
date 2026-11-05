@@ -46,18 +46,18 @@ before the first claim. Game-specific metrics, floors and rosters: see the mixin
 and `<coworld>-eval-design` skills or docs.
 
 Work, in order:
-1. `experiment.create {summary, task, hypothesis, methods}`: the decision rule, metric, effect
+1. `experiment_create {summary, task, hypothesis, methods}`: the decision rule, metric, effect
    size, seeds and episodes are pre-registered. Then `experiment.start`; the design locks.
 2. Make the change in your worktree, commit, `version.create {summary, task, experiment}`, then
    `upload {version}`.
-3. `xp.request {experiment, candidate, baseline, seeds, episodes, opponents}`, then `task.wait
+3. `xp.request {experiment, candidate, baseline, seeds, episodes, opponents}`, then `task_wait
    {task, kind: "xp", detail, ref: [<request ids>]}` and END YOUR RUN. On resume
    `xp.status {experiment}` stores the rows.
 4. `experiment.close {experiment}` applies the rule: confirmed, refuted or inconclusive. Record
    the verdict as claims with `experiment` evidence; a refuted hypothesis is a finding.
-5. `task.propose_submission` only for a confirmed Version (see `proposing`).
+5. `task_propose_submission` only for a confirmed Version (see `proposing`).
 
-Ask (`task.ask`) when the lever or the baseline is ambiguous, or the Experiment would cost far
+Ask (`task_ask`) when the lever or the baseline is ambiguous, or the Experiment would cost far
 more credits than the Task implied; decide seeds, episodes above the mixin's floor and
 implementation details yourself.
 

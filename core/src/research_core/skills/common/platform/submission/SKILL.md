@@ -27,11 +27,11 @@ Do it in the same turn: `version.create` on the code they mean (`code/` for what
 - `submissions.until` (an open window) and `submissions.max_count`; `paused` stops all of it.
 - `submissions.quality_bar`: the Version is merged into `main` and a confirmed Experiment compares it with the League's champion at a primary effect of at least `submissions.min_margin_over_champion`. With no champion, a merged Version whose mixin `check` passes is enough.
 
-The bar is on your initiative, not on the user: they can turn it off (`settings.update {key: submissions.quality_bar, value: false, cites}`) or lower the margin. Meet a shortfall rather than argue with it: get the Task reviewed and merged, run the Experiment against the champion (`experiment`).
+The bar is on your initiative, not on the user: they can turn it off (`settings_update {key: submissions.quality_bar, value: false, cites}`) or lower the margin. Meet a shortfall rather than argue with it: get the Task reviewed and merged, run the Experiment against the champion (`experiment`).
 
 ## Researchers
 
-A Researcher never submits. `task.propose_submission {task, version, reason}` records the proposal; a management wake applies the rule above, and in mode `ask` the Orchestrator asks the user. `task.complete` carries `submission_candidate: yes|no` with `submission_reason`. Waiting for a placed submission is `task.wait {task, kind: submission, detail: "V-n in <league>", ref: <its policy version id>}`.
+A Researcher never submits. `task_propose_submission {task, version, reason}` records the proposal; a management wake applies the rule above, and in mode `ask` the Orchestrator asks the user. `task.complete` carries `submission_candidate: yes|no` with `submission_reason`. Waiting for a placed submission is `task_wait {task, kind: submission, detail: "V-n in <league>", ref: <its policy version id>}`.
 
 ## Options and after
 

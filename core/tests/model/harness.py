@@ -60,8 +60,9 @@ from types import ModuleType
 from typing import Any, Protocol
 
 from research_core import prepare
+from research_core.plugin.inference_hook import MAX_RESPONSE_TOKENS
 from research_core.tools import catalog
-from research_core.tools.base import ToolContext, run_tool
+from research_core.tools.base import ToolContext, run_tool, validate_args
 from research_core.tools.catalog import Role
 
 KEY = os.environ.get("OPENROUTER_API_KEY")
@@ -151,6 +152,7 @@ def request_body(
         "messages": messages,
         "tools": tools,
         "tool_choice": tool_choice,
+        "max_tokens": MAX_RESPONSE_TOKENS,  # as the plugin's request middleware bounds it
         **({"reasoning": HERMES_DEFAULT_REASONING} if model in reasoning_models() else {}),
         **({"provider": provider} if provider else {}),
         "usage": {"include": True},
@@ -239,6 +241,15 @@ class SchemaSet(Protocol):
         (a recovery case's history, and the answer to a refused call before the judged one)."""
 
 
+def own_tool_problems(role: Role, name: str, args: dict) -> list[str]:
+    """What an action's own tool refuses in a call: it is stricter than the grouped call the judging
+    reads, which drops another action's empty fields and takes a field named action."""
+    spec = catalog.TOOLS.get(name)
+    if spec is None or spec.split_from is None:
+        return []
+    return validate_args(spec, role, args)[1]
+
+
 class ShippedSchemas:
     """The schemas the profile plugin registers today (``ToolSpec.schema``)."""
 
@@ -248,13 +259,22 @@ class ShippedSchemas:
         return [spec.schema(role) for spec in catalog.tools_for(role)]
 
     def canonical(self, role: Role, name: str, args: dict) -> tuple[str, dict]:
-        return name, args
+        """A call to an action's own tool reads as the grouped tool and action, for the judging.
+        :func:`own_tool_problems` says what production's flat tool refuses in it."""
+        spec = catalog.TOOLS.get(name)
+        if spec is None or spec.split_from is None:
+            return name, args
+        tool, action = spec.split_from
+        return tool, {**args, "action": action}
 
     def outgoing(self, role: Role, tool: str, args: dict) -> tuple[str, dict]:
-        return tool, args
+        own_tool = catalog.TOOLS.get(f"{tool}_{args.get('action')}")
+        if own_tool is None or own_tool.split_from is None:
+            return tool, args
+        return own_tool.name, {k: v for k, v in args.items() if k != "action"}
 
     def refusal(self, role: Role, tool: str, args: dict) -> str:
-        return catalog_refusal(role, tool, args)
+        return catalog_refusal(role, *self.outgoing(role, tool, args))
 
 
 def schema_set() -> SchemaSet:

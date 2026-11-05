@@ -14,7 +14,7 @@ from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolErro
 
 ORCHESTRATOR = frozenset({"orchestrator"})
 BOTH = frozenset({"orchestrator", "researcher"})
-KEY = a.string("The setting, such as paused or max_researchers; read without it lists all.")
+KEY = "The setting, such as paused or max_researchers"
 
 
 def describe(found: settings.SettingSpec, value: Any) -> dict:
@@ -95,13 +95,13 @@ SPEC = tool(
             ActionSpec(
                 "read",
                 "Read one setting, or all of them with their types, defaults and scopes.",
-                {"key": KEY},
+                {"key": a.string(f"{KEY}; without it, all of them.")},
             ),
             ActionSpec(
                 "update",
                 "Change a setting at the user's request; cites names the message that asked.",
                 {
-                    "key": KEY,
+                    "key": a.string(f"{KEY}."),
                     "value": a.any_of(
                         "The new value in the setting's type; null clears a nullable setting.",
                         a.BOOLEAN,
@@ -114,6 +114,7 @@ SPEC = tool(
                 },
                 ("key", "cites"),
                 ORCHESTRATOR,
+                own_tool=True,
             ),
         ),
     )

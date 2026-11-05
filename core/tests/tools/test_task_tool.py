@@ -239,6 +239,19 @@ def test_orchestrator_cannot_claim_and_researcher_cannot_create(call, goal):
 # --- waits, questions and messages --------------------------------------------------------
 
 
+def test_a_task_actions_own_tool_goes_through_the_same_transition(call, goal, code_repo):
+    """``transitions`` reads the stored arguments' ``action``, so the own tool must supply it."""
+    call("task", task_args())
+    claim(call)
+    waiting = call(
+        "task_wait",
+        {"task": "T-1", "kind": "xp", "detail": "2 requests", "ref": ["xp-1"]},
+        role="researcher",
+        session_id="r1",
+    )
+    assert waiting["record"]["waiting_on"]["kind"] == "xp"
+
+
 def test_wait_ask_answer_and_message(call, goal, code_repo):
     call("task", task_args())
     claim(call)

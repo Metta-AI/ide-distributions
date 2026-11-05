@@ -7,7 +7,7 @@ judging is the same (``write_actions.is_judged`` and ``judge``), read from the S
 messages. A run is stopped as soon as the judged call is seen, so a case costs what it took to
 get there, and what is judged is the call a model composes, not what the real tool then answered:
 that also depends on the seeded records (a Researcher's Session holds its Task but has no worker
-execution, so the real ``task.ask`` refuses it). ``test_real_session.py`` runs the cases.
+execution, so the real ``task_ask`` refuses it). ``test_real_session.py`` runs the cases.
 
 A recovery case needs refused calls already in the history, and the runs API takes only text
 history, so those rows are written into the profile's ``state.db`` before the first run, in the
@@ -282,6 +282,7 @@ class RealGateway:
         schemas = harness.ShippedSchemas()
         rows = [{"role": "user", "content": instruction}]
         rows += write_actions.refused_history(case, schemas)
+        tool_name = schemas.outgoing(case.role, case.tool, case.refused)[0]
         connection = sqlite3.connect(self.state_db(case.role), timeout=30)
         try:
             for index, row in enumerate(rows):
@@ -295,7 +296,7 @@ class RealGateway:
                         row.get("content"),
                         row.get("tool_call_id"),
                         json.dumps(tool_calls) if tool_calls else None,
-                        case.tool if row["role"] == "tool" else None,
+                        tool_name if row["role"] == "tool" else None,
                         time.time() + index * 0.001,
                     ),
                 )
@@ -333,7 +334,8 @@ class RealGateway:
     def force_refusals(self, case: Case, text: str) -> str:
         """Script the case's refused calls; returns the message whose conversation gets them."""
         marked = f"{text} (request {next(RUN_NUMBERS)})"
-        self.forcing.scripts[marked] = [ForcedCall(case.tool, case.refused)] * case.refusals
+        forced = harness.ShippedSchemas().outgoing(case.role, case.tool, case.refused)
+        self.forcing.scripts[marked] = [ForcedCall(*forced)] * case.refusals
         return marked
 
     def run_case(self, model: str, case: Case) -> harness.Result:
@@ -397,8 +399,10 @@ class RealGateway:
         for message in stored:
             for raw in message.get("tool_calls") or []:
                 call = harness._call(raw)
-                args = call.arguments or {}
-                if write_actions.is_judged(case, call.name, args):
+                name, args = harness.ShippedSchemas().canonical(
+                    case.role, call.name, call.arguments or {}
+                )
+                if write_actions.is_judged(case, name, args):
                     result.outcome, result.detail = write_actions.judge(case, call, args)
                     result.reasoning_gaps = write_actions.gaps_in_reasoning(
                         case, args, harness.reasoning_of(message)

@@ -11,8 +11,8 @@ decisions is `docs/plans/ide-profile-refactor/`.
   profile puts `core/src` on `sys.path`, from the path `prepare.py` records). Everything the plugin
   touches in process must import without third-party packages: `layout`, `refs`, `store/*`,
   `plugin/*`, `tools/base.py` and the in-process tools (`goal`, `task`, `directive`, `claim`,
-  `settings`, `ui`). `core/tests/test_tool_budget.py` enforces it. The catalog imports every tool
-  module, and a module that fails to import stops whatever asked for the tools: the prompt build,
+  `settings`, `ui`, and the tools split from their actions). `core/tests/test_tool_budget.py`
+  enforces it. The catalog imports every tool module, and a module that fails to import stops whatever asked for the tools: the prompt build,
   the tests or, on a gateway, the plugin (`test_broken_tool_module_real.py`: Hermes logs "Failed to
   load plugin" and serves on, with none of that profile's tools or hooks).
 - **The workspace environment** (`$IDE_WORKSPACE/tools/venv`, built by `prepare.py` from the
@@ -105,7 +105,7 @@ nowhere.
 
 - **Tool:** a module under `tools/` with `SPEC = tool(ToolSpec(...))`, listed in
   `catalog.TOOL_MODULES`; in-process tools stay stdlib only; `core/tests/test_tool_budget.py`
-  pins the role sets (17 Orchestrator, 14 Researcher) and the executor table; run
+  pins the role sets (26 Orchestrator, 23 Researcher) and the executor table; run
   `uv run python tools/build_prompts.py --write --manifests`. Describe the tool, every field
   and every key, shortly: every request carries the whole list. Build field schemas with
   `tools/_args.py`: an object field lists its keys (`obj`, `objects`; `free_object` only for
@@ -114,11 +114,28 @@ nowhere.
   In a multi-action tool a field shared by actions keeps one shape, and `ToolSpec.properties`
   adds which actions require or take it, and lists each action with its required fields in the
   `action` description; `core/tests/tools/test_tool_schemas.py` checks all of this.
+- **An action with a tool of its own:** `own_tool=True` on its `ActionSpec` registers
+  `<tool>_<action>`, a flat tool with the action's fields, whose schema marks the required ones
+  required, which a multi-action schema cannot. It runs the same handler, as the same grouped call.
+  The grouped tool stops offering the action and still runs a call that names it, because stored
+  chats show that shape; refusing such a call, it shows the flat tool. Prompts and skills name the
+  flat tool (`test_tool_signatures.py` checks), and telemetry reports the grouped tool and action.
+  Thirteen actions have one: the ones weak models got wrong and `claim_write`. It costs prompt size
+  and counts against `catalog.TOOL_BUDGET`, so add one only for a measured failure. Measured on
+  2026-11-05 against the grouped form, 6 to 10 repeats per case: Kimi K3 first try 81/216 against
+  185/216, Kimi K3.1 Pro no difference (160/162 against 161/162, findability 91/100 against 94/100),
+  about 1,200 more prompt tokens per request.
+  Some Kimi K3 `experiment_create` calls repeat text inside `hypothesis.statement` until the output
+  limit (`MAX_RESPONSE_TOKENS`). Measured at that limit on Moonshot on 2026-11-05: Kimi K3 2/14,
+  and 2/8 with a description asking for one short sentence per key, so the description was not
+  kept; Kimi K3.1 Pro 0/12. Each costs about $0.27. Hermes v0.22.6 sends a cut-off call again up to
+  4 times, then ends the turn with nothing run, so one call costs at most about $1.35.
 - **Record:** a migration (`store/migrations/<kind>/NNNN_*.sql`), a module under `store/`, a
   `RecordSpec` in `store/registry.py`, its event kinds in `store/events.py`, and a tool action.
 - **Skill:** `skills/<root>/<category>/<name>/SKILL.md` with `name` equal to the directory and a
   one-sentence `description` of at most 60 characters; `tools/check_prompts.py` checks it.
 - **A call shown in a prompt, skill, task type or wake:** write it as
-  `tool.action {a, b: value, c?, d | e, f {g, h}}`, in backticks. Every name must exist on that action,
+  `tool.action {a, b: value, c?, d | e, f {g, h}}`, or `tool_action {...}` for an action with a
+  tool of its own, in backticks. Every name must exist on that action,
   and the signature must name every required field and key; end it with `...` when it shows only
   part of the call on purpose. `core/tests/test_tool_signatures.py` checks this, and that example values fit a field's enum, and says the rules in full.

@@ -36,7 +36,7 @@ def test_a_frozen_enum_value_the_validator_refuses_is_reported(drift_tool):
 
 def test_a_required_nested_key_missing_from_the_frozen_schema_is_reported(drift_tool):
     tools = copy.deepcopy(current_tools())
-    claim = next(t for t in tools if t["function"]["name"] == "claim")
+    claim = next(t for t in tools if t["function"]["name"] == "claim_write")
     del claim["function"]["parameters"]["properties"]["evidence"]["items"]["properties"]["stance"]
     assert any("evidence.stance" in str(d) for d in drift_tool.compare(ROLE, tools))
 
@@ -46,7 +46,7 @@ def test_a_required_nested_key_missing_from_the_frozen_schema_is_reported(drift_
 )
 def test_frozen_items_that_cannot_hold_the_required_keys_are_reported(drift_tool, frozen_items):
     tools = copy.deepcopy(current_tools())
-    claim = next(t for t in tools if t["function"]["name"] == "claim")
+    claim = next(t for t in tools if t["function"]["name"] == "claim_write")
     claim["function"]["parameters"]["properties"]["evidence"]["items"] = frozen_items
     assert any("evidence.stance" in str(d) for d in drift_tool.compare(ROLE, tools))
 
@@ -161,3 +161,10 @@ def test_the_command_reads_a_copied_state_db(drift_tool, tmp_path, capsys):
     assert "legacy" not in output
     assert drift_tool.main([str(db), "--role", ROLE, "--session", "new-chat"]) == 0
     assert "0 disagreement(s)" in capsys.readouterr().out
+
+
+def test_a_frozen_enum_still_offering_an_own_tool_action_is_checked_for_its_fields(drift_tool):
+    tools = copy.deepcopy(current_tools())
+    claim = next(t for t in tools if t["function"]["name"] == "claim")
+    claim["function"]["parameters"]["properties"]["action"]["enum"].append("write")
+    assert any("summary" in str(d) for d in drift_tool.compare(ROLE, tools))

@@ -112,6 +112,7 @@ def test_pinned_hermes_stages_and_reads_native_attachment(hermes_bin, tmp_path):
     script = r"""
 import base64
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -194,6 +195,11 @@ assert "Existing conversation stays intact." in json.dumps(history), history
 assert target.read_text() == marker
 assert call("session.close", {"session_id": resumed["session_id"]})["closed"]
 print("PASS native attachment staging, reference expansion, file read and session resume")
+# Hermes's server threads can keep a normal exit waiting until the timeout. Shutdown is not under
+# test here, and a hung exit failed CI on main and on several branches.
+sys.stdout.flush()
+sys.stderr.flush()
+os._exit(0)
 """
     result = subprocess.run(
         [str(hermes_bin.parent / "python"), "-c", script, str(workspace)],

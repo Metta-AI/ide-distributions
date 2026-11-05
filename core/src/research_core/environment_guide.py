@@ -176,7 +176,7 @@ def _reaching_the_user(role: str) -> list[str]:
         ]
     else:
         lines += [
-            "- Researchers never talk to the user directly: `task.ask` puts a question on the "
+            "- Researchers never talk to the user directly: `task_ask` puts a question on the "
             "Task for the Orchestrator, and the Task's result reports the outcome.",
         ]
     lines.append("")
@@ -189,7 +189,7 @@ def _sleep_and_wake() -> list[str]:
         "",
         f"- The watcher runs every {WATCHER_TICK_S} seconds (a Hermes cron job without a model). "
         "It starts Task runs, resolves waits, recovers dead runs and runs capability checks.",
-        "- `task.wait` ends your run; the same Session resumes with its history when the wait "
+        "- `task_wait` ends your run; the same Session resumes with its history when the wait "
         "resolves. Nothing you started in the foreground survives the end of a run.",
         "- Long mixin commands run detached with their output in a log file; a result with "
         "`background` means the command outlived the tool budget and is still running.",

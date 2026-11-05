@@ -165,9 +165,8 @@ class ScriptedAgent:
                 self.call(ctx, "ui", {"action": "show", "ref": goal_id})
                 self.call(
                     ctx,
-                    "ui",
+                    "ui_panel_set",
                     {
-                        "action": "panel_set",
                         "panel": "goal-brief",
                         "kind": "markdown",
                         "content": f"# {goal_id}\n\nMade from your message: {excerpt}\n\n"

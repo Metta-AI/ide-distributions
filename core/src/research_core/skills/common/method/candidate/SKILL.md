@@ -26,7 +26,7 @@ A Version is a policy candidate built on purpose: a commit in the code repositor
 
 `build` runs with a 240-second budget. Past it, `version.create` answers `{"ok": true, "background": {"pid", "log", "resume"}}` and the build keeps running.
 
-- A Researcher calls `task.wait {task, kind: process, ref: <pid>, detail: "build of <commit>"}` and ends its run, even if the build looks close to done; on resume it calls `version.create {summary, resume: <token>}` with the first call's other arguments too, to record the Version.
+- A Researcher calls `task_wait {task, kind: process, ref: <pid>, detail: "build of <commit>"}` and ends its run, even if the build looks close to done; on resume it calls `version.create {summary, resume: <token>}` with the first call's other arguments too, to record the Version.
 - The Orchestrator reads the log, finishes other work and calls `version.create {summary, resume}` with the first call's other arguments once the process has ended.
 - Never launch the build again because it has not finished; the log under `documents/logs/` shows progress.
 

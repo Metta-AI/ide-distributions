@@ -32,8 +32,8 @@ Where you are (the workspace root and the session's Coworld's folder), the image
 ## Sleep, wake and limits
 
 - Neither profile has a turn or time limit, but a tool call has about 400 seconds, and a mixin command 240 seconds before it is backgrounded with a log and a resume token (the `candidate` skill has the protocol). Results carry the log path and a 2,000-character tail.
-- The watcher ticks every minute: it resumes Sessions whose wait resolved, runs due checks, merges reviewed Tasks and syncs the champion every ten minutes. A Session that ends on `task.wait` is asleep, not finished.
-- Reaching the user: the Orchestrator through the conversation or `ui.notify`; a Researcher only through its Task (`task.ask`, the result). Wakes never write into a chat.
+- The watcher ticks every minute: it resumes Sessions whose wait resolved, runs due checks, merges reviewed Tasks and syncs the champion every ten minutes. A Session that ends on `task_wait` is asleep, not finished.
+- Reaching the user: the Orchestrator through the conversation or `ui.notify`; a Researcher only through its Task (`task_ask`, the result). Wakes never write into a chat.
 - `paused` stops background starts; the user's requests in a turn still run.
 
 ## Native terminal store commands

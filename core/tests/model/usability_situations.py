@@ -803,7 +803,7 @@ XP_ACCEPTED = ok(
     credits="credits: 838 available of 1000; 162 spent this period",
     estimate={"episodes": 2, "credits": 2.0},
     warnings=[],
-    next="task.wait {task, kind: xp, detail: 'XP requests for X-5', ref: "
+    next="task_wait {task, kind: xp, detail: 'XP requests for X-5', ref: "
     '["xreq_1", "xreq_2"]} and end your run; the watcher resumes you when they finish, then '
     "xp.status stores the rows",
 )
@@ -833,7 +833,7 @@ CREDITS_REFUSAL = json.dumps(
         "created": [],
         "reconciled": [],
         "runs": [],
-        "next": "task.wait {task, kind: credits, detail: 'XP requests for X-5: need 2.00 credits'} "
+        "next": "task_wait {task, kind: credits, detail: 'XP requests for X-5: need 2.00 credits'} "
         "and end your run; the watcher resumes you when the balance covers it",
     }
 )

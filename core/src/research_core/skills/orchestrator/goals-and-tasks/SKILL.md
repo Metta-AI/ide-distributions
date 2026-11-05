@@ -15,7 +15,7 @@ something that can be judged: "a Version beats the champion by 2 points of mean 
 episodes with the mixin's guardrails met", not "improve the policy". `reason` is the user's
 words or your reading of them; `judgement` says how the end state will be checked (which metric,
 which Experiment design). Keep `where_it_stands` current with `goal.update` after each review.
-`goal.set_status {goal, status, status_reason}` to park (waiting on the user or on credits), complete (the end state was met; cite the Experiment) or abandon.
+`goal_set_status {goal, status, status_reason}` to park (waiting on the user or on credits), complete (the end state was met; cite the Experiment) or abandon.
 
 A read-only question needs no Goal. A request that takes more than a turn does.
 
@@ -40,7 +40,7 @@ you reopen the Task.
 
 ## Proposals
 
-Researchers propose with `task.propose`; a management wake brings each one to you. Read it, then
+Researchers propose with `task_propose`; a management wake brings each one to you. Read it, then
 `task.approve {task}` or `task.reject {task, next_step}` with what to do instead. When
 `approval_required.task_types` names the type, only the user can accept: ask them, and pass
 their message as `cites` in `task.approve` or `task.create`; without `cites` the Task stays
@@ -51,7 +51,7 @@ proposed. A Researcher's question arrives the same way: `task.answer
 
 A Goal with no open Task and nothing waiting on the user gets an ideation Task from a management
 wake. Each round raises `ideation_round`; when rounds without progress reach
-`ideation.park_after_rounds` (default 3), park the Goal with `goal.set_status` and tell the user
+`ideation.park_after_rounds` (default 3), park the Goal with `goal_set_status` and tell the user
 what was tried and what would unpark it. Progress is a confirmed Experiment or a merged change,
 not activity.
 
@@ -64,7 +64,7 @@ in its briefing; a Task in progress gets it only through `task.message`, so send
 tell the user running work will follow it. `directive.update` when the user changes it,
 `directive.retire` when they withdraw it, and `claim.retire` any older `preference` claim that contradicts.
 
-When a setting covers it, use the setting instead: `settings.update {key, value, cites}`, and
+When a setting covers it, use the setting instead: `settings_update {key, value, cites}`, and
 `cites` is the user's message, always. `settings.read` lists the keys with their scopes,
 such as `paused`, `max_researchers`, `approval_required.task_types` and the `submissions` keys.
 Settings bound only the agents' own initiative; nothing the user asks for in a turn is refused by one.
@@ -76,6 +76,6 @@ ask for it.
 
 ## Abandoning
 
-`task.abandon {task, failure: {what_failed, next_step}}` for a Task that should not continue; a
+`task_abandon {task, failure: {what_failed, next_step}}` for a Task that should not continue; a
 held run is stopped by the watcher. Both fields are read by people: "rejected by the user: the
 Goal changed" and "fold the opening analysis into T-12", not "dropped".

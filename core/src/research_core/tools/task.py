@@ -66,8 +66,11 @@ CREATE_PARAMS = {
     "description": a.string("What to do and deliver, in Markdown."),
     "reasoning": a.string("Why, with references to the Goal, claims and Experiments."),
     "for_human": a.string("One plain sentence that clients show."),
-    "end_condition": a.string("How the Task ends.", enum=["deliverable", "steps", "effort"]),
-    "end_detail": a.string("The detail of the end condition."),
+    "end_condition": a.string(
+        "How the Task ends. Sending it requires end_detail too.",
+        enum=["deliverable", "steps", "effort"],
+    ),
+    "end_detail": a.string("What done means under end_condition. Required with end_condition."),
     "experiment": EXPERIMENT,
     "priority": a.string("Default normal.", enum=["normal", "high"]),
     "depends_on": a.strings('Tasks that must complete first, such as ["T-1"].'),
@@ -403,6 +406,7 @@ SPEC = durable_tool(
                 CREATE_PARAMS,
                 ("type", "title", "description"),
                 example_fields=("goal",),
+                own_tool=True,
             ),
             ActionSpec(
                 "approve",
@@ -443,6 +447,7 @@ SPEC = durable_tool(
                 {"task": TASK, "failure": {**FAILURE, "description": "Why it is dropped."}},
                 ("task", "failure"),
                 ORCHESTRATOR,
+                own_tool=True,
             ),
             ActionSpec(
                 "review",
@@ -490,6 +495,7 @@ SPEC = durable_tool(
                 },
                 ("task", "kind", "detail"),
                 RESEARCHER,
+                own_tool=True,
             ),
             ActionSpec(
                 "ask",
@@ -497,6 +503,7 @@ SPEC = durable_tool(
                 {"task": TASK, "question": a.string("The question.")},
                 ("task", "question"),
                 RESEARCHER,
+                own_tool=True,
             ),
             ActionSpec(
                 "complete",
@@ -526,10 +533,12 @@ SPEC = durable_tool(
                 "release",
                 "Give the Task back unfinished because you must not continue, such as when a "
                 "directive forbids the only path; your run is stopped, then it goes back to "
-                "scheduling. If you tried and it did not work, use complete with outcome failed.",
+                "scheduling. If you tried and it did not work, use task.complete with outcome "
+                "failed.",
                 {"task": TASK, "reason": a.string("Why you must not continue.")},
                 ("task", "reason"),
                 RESEARCHER,
+                own_tool=True,
             ),
             ActionSpec(
                 "propose_submission",
@@ -541,6 +550,7 @@ SPEC = durable_tool(
                 },
                 ("task", "version", "reason"),
                 RESEARCHER,
+                own_tool=True,
             ),
             ActionSpec(
                 "read",

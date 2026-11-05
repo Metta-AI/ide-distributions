@@ -9,11 +9,11 @@ closes on (``tools/experiment.py``: ``results.rows`` objects with ``episode_id``
 ``opponents``, ``metrics``, ``status``, ``reason``).
 
 Rules the tool keeps (A4.4): it never puts a Task on a wait itself; a Researcher calls
-``task.wait {kind: xp, ref: [...]}`` and ends its run, or ``task.wait {kind: credits}`` after a
+``task_wait {kind: xp, ref: [...]}`` and ends its run, or ``task_wait {kind: credits}`` after a
 credits refusal. There is no local credits pre-check: the platform's refusal (402) is the
 refusal, reported with the balance, the held amount and the next refill. The
 ``xp.ask_above_requests_per_experiment`` setting never refuses: above it the Orchestrator gets
-a warning and proceeds, a Researcher gets ``ask_orchestrator`` and a ``task.ask`` suggestion.
+a warning and proceeds, a Researcher gets ``ask_orchestrator`` and a ``task_ask`` suggestion.
 
 Every create is an intent (B.13): ``intents.begin(kind="xp", key="X-<n>:<seed>:<arm>")``
 before the call, saving the exact body and a unique idempotency key locally. Recovery
@@ -345,7 +345,7 @@ def _ask_orchestrator(record: dict, counts: dict) -> dict:
         ),
         "ask_orchestrator": True,
         "counts": counts,
-        "suggest": "task.ask {task: "
+        "suggest": "task_ask {task: "
         + (f"T-{task}" if task else "<your Task>")
         + f", question: {question!r}}}",
     }
@@ -368,7 +368,7 @@ def _credits_refused(
         need = f": need {cost:.2f} credits" if cost else ""
         when = "the balance covers it" if cost else "the balance is above zero"
         next_step = (
-            f"task.wait {{task, kind: credits, detail: 'XP requests for {record['id']}{need}'}} and"
+            f"task_wait {{task, kind: credits, detail: 'XP requests for {record['id']}{need}'}} and"
             f" end your run; the watcher resumes you when {when}"
         )
     else:
@@ -395,7 +395,7 @@ def _next_after_request(ctx: ToolContext, record: dict, pending_ids: list[str]) 
         )
     if ctx.role == "researcher":
         return (
-            f"task.wait {{task, kind: xp, detail: 'XP requests for {record['id']}', ref:"
+            f"task_wait {{task, kind: xp, detail: 'XP requests for {record['id']}', ref:"
             f" {json.dumps(pending_ids)}}} and end your run; the watcher resumes you when they"
             " finish, then xp.status stores the rows"
         )
@@ -525,7 +525,7 @@ def _finish_evaluate(
                 "output_tail": result.output_tail,
             },
             "next": (
-                f"evaluate is still running (pid {result.pid}); a Researcher calls task.wait"
+                f"evaluate is still running (pid {result.pid}); a Researcher calls task_wait"
                 f" {{task, kind: process, detail: 'evaluate', ref: {result.pid}}} and ends its"
                 " run; when it has ended, xp.status {resume: <token>} finishes it"
             ),
@@ -616,8 +616,8 @@ def _report(record: dict, note: str | None = None) -> dict:
         )
     elif pending:
         report["next"] = (
-            f"{len(pending)} requests still run; a Researcher calls task.wait {{task, kind: xp,"
-            " detail, ref}} and ends its run, an Orchestrator tries later"
+            f"{len(pending)} requests still run; a Researcher calls task_wait {{task, kind: xp,"
+            " detail, ref} and ends its run, an Orchestrator tries later"
         )
     return report
 

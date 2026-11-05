@@ -130,9 +130,10 @@ def _compare_tool(role: catalog.Role, spec: ToolSpec, parameters: dict) -> list[
         frozen_actions = (frozen.get("action") or {}).get("enum") or []
         for action in spec.actions_for(role):
             if action.name not in frozen_actions:
-                found.append(
-                    Drift(spec.name, action.name, "deployed action not in the frozen enum")
-                )
+                if not action.own_tool:  # no longer offered here, so a newer enum lacks it
+                    found.append(
+                        Drift(spec.name, action.name, "deployed action not in the frozen enum")
+                    )
                 continue
             found.extend(
                 Drift(spec.name, action.name, f"{f}: {MISSING}")
@@ -145,7 +146,7 @@ def _compare_tool(role: catalog.Role, spec: ToolSpec, parameters: dict) -> list[
             for name in frozen_actions
             if name not in allowed
         )
-    deployed = spec.properties(role)
+    deployed = spec.checked_fields(role)
     known = set(deployed) | {name for action in spec.actions or () for name in action.params}
     for name, schema in frozen.items():
         if name not in known:

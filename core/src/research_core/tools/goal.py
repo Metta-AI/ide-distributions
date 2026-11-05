@@ -103,6 +103,7 @@ SPEC = tool(
                 },
                 ("goal", "status", "status_reason"),
                 ORCHESTRATOR,
+                own_tool=True,
             ),
             ActionSpec(
                 "read", "Read a Goal with its computed progress.", {"goal": GOAL}, ("goal",)

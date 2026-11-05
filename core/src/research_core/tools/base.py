@@ -12,6 +12,9 @@ That refusal says what the call sent and carries ``usage`` (the action's require
 fields and an example call), so a model can fix the call in one try instead of repeating it.
 Empty placeholders for fields the action does not take are dropped, not refused.
 
+An action marked ``own_tool`` is also a flat tool, ``<tool>_<action>``, running the same handler as
+the same grouped call (:func:`own_tool`). A flat tool has no ``action`` field and refuses one.
+
 Store-only tools run inside Hermes, with the packaged OpenTelemetry SDK.
 """
 
@@ -22,7 +25,7 @@ import os
 import re
 import traceback
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -68,6 +71,10 @@ class ActionSpec:
     # Fields a call may still carry but no schema or refusal offers: code fills them in now, and
     # a chat keeps the tool schema it started with, so an open one may send them for a while.
     hidden_params: dict[str, dict] = field(default_factory=dict)
+    # Offered as a tool of its own, ``<tool>_<action>`` (:func:`own_tool`), whose schema can mark
+    # the required fields as required, which the grouped tool's schema cannot. The grouped tool no
+    # longer offers the action but still runs a call that names it.
+    own_tool: bool = False
 
 
 @dataclass(frozen=True)
@@ -83,9 +90,24 @@ class ToolSpec:
     # Wall-clock budget of a workspace-executor call; None means the executor default (400 s,
     # under Hermes's 420 s tool deadline). Long mixin commands run detached instead (A3.2).
     timeout_s: int | None = None
+    # Fields the handler needs in some form beyond ``required``; see ActionSpec.example_fields.
+    example_fields: tuple[str, ...] = ()
+    # For a tool made by :func:`own_tool`: the grouped tool and the action it stands for, and the
+    # action's hidden fields, so a retry of an older grouped call can keep its operation_id.
+    split_from: tuple[str, str] | None = None
+    hidden_params: dict[str, dict] = field(default_factory=dict)
 
     def actions_for(self, role: Role) -> list[ActionSpec]:
+        """Every action a call may name for this role, offered here or as a tool of its own."""
         return [action for action in self.actions or () if role in action.roles]
+
+    def grouped_actions(self, role: Role) -> list[ActionSpec]:
+        """The actions this tool's schema offers."""
+        return [action for action in self.actions_for(role) if not action.own_tool]
+
+    def own_tools(self, role: Role) -> list[str]:
+        """The tools of this role's actions that have one of their own."""
+        return [f"{self.name}_{a.name}" for a in self.actions_for(role) if a.own_tool]
 
     def action(self, name: str) -> ActionSpec | None:
         for action in self.actions or ():
@@ -102,7 +124,7 @@ class ToolSpec:
         """
         properties: dict[str, dict] = {}
         if self.actions is not None:
-            actions = self.actions_for(role)
+            actions = self.grouped_actions(role)
             properties["action"] = {
                 "type": "string",
                 "enum": [action.name for action in actions],
@@ -126,16 +148,20 @@ class ToolSpec:
 
     def accepted(self, action: ActionSpec | None) -> dict[str, dict]:
         """The fields one call may carry: the offered ones plus the action's hidden ones."""
-        return {**self.offered(action), **(action.hidden_params if action else {})}
+        return {**self.offered(action), **(action.hidden_params if action else self.hidden_params)}
 
     def checked_fields(self, role: Role) -> dict[str, dict]:
-        """The shapes arguments are checked against: the offered fields, then the hidden ones."""
-        hidden = {
+        """The shapes arguments are checked against: the offered fields, then the others a call may
+        still carry (hidden ones, and the fields of actions that have their own tool)."""
+        others = {
             name: schema
             for action in self.actions or ()
-            for name, schema in action.hidden_params.items()
+            for name, schema in (
+                *action.hidden_params.items(),
+                *(action.params.items() if action.own_tool else ()),
+            )
         }
-        return {**hidden, **self.properties(role)}
+        return {**self.hidden_params, **others, **self.properties(role)}
 
     def schema(self, role: Role) -> dict:
         """The OpenAI function body Hermes registers: name, description, parameters."""
@@ -149,7 +175,42 @@ class ToolSpec:
         }
         if required:
             parameters["required"] = required
-        return {"name": self.name, "description": self.description, "parameters": parameters}
+        own = self.own_tools(role)
+        note = f" Other changes have their own tools: {', '.join(own)}." if own else ""
+        return {
+            "name": self.name,
+            "description": self.description + note,
+            "parameters": parameters,
+        }
+
+
+def first_sentence(text: str) -> str:
+    head, dot, _ = text.partition(". ")
+    return head + "." if dot else text
+
+
+def own_tool(grouped: ToolSpec, action: ActionSpec) -> ToolSpec:
+    """One action of ``grouped`` as a flat tool: its fields, its required ones really required,
+    the same handler."""
+
+    def run_action(call: ToolCall) -> dict:
+        # The handler and what it records (a transition's stored arguments) see a grouped call.
+        args = {"action": action.name, **call.args}
+        return grouped.handler(replace(call, spec=grouped, action=action.name, args=args))
+
+    return ToolSpec(
+        name=f"{grouped.name}_{action.name}",
+        description=f"{first_sentence(grouped.description)} {action.description}",
+        handler=run_action,
+        roles=action.roles & grouped.roles,
+        executor=grouped.executor,
+        params={**action.params, **grouped.params},
+        required=(*action.required, *grouped.required),
+        timeout_s=grouped.timeout_s,
+        example_fields=action.example_fields,
+        split_from=(grouped.name, action.name),
+        hidden_params=action.hidden_params,
+    )
 
 
 def action_line(action: ActionSpec) -> str:
@@ -200,7 +261,11 @@ def field_description(name: str, taking: list[ActionSpec], action_count: int) ->
 
 
 def tool(spec: ToolSpec) -> ToolSpec:
-    """Register a tool in the catalog (used as ``SPEC = tool(ToolSpec(...))``)."""
+    """Register a tool in the catalog (used as ``SPEC = tool(ToolSpec(...))``), and the tools of
+    its actions marked ``own_tool``."""
+    for action in spec.actions or ():
+        if action.own_tool:
+            register(own_tool(spec, action))
     return register(spec)
 
 
@@ -294,11 +359,11 @@ def validate_args(
     action_name: str | None = None
     required = list(spec.required)
     if spec.actions is not None:
-        allowed = [action.name for action in spec.actions_for(role)]
+        allowed = [action.name for action in spec.grouped_actions(role)]
         raw = args.get("action")
         if raw is None:
             problems.append(f"action is required; one of {', '.join(allowed)}")
-        elif raw not in allowed:
+        elif raw not in [action.name for action in spec.actions_for(role)]:
             known = spec.action(str(raw))
             if known is not None:
                 problems.append(
@@ -309,7 +374,7 @@ def validate_args(
         else:
             action_name = str(raw)
             required.extend(spec.action(action_name).required)  # type: ignore[union-attr]
-    known = set(properties) | {
+    known = {*properties, *spec.hidden_params} | {
         name for action in spec.actions or () for name in (*action.params, *action.hidden_params)
     }
     accepted = spec.accepted(spec.action(action_name)) if action_name else None
@@ -429,17 +494,19 @@ def usage(spec: ToolSpec, role: Role, action: str | None) -> dict:
     call to copy. Without one: every action the role may use, with the fields each requires.
     """
     if spec.actions is not None and action is None:
+        own = spec.own_tools(role)
         return {
             "actions": {
                 a.name: {"does": a.description, "requires": list(a.required)}
-                for a in spec.actions_for(role)
-            }
+                for a in spec.grouped_actions(role)
+            },
+            **({"own_tools": own} if own else {}),
         }
     selected = spec.action(action) if action else None
     schemas = spec.offered(selected)
     required = [*(selected.required if selected else ()), *spec.required]
     optional = [name for name in schemas if name not in required]
-    names = [*required, *(selected.example_fields if selected else ())]
+    names = [*required, *(selected.example_fields if selected else spec.example_fields)]
     out = {
         **({"does": selected.description} if selected else {}),
         "required": _fields(schemas, required),
@@ -460,8 +527,12 @@ def argument_error(
 
     Models that keep repeating a broken call (seen with Kimi K3 on some OpenRouter hosts) need the
     fix spelled out, so the summary names what this call sent and the payload carries the usage.
+    A call naming an action that has its own tool is shown how to call that tool.
     """
-    received = sorted(k for k in args if k != "action")
+    received = sorted(k for k in args if k != "action" or spec.actions is None)
+    selected = spec.action(action) if action else None
+    if selected is not None and selected.own_tool:
+        spec, action = TOOLS[f"{spec.name}_{action}"], None
     label = f"{spec.name} {action}" if action else spec.name
     how_to = usage(spec, role, action)
     if "example" in how_to:
@@ -470,17 +541,23 @@ def argument_error(
             "with real values in place of each <...>."
         )
     elif "actions" in how_to:
-        fix = "Call again with one of the actions in usage.actions and the fields it requires."
+        fix = "Call again with one of the actions in usage.actions and the fields it requires"
+        fix += ", or one of the tools in usage.own_tools." if "own_tools" in how_to else "."
     else:
         fix = "Call again with every required field in one call; usage.required describes each."
+    nothing_sent = "no fields besides action" if spec.actions is not None else "no fields"
     summary = (
         f"{label} was not run, nothing changed: {'; '.join(problems)}. "
-        f"This call sent: {', '.join(received) or 'no fields besides action'}. {fix}"
+        f"This call sent: {', '.join(received) or nothing_sent}. {fix}"
     )
-    payload = error_payload(problems, {"tool": spec.name, "action": action, "received": received})
+    payload = error_payload(problems, {**tool_context(spec.name, action), "received": received})
     payload["error"] = summary
     payload["usage"] = how_to
     return payload
+
+
+def tool_context(name: str, action: str | None) -> dict:
+    return {"tool": name, **({"action": action} if action else {})}
 
 
 def error_payload(problems: list[str], context: dict | None = None) -> dict:
@@ -508,6 +585,7 @@ def run_tool(name: str, args: Mapping[str, Any], ctx: ToolContext) -> str:
     with telemetry.span("execute_tool", context=parent) as span:
         tool_name = "unknown"
         action = None
+        own_tool_action = None
         outcome = "internal_error"
         spec = None
         try:
@@ -516,7 +594,8 @@ def run_tool(name: str, args: Mapping[str, Any], ctx: ToolContext) -> str:
             if spec is None or ctx.role not in spec.roles:
                 outcome = "unknown_tool"
                 return json.dumps(error_payload([f"unknown tool {name!r} for the {ctx.role}"]))
-            tool_name = spec.name
+            # A tool of an action's own reports as the grouped tool and action it stands for.
+            tool_name, own_tool_action = spec.split_from or (spec.name, None)
             action, problems = validate_args(spec, ctx.role, args)
             if problems:
                 outcome = "validation_rejected"
@@ -538,20 +617,14 @@ def run_tool(name: str, args: Mapping[str, Any], ctx: ToolContext) -> str:
             except StoreError as error:
                 outcome = "store_rejected"
                 text = json.dumps(
-                    error_payload(
-                        list(error.problems) or [str(error)], {"tool": name, "action": action}
-                    )
+                    error_payload(list(error.problems) or [str(error)], tool_context(name, action))
                 )
             except Exception as error:  # the agent must see what failed, with context
                 outcome = "internal_error"
                 text = json.dumps(
                     error_payload(
                         [f"{type(error).__name__}: {error}"],
-                        {
-                            "tool": name,
-                            "action": action,
-                            "traceback": traceback.format_exc()[-2000:],
-                        },
+                        {**tool_context(name, action), "traceback": traceback.format_exc()[-2000:]},
                     )
                 )
             return ctx.scrub(text)
@@ -567,7 +640,10 @@ def run_tool(name: str, args: Mapping[str, Any], ctx: ToolContext) -> str:
                     "outcome": outcome,
                 }
             )
-            if spec is not None and spec.action(action) is not None and action is not None:
-                span.set_attribute("tool.action", action)
+            reported_action = own_tool_action or (
+                action if spec is not None and spec.action(action) is not None else None
+            )
+            if reported_action is not None:
+                span.set_attribute("tool.action", reported_action)
             if outcome != "succeeded":
                 span.set_status(StatusCode.ERROR)

@@ -141,7 +141,7 @@ def test_only_a_chat_is_told_to_ask_in_chat(tmp_path):
     assert f"Work only in {ctx.coworld().root}." in wake
     researcher = ToolContext.from_env("researcher", ctx.env)
     text = session_context.render(researcher, "unknown")
-    assert "ui." not in text and "task.ask" in text
+    assert "ui." not in text and "task_ask" in text
 
 
 def test_reactions_reach_the_agent_at_its_next_turn(tmp_path):

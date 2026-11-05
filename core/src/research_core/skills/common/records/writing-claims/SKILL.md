@@ -11,13 +11,13 @@ A claim is one finding with typed evidence. Everything you learn that someone wi
 
 `claim.search {query, tags?, include_retired: true}` before every write. A match means one of:
 
-- the same finding: `claim.add_evidence {claim, type, ref, stance, note}`; evidence can be added, but a claim's text and tags and its existing links do not change once written, so a changed finding is a new claim that supersedes it;
+- the same finding: `claim_add_evidence {claim, type, ref, stance, note}`; evidence can be added, but a claim's text and tags and its existing links do not change once written, so a changed finding is a new claim that supersedes it;
 - a finding this one replaces: write the new claim, then `claim.retire {claim: C-old, status: superseded, superseded_by: C-new}`;
 - a finding this one contradicts: write yours with the contradicting evidence; the pair shows as contested until one is refuted.
 
 ## Write
 
-`claim.write {summary, body, tags, evidence, see_also?}`:
+`claim_write {summary, body, tags, evidence, see_also?}`:
 
 - `summary`: at most 40 words, one sentence, the finding with its number and condition ("V-7 wins 58% against the champion over 40 paired seeds (CI 52–64), at the cost of 9% more timeouts").
 - `body`: at most 500 words. Detail, numbers with their n and comparison, the conditions, what you did not observe, and a closing paragraph "what would change our mind": the evidence that reopens or retires this finding. Negative and inconclusive results get the same care; they stop the next person repeating the work.

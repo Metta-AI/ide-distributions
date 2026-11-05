@@ -30,8 +30,8 @@ Work: every claim rests on at least one evidence link (`code` at a commit, `doc`
 at most 500; tag it with the Goal's tags. Retire what new evidence supersedes or refutes
 (`claim.retire`). Game-specific reading: see the mixin's `<coworld>-<binding>` skill or docs.
 
-Ask (`task.ask`) when the question itself is unclear or the Goal would change; decide method,
-scope and which claims to write yourself. A wait (`task.wait`) ends your run; the watcher
+Ask (`task_ask`) when the question itself is unclear or the Goal would change; decide method,
+scope and which claims to write yourself. A wait (`task_wait`) ends your run; the watcher
 resumes you.
 
 End: `task.complete {task, claims: ["C-12", "C-13"], result, merge: "no", merge_reason}`; a

@@ -7,14 +7,23 @@ requires_hermes: ">=0.21.6"
 # Kept in sync with the tool catalog by `python tools/build_prompts.py --manifests`.
 provides_tools:
   - claim
+  - claim_add_evidence
+  - claim_write
   - directive
   - experiment
+  - experiment_add_run
+  - experiment_create
   - forum_post
   - goal
   - platform
   - settings
   - softmax_api
   - task
+  - task_ask
+  - task_propose
+  - task_propose_submission
+  - task_release
+  - task_wait
   - upload
   - version
   - wiki_edit

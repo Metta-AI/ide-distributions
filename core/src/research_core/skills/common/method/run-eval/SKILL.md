@@ -35,7 +35,7 @@ Never conclude from a rung below the question's weight.
 2. Pin seats by explicit policy version id: `platform.active_policies {league, exclude_player: true}` lists the field, `platform.policy_versions` ours. "Latest" in a roster is a reproducibility hole.
 3. Cost: `platform.credits`; the request result carries an `estimate` (`credits` skill). Shrink seeds or split into batches before you start, keeping both arms of a seed together.
 4. `xp.request`. Each accepted request is recorded as a run at once; the result lists created, existing and pending ids. Repeating the call creates only the missing requests.
-5. `task.wait {task, kind: xp, detail: "X-n's requests", ref: [<request ids>]}` and end your run. Reading starts when the watcher resumes you: `xp.status {experiment}`.
+5. `task_wait {task, kind: xp, detail: "X-n's requests", ref: [<request ids>]}` and end your run. Reading starts when the watcher resumes you: `xp.status {experiment}`.
 6. Both arms of an A/B go out in the same window; when the binding gives a batch size, respect it.
 
 ## Footguns
@@ -43,4 +43,4 @@ Never conclude from a rung below the question's weight.
 - Sampled seats (`league`) in an A/B invalidate the comparison: the arms saw different fields.
 - A created or running request counts for nothing until its results are inspected.
 - A platform 4xx on a body means the route changed: read the error's detail and the `softmax-api-routes` skill, do not retry blind.
-- A request above the `xp.ask_above_requests_per_experiment` setting is a warning for the Orchestrator and a `task.ask` suggestion for a Researcher; it never refuses.
+- A request above the `xp.ask_above_requests_per_experiment` setting is a warning for the Orchestrator and a `task_ask` suggestion for a Researcher; it never refuses.

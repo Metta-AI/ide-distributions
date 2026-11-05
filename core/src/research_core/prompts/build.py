@@ -209,12 +209,16 @@ def tool_available(role: Role, ref: str) -> bool:
 
 
 def render_tools(role: Role) -> str:
-    """One line per tool the role has: its actions, or its inputs when it has none."""
+    """One line per tool the role has: its actions and the tools split from them, or its inputs
+    when it has none."""
     lines = []
     for spec in tools_for(role):
+        if spec.split_from is not None:
+            continue  # on the line of the tool it came from
         if spec.actions is not None:
-            names = ", ".join(action.name for action in spec.actions_for(role))
-            lines.append(f"- `{spec.name}`: {names}")
+            names = [action.name for action in spec.grouped_actions(role)]
+            names += [f"`{name}`" for name in spec.own_tools(role)]
+            lines.append(f"- `{spec.name}`: {', '.join(names)}")
         else:
             lines.append(f"- `{spec.name}` (inputs: {', '.join(spec.params) or 'none'})")
     return "\n".join(lines)
