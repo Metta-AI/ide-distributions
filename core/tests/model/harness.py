@@ -250,12 +250,14 @@ class ShippedSchemas:
         return [spec.schema(role) for spec in catalog.tools_for(role)]
 
     def canonical(self, role: Role, name: str, args: dict) -> tuple[str, dict]:
-        """A call to an action's own tool reads as the grouped tool and action, for the judging."""
+        """A call to an action's own tool reads as the grouped tool and action, for the judging.
+        One naming an action stays as it is: production refuses it, so it must not be judged valid.
+        """
         spec = catalog.TOOLS.get(name)
-        if spec is None or spec.split_from is None:
+        if spec is None or spec.split_from is None or "action" in args:
             return name, args
         tool, action = spec.split_from
-        return tool, {"action": action, **{k: v for k, v in args.items() if k != "action"}}
+        return tool, {"action": action, **args}
 
     def outgoing(self, role: Role, tool: str, args: dict) -> tuple[str, dict]:
         own_tool = catalog.TOOLS.get(f"{tool}_{args.get('action')}")

@@ -6,6 +6,7 @@ import pytest
 
 from research_core.tools import catalog
 from research_core.tools.base import run_tool, usage
+from tests.model import harness
 
 
 def tools():
@@ -141,3 +142,10 @@ def test_own_tool_text_stands_alone():
         fields = [p.get("description", "") for p in schema["parameters"]["properties"].values()]
         for text in (schema["description"], *fields):
             assert "action" not in text.lower(), (spec.name, text)
+
+
+def test_the_model_tests_do_not_judge_a_flat_call_naming_an_action_as_valid():
+    schemas = harness.ShippedSchemas()
+    assert schemas.canonical("researcher", "task_ask", {"task": "T-1"})[0] == "task"
+    named = {"action": "release", "task": "T-1"}
+    assert schemas.canonical("researcher", "task_ask", named) == ("task_ask", named)

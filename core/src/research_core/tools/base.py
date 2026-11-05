@@ -92,8 +92,10 @@ class ToolSpec:
     timeout_s: int | None = None
     # Fields the handler needs in some form beyond ``required``; see ActionSpec.example_fields.
     example_fields: tuple[str, ...] = ()
-    # For a tool made by :func:`own_tool`: the grouped tool and the action it stands for.
+    # For a tool made by :func:`own_tool`: the grouped tool and the action it stands for, and the
+    # action's hidden fields, so a retry of an older grouped call can keep its operation_id.
     split_from: tuple[str, str] | None = None
+    hidden_params: dict[str, dict] = field(default_factory=dict)
 
     def actions_for(self, role: Role) -> list[ActionSpec]:
         """Every action a call may name for this role, offered here or as a tool of its own."""
@@ -146,7 +148,7 @@ class ToolSpec:
 
     def accepted(self, action: ActionSpec | None) -> dict[str, dict]:
         """The fields one call may carry: the offered ones plus the action's hidden ones."""
-        return {**self.offered(action), **(action.hidden_params if action else {})}
+        return {**self.offered(action), **(action.hidden_params if action else self.hidden_params)}
 
     def checked_fields(self, role: Role) -> dict[str, dict]:
         """The shapes arguments are checked against: the offered fields, then the others a call may
@@ -159,7 +161,7 @@ class ToolSpec:
                 *(action.params.items() if action.own_tool else ()),
             )
         }
-        return {**others, **self.properties(role)}
+        return {**self.hidden_params, **others, **self.properties(role)}
 
     def schema(self, role: Role) -> dict:
         """The OpenAI function body Hermes registers: name, description, parameters."""
@@ -207,6 +209,7 @@ def own_tool(grouped: ToolSpec, action: ActionSpec) -> ToolSpec:
         timeout_s=grouped.timeout_s,
         example_fields=action.example_fields,
         split_from=(grouped.name, action.name),
+        hidden_params=action.hidden_params,
     )
 
 
@@ -371,7 +374,7 @@ def validate_args(
         else:
             action_name = str(raw)
             required.extend(spec.action(action_name).required)  # type: ignore[union-attr]
-    known = set(properties) | {
+    known = {*properties, *spec.hidden_params} | {
         name for action in spec.actions or () for name in (*action.params, *action.hidden_params)
     }
     accepted = spec.accepted(spec.action(action_name)) if action_name else None

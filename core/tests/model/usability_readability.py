@@ -17,6 +17,8 @@ import re
 from dataclasses import dataclass
 
 from research_core.tools import catalog
+from research_core.tools.base import ToolSpec
+from research_core.tools.catalog import Role
 from tests.model import harness, usability_context
 
 REVIEW_TOOL = {
@@ -111,20 +113,20 @@ class Item:
 
 def items() -> list[Item]:
     found = [Item(f"skill:{s.name}", "skill", s.text) for s in usability_context.all_skills()]
-    # A tool split from a grouped one is asked about under the grouped one's questions.
+    # A tool split from a grouped one is read and asked about with the grouped one.
     for spec in catalog.tools_for("orchestrator"):
-        if spec.split_from is not None:
-            continue
-        schema = spec.schema("orchestrator")
-        found.append(
-            Item(f"tool:{spec.name}", "tool definition", json.dumps(schema, indent=1), schema)
-        )
+        if spec.split_from is None:
+            found.append(_tool_item(f"tool:{spec.name}", spec, "orchestrator"))
     task = next(s for s in catalog.tools_for("researcher") if s.name == "task")
-    schema = task.schema("researcher")
-    found.append(
-        Item("tool:researcher:task", "tool definition", json.dumps(schema, indent=1), schema)
-    )
+    found.append(_tool_item("tool:researcher:task", task, "researcher"))
     return found
+
+
+def _tool_item(item_id: str, spec: ToolSpec, role: Role) -> Item:
+    schema = spec.schema(role)
+    own = [catalog.TOOLS[name].schema(role) for name in spec.own_tools(role)]
+    text = json.dumps([schema, *own] if own else schema, indent=1)
+    return Item(item_id, "tool definition", text, schema)
 
 
 def _ask(prompt: str, tool: dict, model: str, provider: dict | None) -> harness.Reply:
@@ -241,7 +243,7 @@ QUESTIONS: dict[str, list[Question]] = {
     "skill:candidate": [
         q("How many seconds does a build run before it goes to the background?", r"240"),
         q("What does version.create do with a dirty tree?", r"refus"),
-        q("What does a Researcher call when a build goes to the background?", r"task\.wait"),
+        q("What does a Researcher call when a build goes to the background?", r"task_wait"),
     ],
     "skill:diagnose": [
         q("How many hypotheses should you propose?", r"(two to four|2\s*(-|–|to)\s*4)"),
@@ -310,7 +312,7 @@ QUESTIONS: dict[str, list[Question]] = {
     "skill:credits": [
         q("What does a batch cost, as a formula?", r"seeds", r"arms", r"episodes"),
         q("What HTTP status is the refusal?", r"402"),
-        q("What does a Researcher call after a refusal?", r"task\.wait"),
+        q("What does a Researcher call after a refusal?", r"task_wait"),
     ],
     "skill:expert-consultation": [
         q("Is a recommendation evidence?", r"\bno\b|never|not|advice"),
@@ -403,7 +405,7 @@ QUESTIONS: dict[str, list[Question]] = {
     ],
     "tool:claim": [
         q(
-            "What are the required arguments for add_evidence?",
+            "What are the required arguments for claim_add_evidence?",
             r"claim",
             r"type",
             r"\bref\b",
@@ -421,7 +423,12 @@ QUESTIONS: dict[str, list[Question]] = {
         q("What scope does add default to?", r"workspace"),
     ],
     "tool:experiment": [
-        q("What are the required arguments for create?", r"summary", r"hypothesis", r"methods"),
+        q(
+            "What are the required arguments for experiment_create?",
+            r"summary",
+            r"hypothesis",
+            r"methods",
+        ),
         q("What are the metric roles?", r"primary", r"guardrail", r"performance"),
         q("What does close do when verdict is omitted?", r"decision rule|rule"),
     ],
@@ -438,7 +445,7 @@ QUESTIONS: dict[str, list[Question]] = {
     "tool:goal": [
         q("What are the required arguments for create?", r"title", r"end_state", r"reason"),
         q("What are the possible statuses?", r"active", r"parked", r"completed", r"abandoned"),
-        q("What is required with set_status besides goal and status?", r"status_reason"),
+        q("What is required with goal_set_status besides goal and status?", r"status_reason"),
     ],
     "tool:platform": [
         q("Can this tool write?", r"\bno\b|reads? only|not"),
@@ -446,7 +453,7 @@ QUESTIONS: dict[str, list[Question]] = {
         q("Where does replay put the file?", r"documents/replays"),
     ],
     "tool:settings": [
-        q("Which argument names the user's message on update?", r"cites"),
+        q("Which argument names the user's message on settings_update?", r"cites"),
         q("What does read without a key do?", r"all|every|lists"),
         q("Do settings refuse what the user asks for?", r"\bno\b|never"),
     ],
@@ -473,7 +480,7 @@ QUESTIONS: dict[str, list[Question]] = {
     ],
     "tool:researcher:task": [
         q(
-            "What are the required arguments for wait?",
+            "What are the required arguments for task_wait?",
             r"task",
             r"kind",
             r"detail",
@@ -482,7 +489,7 @@ QUESTIONS: dict[str, list[Question]] = {
         q("Is merge needed when a Task succeeded?", r"yes|required"),
     ],
     "tool:ui": [
-        q("What are the required arguments for panel_set?", r"panel", r"kind", r"content"),
+        q("What are the required arguments for ui_panel_set?", r"panel", r"kind", r"content"),
         q("Does notify ask anything?", r"\bno\b|never|inform"),
         q("How does a wake report to the user?", r"notice|notify"),
     ],

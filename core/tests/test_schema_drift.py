@@ -161,3 +161,10 @@ def test_the_command_reads_a_copied_state_db(drift_tool, tmp_path, capsys):
     assert "legacy" not in output
     assert drift_tool.main([str(db), "--role", ROLE, "--session", "new-chat"]) == 0
     assert "0 disagreement(s)" in capsys.readouterr().out
+
+
+def test_a_frozen_enum_still_offering_an_own_tool_action_is_checked_for_its_fields(drift_tool):
+    tools = copy.deepcopy(current_tools())
+    claim = next(t for t in tools if t["function"]["name"] == "claim")
+    claim["function"]["parameters"]["properties"]["action"]["enum"].append("write")
+    assert any("summary" in str(d) for d in drift_tool.compare(ROLE, tools))

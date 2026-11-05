@@ -126,6 +126,15 @@ def test_a_repeat_through_the_other_form_of_the_tool_joins_the_command(ctx, no_w
     assert count(ctx, "tasks") == 1
 
 
+def test_an_explicit_operation_id_joins_the_command_through_the_other_form(ctx, no_wait):
+    """A chat frozen on the old schema sent one; its tools then refresh and it retries flat."""
+    fields = {"type": "maintenance", "title": "Repair", "description": "Fix", "operation_id": "op"}
+    first = call(ctx, {"action": "propose", **fields})
+    assert call(ctx, fields, tool="task_propose")["command_id"] == first["command_id"]
+    apply(ctx)
+    assert count(ctx, "tasks") == 1
+
+
 def test_a_repeat_after_the_gateway_died_returns_the_earlier_result(ctx, monkeypatch):
     with monkeypatch.context() as patch:
         die_before_the_reply(patch)
