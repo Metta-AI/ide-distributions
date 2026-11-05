@@ -311,6 +311,7 @@ def test_offline_situations_name_what_the_role_has():
         assert set(situation.skills) <= skills, situation.id
         known = _catalog_labels(situation.role) | usability_context.builtin_names() | {"text"}
         assert set(situation.acts) <= known, situation.id
+        assert set(situation.before) <= known, situation.id
 
 
 def test_offline_every_item_has_questions():

@@ -8,6 +8,8 @@ requests. Every call it makes before that is answered as a session would answer 
   refusal when the argument check refuses it, else ``write_actions.RESULT``;
 - a call named in ``situation.acts`` is judged by ``write_actions.judge``. Valid ends the run as
   ``right``; invalid gets the refusal and the model may try again, which is how recovery shows;
+- ``situation.before`` names writes that may sensibly come first; they are answered and the run
+  goes on;
 - any other call that changes something ends the run as ``wrong_act``: production would have
   acted on it.
 
@@ -35,9 +37,11 @@ from tests.model.usability_situations import Situation
 MAX_REQUESTS = 8
 HOST_RETRIES = 3
 TASK_ID = "T-21"
-# Hermes's tools that change nothing the session cannot redo; an edit is how work starts.
+# Hermes's tools that change nothing the session cannot redo; an edit is how work starts, and
+# models use execute_code to look around (every case seen on 2026-11-04 was a read).
 PREPARATION_BUILTINS = frozenset(
     {
+        "execute_code",
         "patch",
         "process_manage",
         "read_file",
@@ -56,9 +60,11 @@ PREPARATION_ACTIONS = frozenset({"workers", "command", "show", "notify", "reposi
 
 
 def label_of(name: str, args: dict | None) -> str:
-    """``tool.action`` for an action tool, else the tool's name."""
+    """``tool.action`` for an IDE action tool, else the tool's name."""
     action = (args or {}).get("action")
-    return f"{name}.{action}" if isinstance(action, str) else name
+    if isinstance(action, str) and name not in usability_context.builtin_names():
+        return f"{name}.{action}"
+    return name
 
 
 def is_preparation(name: str, args: dict | None) -> bool:
@@ -278,7 +284,7 @@ def _handle_call(
                 run.args_right = args_hold(situation.args, args or {})
             return None
         return _answer(situation, call, schemas)
-    if is_preparation(call.name, args) or call.name == "skills_list":
+    if is_preparation(call.name, args) or call.name == "skills_list" or label in situation.before:
         return _answer(situation, call, schemas)
     run.outcome, run.act, run.act_args = "wrong_act", label, args
     run.detail = call.raw[:300]

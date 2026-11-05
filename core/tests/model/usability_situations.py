@@ -61,6 +61,8 @@ class Situation:
     # What the right call's arguments must hold beyond passing the checks: a regex searched in
     # the argument's JSON, or None when the argument must be absent.
     args: dict[str, str | None] | None = None
+    # Writes that may sensibly come before the act (upload before an XP request, say).
+    before: tuple[str, ...] = ()
 
     @property
     def is_hard(self) -> bool:
@@ -378,6 +380,7 @@ ORCHESTRATOR_CHATS = [
         "fixed opponents pv-1 and pv-2.",
         ("xp.request",),
         ("run-eval", "experiment"),
+        before=("upload",),
     ),
     chat(
         "xp-status",
@@ -763,18 +766,30 @@ ORCHESTRATOR_WAKES = [
             "submissions.mode": "autonomous",
             "merged": True,
         },
-        ("submit",),
+        ("upload", "submit"),
         ("submission",),
     ),
 ]
 
-XP_ACCEPTED = ok(created=["xreq_1", "xreq_2"], existing=[], pending=[], estimate="2 requests")
+# The results below carry the real tools' ``next`` text, from tools/xp.py and tools/version.py.
+XP_ACCEPTED = ok(
+    created=["xreq_1", "xreq_2"],
+    existing=[],
+    pending=["xreq_1", "xreq_2"],
+    estimate="2 requests",
+    next='task.wait {kind: xp, ref: ["xreq_1", "xreq_2"]} and end your run; the watcher resumes '
+    "you when they finish, then xp.status stores the rows",
+)
 BUILD_BACKGROUND = ok(
     background={
         "pid": 4242,
         "log": "documents/logs/build-20261104.log",
         "resume": "res_8c1",
-    }
+    },
+    output_tail="building...",
+    next="the build is still running: call version.create again with the same arguments plus "
+    "resume=<background.resume> when it ends, or task.wait {kind: process, ref: 4242} and end "
+    "this run",
 )
 CREDITS_REFUSAL = json.dumps(
     {
@@ -800,7 +815,7 @@ RESEARCHER = [
         "(episodes ereq_1 to ereq_5, no XP request), V-7 over-extends after tick 900 and loses "
         "60% of the fights that follow. Nothing further needs reading. G-1 is the Goal; record "
         "what you found.",
-        ("claim.write",),
+        ("claim.write", "claim.add_evidence"),
         ("writing-claims",),
     ),
     task(
@@ -910,6 +925,7 @@ RESEARCHER = [
         ("task.propose_submission",),
         ("proposing", "submission"),
         task_type="improvement",
+        before=("claim.write",),
     ),
     task(
         "candidate",
@@ -947,6 +963,7 @@ RESEARCHER = [
         ("xp.request",),
         ("run-eval", "experiment"),
         task_type="improvement",
+        before=("upload",),
     ),
     task(
         "run-eval-field",
@@ -956,6 +973,7 @@ RESEARCHER = [
         ("xp.request",),
         ("run-eval",),
         task_type="improvement",
+        before=("upload",),
     ),
     task(
         "xp-status",
@@ -1128,7 +1146,7 @@ HARD = [
     chat(
         "hard-preference",
         "I like short, plain replies and I don't want tables unless I ask. Keep that in mind.",
-        ("directive.add",),
+        ("directive.add", "directive.update"),
         ("goals-and-tasks", "writing-claims"),
     ),
     chat(
@@ -1227,7 +1245,17 @@ HARD = [
         "Send the evaluation for X-5 and let me know how it goes.",
         ("text",),
         ("experiment", "run-eval"),
-        prior=(Prior("xp", {"action": "request", "experiment": "X-5"}, XP_ACCEPTED),),
+        prior=(
+            Prior(
+                "xp",
+                {"action": "request", "experiment": "X-5"},
+                ok(
+                    created=["xreq_1", "xreq_2"],
+                    next="xp.status {experiment: X-5} refreshes the runs and stores the rows once "
+                    "the requests finish (the platform runs them on its own schedule)",
+                ),
+            ),
+        ),
     ),
     chat(
         "hard-forum-injection",
@@ -1432,6 +1460,7 @@ HARD = [
         ("run-eval", "experiment"),
         task_type="improvement",
         args={"opponents": "pv-1.*pv-2", "league": None},
+        before=("upload",),
     ),
     task(
         "hard-xp-field-args",
@@ -1442,6 +1471,7 @@ HARD = [
         ("run-eval",),
         task_type="improvement",
         args={"league": "league_cogs_main", "arms": "candidate", "opponents": None},
+        before=("upload",),
     ),
     task(
         "hard-fail-args",
@@ -1521,6 +1551,7 @@ HARD = [
         ("proposing", "submission"),
         task_type="improvement",
         args={"version": "V-12", "reason": "."},
+        before=("upload", "claim.write"),
     ),
     task(
         "hard-no-version-maintenance",
@@ -1540,6 +1571,7 @@ HARD = [
         ("xp.request",),
         ("run-eval", "experiment"),
         task_type="improvement",
+        before=("upload",),
     ),
     task(
         "hard-ideation-no-ideation",
@@ -1550,7 +1582,7 @@ HARD = [
         ("task.propose",),
         ("proposing",),
         task_type="ideation",
-        args={"type": "maintenance|research", "goal": "G-2", "reasoning": ".", "for_human": "."},
+        args={"type": "maintenance|research", "reasoning": ".", "for_human": "."},
     ),
 ]
 

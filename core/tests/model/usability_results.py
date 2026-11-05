@@ -27,7 +27,14 @@ def short_hash(text: str) -> str:
 def situation_hash(situation: Situation) -> str:
     return short_hash(
         json.dumps(
-            [situation.text, situation.acts, situation.skills, situation.payload, situation.args],
+            [
+                situation.text,
+                situation.acts,
+                situation.skills,
+                situation.payload,
+                situation.args,
+                situation.before,
+            ],
             sort_keys=True,
         )
     )
