@@ -6,6 +6,18 @@ import pytest
 from research_core.plugin import timing
 
 
+@pytest.fixture(autouse=True)
+def native_leases(monkeypatch):
+    active = set()
+
+    def snapshot(current_turn_id):
+        active.add(current_turn_id)
+        return set(active)
+
+    monkeypatch.setattr(timing, "active_native_turns", snapshot)
+    return active
+
+
 def start(hooks, monkeypatch, now=100):
     monkeypatch.setattr(timing.time, "time", lambda: now)
     hooks["pre_llm_call"](
@@ -210,3 +222,180 @@ def test_exact_native_message_binding_supplies_admission_envelope(monkeypatch, c
 
 def test_union_clips_nested_and_outside_intervals():
     assert timing.union_seconds([(0, 12), (3, 7), (10, 20), (22, 25)], 2, 24) == 20
+
+
+def test_repeated_fatal_turns_cleanup_at_proven_next_session_turn(
+    monkeypatch, capsys, native_leases
+):
+    monkeypatch.setattr(timing.time, "time", lambda: 100)
+    hooks = timing.make_hooks("orchestrator")
+    for index in range(300):
+        turn = f"fatal-{index}"
+        hooks["pre_llm_call"](
+            session_id="fatal-session",
+            task_id="fatal-session",
+            turn_id=turn,
+            is_first_turn=False,
+        )
+        hooks["pre_api_request"](
+            turn_id=turn,
+            api_request_id=f"{turn}:api:1",
+            retry_count=0,
+            started_at=100,
+        )
+        hooks["api_request_error"](
+            turn_id=turn,
+            api_request_id=f"{turn}:api:1",
+            api_call_count=1,
+            started_at=100,
+            ended_at=102,
+            model="m",
+            provider="p",
+            api_mode="chat",
+            retryable=False,
+            status_code=401,
+        )
+        # Native finally releases the lease even though no end callback is dispatched.
+        native_leases.remove(turn)
+    events = records(capsys)
+    discarded = [e for e in events if e["event"] == "workspace_timing_state"]
+    assert len(discarded) == 299
+    assert all(
+        e["reason"] == "native_lease_released" and e["retained_turns"] == 0 for e in discarded
+    )
+    assert not any(e["event"] == "workspace_turn" for e in events)
+    # The fallback path must retain the current errored turn until another native callback.
+    hooks["pre_api_request"](
+        turn_id="fatal-299",
+        api_request_id="fallback",
+        retry_count=0,
+        started_at=103,
+    )
+    hooks["post_api_request"](
+        turn_id="fatal-299",
+        api_request_id="fallback",
+        api_call_count=2,
+        started_at=103,
+        ended_at=104,
+        model="fallback",
+        provider="p",
+        api_mode="chat",
+    )
+    assert records(capsys)[0]["event"] == "workspace_model_attempt"
+
+
+def test_tracking_capacity_preserves_active_turns_and_reports_untracked_callbacks(
+    monkeypatch, capsys
+):
+    monkeypatch.setattr(timing, "MAX_TRACKED_TURNS", 1)
+    hooks = timing.make_hooks("orchestrator")
+    start(hooks, monkeypatch)
+    hooks["pre_api_request"](
+        turn_id="turn-1",
+        api_request_id="api-1",
+        retry_count=0,
+        started_at=101,
+    )
+    hooks["pre_llm_call"](
+        session_id="other-session",
+        task_id="other",
+        turn_id="other",
+        is_first_turn=True,
+    )
+    hooks["pre_tool_call"](turn_id="other", tool_call_id="untracked-tool")
+    hooks["on_session_end"](turn_id="other", completed=True, failed=False, interrupted=False)
+    events = records(capsys)
+    assert [e["reason"] for e in events] == [
+        "tracking_capacity",
+        "untracked_callback",
+        "untracked_callback",
+    ]
+    assert all(e["stage"] == "diagnostic" and not e["accounting_complete"] for e in events)
+    hooks["post_api_request"](
+        turn_id="turn-1",
+        api_request_id="api-1",
+        api_call_count=1,
+        started_at=101,
+        ended_at=105,
+        model="m",
+        provider="p",
+        api_mode="chat",
+    )
+    finish(hooks, monkeypatch)
+    assert records(capsys)[-1]["accounting_complete"]
+
+
+@pytest.mark.parametrize("hook", ["on_session_finalize", "on_session_reset", "on_session_delete"])
+def test_session_boundaries_discard_without_inventing_end_timings(monkeypatch, capsys, hook):
+    hooks = timing.make_hooks("orchestrator")
+    start(hooks, monkeypatch)
+    hooks[hook](session_id="s1")
+    (event,) = records(capsys)
+    assert event["event"] == "workspace_timing_state"
+    assert event["reason"] == hook.removeprefix("on_")
+    assert "ended_at" not in event
+
+
+def test_nonsecret_workspace_and_runtime_identity_are_optional_log_attributes(monkeypatch, capsys):
+    monkeypatch.setenv("IDE_WORKSPACE_ID", "workspace-proof")
+    monkeypatch.setenv("IDE_RUNTIME_ID", "boot-proof")
+    hooks = timing.make_hooks("orchestrator")
+    start(hooks, monkeypatch)
+    model(hooks, 101, 102)
+    finish(hooks, monkeypatch)
+    assert all(
+        e["workspace_id"] == "workspace-proof" and e["runtime_id"] == "boot-proof"
+        for e in records(capsys)
+    )
+
+
+def test_released_unique_session_orphans_reclaim_slots_without_evicting_a_live_turn(
+    monkeypatch, capsys, native_leases
+):
+    monkeypatch.setattr(timing, "MAX_TRACKED_TURNS", 2)
+    monkeypatch.setattr(timing.time, "time", lambda: 100)
+    hooks = timing.make_hooks("orchestrator")
+    start(hooks, monkeypatch)
+    hooks["pre_tool_call"](turn_id="turn-1", tool_call_id="long-lived-tool")
+    for index in range(20):
+        turn = f"unique-fatal-{index}"
+        hooks["pre_llm_call"](
+            session_id=turn,
+            task_id=turn,
+            turn_id=turn,
+            is_first_turn=True,
+        )
+        hooks["pre_api_request"](
+            turn_id=turn,
+            api_request_id=turn,
+            retry_count=0,
+            started_at=100,
+        )
+        hooks["api_request_error"](
+            turn_id=turn,
+            api_request_id=turn,
+            api_call_count=1,
+            started_at=100,
+            ended_at=101,
+            model="m",
+            provider="p",
+            api_mode="chat",
+            retryable=False,
+            status_code=401,
+        )
+        native_leases.remove(turn)  # Authoritative native finally, no session-end hook.
+    events = records(capsys)
+    assert not any(e.get("reason") == "tracking_capacity" for e in events)
+    reclaimed = [e for e in events if e.get("reason") == "native_lease_released"]
+    assert len(reclaimed) == 19
+    assert all(e["retained_turns"] == 1 for e in reclaimed)  # The concurrent tool survives.
+    hooks["post_tool_call"](
+        turn_id="turn-1",
+        tool_call_id="long-lived-tool",
+        api_request_id="api-1",
+        tool_name="terminal",
+        duration_ms=1000,
+        status="ok",
+    )
+    finish(hooks, monkeypatch)
+    assert records(capsys)[-1]["accounting_complete"]

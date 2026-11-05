@@ -312,8 +312,10 @@ def test_recovery_replays_old_message_ids_and_counts_a_running_continuation(tmp_
     [("completed", None), ("failed", "fixture failure"), ("failed", "HTTP 429 rate limit")],
 )
 def test_terminal_observation_is_after_settlement_and_not_a_native_completion_clock(
-    tmp_path, capsys, outcome, error
+    tmp_path, capsys, monkeypatch, outcome, error
 ):
+    monkeypatch.setenv("IDE_WORKSPACE_ID", "workspace-terminal-proof")
+    monkeypatch.setenv("IDE_RUNTIME_ID", "runtime-terminal-proof")
     ctx = make_ctx(tmp_path)
     native = FakeHermesRuns()
     coordinator = Coordinator(ctx.workspace, native)
@@ -330,6 +332,8 @@ def test_terminal_observation_is_after_settlement_and_not_a_native_completion_cl
     (event,) = [event for event in events if event["event"] == "workspace_run_observation"]
     assert event["run_id"] == run_id and event["op_id"] == row["op_id"]
     assert event["outcome"] == outcome and event["elapsed_ms"] >= 0
+    assert event["workspace_id"] == "workspace-terminal-proof"
+    assert event["runtime_id"] == "runtime-terminal-proof"
     assert event["boundary"] == "message_acceptance_to_terminal_observation"
     assert event["native_terminal_at"] is None
     assert event["terminal_observation_delay_ms"] is None

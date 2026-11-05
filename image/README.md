@@ -296,3 +296,23 @@ polling delay: `native_terminal_at` and `terminal_observation_delay_ms` are unkn
 native `completed`, `failed`, `cancelled` or `interrupted` outcomes. Use it for observed native
 receipt/failure counts and coverage checks, separately from precise hook-window distributions.
 Neither source reconstructs timings lost during a process crash.
+
+The image passes non-secret `IDE_WORKSPACE_ID` and `IDE_RUNTIME_ID` to its child processes.
+Timing records expose them as `workspace_id` and `runtime_id` log attributes; standalone CLI
+invocations leave them null. Neither belongs in metric tags.
+
+A fatal native return can omit its end hook. Before retaining a new turn, the observer reads
+an authoritative snapshot of the pinned runtime's active conversation leases. The public
+`SessionDB(read_only=True)` constructor resolves the routed profile database; a separate
+SQLite connection uses `mode=ro`. The current hook's own turn must appear in that snapshot
+before any prior state is discarded. Only absent/released/expired native leases are reclaimed,
+including orphaned turns in other sessions; active model calls, tools and backoff are retained.
+The pinned table/holder contract is checked by the installed-agent and packaged-gateway tests.
+Supported finalize/reset/delete hooks also discard session state. No missing end timing is
+invented; `workspace_timing_state` diagnostics explain the discard.
+
+The profile retains at most 256 unfinished timing records. Reaching that diagnostics budget
+declines tracking for a new turn; it never evicts an active concurrent turn or times out long
+work. Subsequent callbacks for an untracked turn emit typed incomplete diagnostics rather
+than fabricated durations or a summary. Watch `tracking_capacity` and `untracked_callback`
+reasons when checking coverage. Request errors alone never discard state: fallback may follow.

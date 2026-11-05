@@ -10,6 +10,7 @@ import fcntl
 import hashlib
 import json
 import logging
+import os
 import sys
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -104,6 +105,8 @@ class RunObservation:
     schema_version: int = field(default=1, init=False)
     stage: str = field(default="terminal", init=False)
     role: str
+    workspace_id: str | None
+    runtime_id: str | None
     session_id: str
     op_id: str
     run_id: str
@@ -1116,6 +1119,8 @@ class Coordinator:
         start = parse_iso(row["created_at"]).timestamp()
         RunObservation(
             role=row["profile"],
+            workspace_id=os.environ.get("IDE_WORKSPACE_ID"),
+            runtime_id=os.environ.get("IDE_RUNTIME_ID"),
             session_id=row["session_id"],
             op_id=row["op_id"],
             run_id=status.run_id,

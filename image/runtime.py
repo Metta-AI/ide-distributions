@@ -99,6 +99,7 @@ async def run(stack: AsyncExitStack) -> None:
     common = {
         **os.environ,
         "IDE_RUNTIME_ID": boot_id,
+        "IDE_WORKSPACE_ID": bootstrap.workspace_id,
         "API_SERVER_ENABLED": "true",
         "API_SERVER_HOST": "127.0.0.1",
         "API_SERVER_PORT": "8642",

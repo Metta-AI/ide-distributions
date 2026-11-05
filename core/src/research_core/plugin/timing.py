@@ -11,12 +11,16 @@ Stdlib only: this module executes in Hermes's interpreter.
 from __future__ import annotations
 
 import json
+import os
+import sqlite3
 import sys
 import threading
 import time
 from collections.abc import Callable
+from contextlib import closing
 from dataclasses import asdict, dataclass, field
 from datetime import datetime
+from functools import partial
 from typing import Any, Literal
 
 from research_core.tools.catalog import Role
@@ -28,6 +32,8 @@ class TimingEvent:
     schema_version: Literal[1] = field(default=1, init=False)
     stage: Literal["terminal"] = field(default="terminal", init=False)
     role: Role
+    workspace_id: str | None
+    runtime_id: str | None
     session_id: str
     task_id: str
     turn_id: str
@@ -142,6 +148,8 @@ class Turn:
         self.sequence += 1
         return dict(
             role=role,
+            workspace_id=os.environ.get("IDE_WORKSPACE_ID"),
+            runtime_id=os.environ.get("IDE_RUNTIME_ID"),
             session_id=self.session_id,
             task_id=self.task_id,
             turn_id=turn_id,
@@ -205,14 +213,99 @@ def union_seconds(intervals: list[tuple[float, float]], start: float, end: float
     return total
 
 
+def active_native_turns(current_turn_id: str) -> set[str]:
+    """Read the pinned runtime's authoritative conversation leases without mutating it.
+
+    The public SessionDB constructor resolves multiplexed profile paths. The lease table
+    and holder marker are pinned runtime contracts, verified by installed-agent tests.
+    Verify this callback's own lease before using the snapshot to reclaim any state.
+    """
+    from hermes_state import SessionDB
+
+    native = SessionDB(read_only=True)
+    try:
+        with closing(sqlite3.connect(f"file:{native.db_path}?mode=ro", uri=True)) as connection:
+            holders = connection.execute(
+                "SELECT holder FROM session_turn_leases WHERE expires_at>?", (time.time(),)
+            ).fetchall()
+        active = {
+            holder.partition(":turn=")[2].rpartition(":platform=")[0] for (holder,) in holders
+        }
+        if current_turn_id not in active:
+            raise RuntimeError("Timing callback does not hold the pinned native turn lease")
+        return active
+    finally:
+        native.close()
+
+
+# Bounded diagnostics only. Capacity rejects NEW tracking, never evicts another live turn.
+MAX_TRACKED_TURNS = 256
+
+
+@dataclass(frozen=True)
+class MissingTiming:
+    event: str = field(default="workspace_timing_state", init=False)
+    schema_version: int = field(default=1, init=False)
+    stage: str = field(default="diagnostic", init=False)
+    accounting_complete: bool = field(default=False, init=False)
+    role: Role
+    workspace_id: str | None
+    runtime_id: str | None
+    session_id: str
+    turn_id: str
+    reason: str
+    callback: str
+    retained_turns: int
+
+    def emit(self) -> None:
+        sys.stderr.write(json.dumps(asdict(self), separators=(",", ":")) + "\n")
+        sys.stderr.flush()
+
+
 def make_hooks(role: Role) -> dict[str, Callable[..., None]]:
     turns: dict[str, Turn] = {}
     lock = threading.Lock()  # Hermes may dispatch bounded callbacks on different workers.
+
+    def missing(turn_id: str, session_id: str, reason: str, callback: str) -> MissingTiming:
+        event = MissingTiming(
+            role,
+            os.environ.get("IDE_WORKSPACE_ID"),
+            os.environ.get("IDE_RUNTIME_ID"),
+            session_id,
+            turn_id,
+            reason,
+            callback,
+            len(turns),
+        )
+        event.emit()
+        return event
+
+    def retained(turn_id: str, callback: str) -> Turn | MissingTiming:
+        if turn_id in turns:
+            return turns[turn_id]
+        return missing(turn_id, "", "untracked_callback", callback)
+
+    def discard_session(*, session_id: str, reason: str, **_: Any) -> None:
+        with lock:
+            for turn_id, turn in list(turns.items()):
+                if turn.session_id == session_id:
+                    del turns[turn_id]
+                    missing(turn_id, session_id, reason, "session_boundary")
 
     def pre_llm_call(
         *, session_id: str, task_id: str, turn_id: str, is_first_turn: bool, **_: Any
     ) -> None:
         with lock:
+            # A leased turn can be between calls or in backoff. Only authoritative
+            # lease release/expiry proves another session's orphan is no longer live.
+            active = active_native_turns(turn_id)
+            for previous, turn in list(turns.items()):
+                if previous not in active:
+                    del turns[previous]
+                    missing(previous, turn.session_id, "native_lease_released", "pre_llm_call")
+            if len(turns) >= MAX_TRACKED_TURNS:
+                missing(turn_id, session_id, "tracking_capacity", "pre_llm_call")
+                return
             turns[turn_id] = Turn(session_id, task_id, time.time(), is_first_turn)
 
     def pre_api_request(
@@ -226,7 +319,9 @@ def make_hooks(role: Role) -> dict[str, Callable[..., None]]:
     ) -> None:
         observed_start = time.time()
         with lock:
-            turn = turns[turn_id]
+            turn = retained(turn_id, "pre_api_request")
+            if isinstance(turn, MissingTiming):
+                return
             if turn.admission is None and conversation_history:
                 current = next(m for m in reversed(conversation_history) if m["role"] == "user")
                 turn.admission = read_admission(
@@ -263,7 +358,9 @@ def make_hooks(role: Role) -> dict[str, Callable[..., None]]:
         **_: Any,
     ) -> None:
         with lock:
-            turn = turns[turn_id]
+            turn = retained(turn_id, "model_done")
+            if isinstance(turn, MissingTiming):
+                return
             attempt = turn.attempts.pop(api_request_id, None)
             if attempt is None:
                 turn.unpaired_model_callbacks += 1
@@ -326,7 +423,10 @@ def make_hooks(role: Role) -> dict[str, Callable[..., None]]:
 
     def pre_tool_call(*, turn_id: str, tool_call_id: str, **_: Any) -> None:
         with lock:
-            turns[turn_id].tool_starts[tool_call_id] = time.time()
+            turn = retained(turn_id, "pre_tool_call")
+            if isinstance(turn, MissingTiming):
+                return
+            turn.tool_starts[tool_call_id] = time.time()
 
     def post_tool_call(
         *,
@@ -339,7 +439,9 @@ def make_hooks(role: Role) -> dict[str, Callable[..., None]]:
         **_: Any,
     ) -> None:
         with lock:
-            turn = turns[turn_id]
+            turn = retained(turn_id, "post_tool_call")
+            if isinstance(turn, MissingTiming):
+                return
             # Native executor owns one terminal callback per ID. Keep retries distinct;
             # suppress only a repeated delivery of that same completed native tool call.
             if tool_call_id in turn.tool_ids:
@@ -375,7 +477,10 @@ def make_hooks(role: Role) -> dict[str, Callable[..., None]]:
         *, turn_id: str, completed: bool, failed: bool, interrupted: bool, **_: Any
     ) -> None:
         with lock:
-            turn = turns.pop(turn_id)
+            turn = retained(turn_id, "on_session_end")
+            if isinstance(turn, MissingTiming):
+                return
+            del turns[turn_id]
             end = time.time()
             if turn.admission is not None:
                 turn.admission = read_admission(
@@ -429,4 +534,7 @@ def make_hooks(role: Role) -> dict[str, Callable[..., None]]:
         "pre_tool_call": pre_tool_call,
         "post_tool_call": post_tool_call,
         "on_session_end": on_session_end,
+        "on_session_finalize": partial(discard_session, reason="session_finalize"),
+        "on_session_reset": partial(discard_session, reason="session_reset"),
+        "on_session_delete": partial(discard_session, reason="session_delete"),
     }

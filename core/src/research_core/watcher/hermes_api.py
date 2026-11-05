@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import secrets
 import socket
 import sys
@@ -58,6 +59,8 @@ class SessionSetupTiming:
     schema_version: int = field(default=1, init=False)
     stage: str = field(default="terminal", init=False)
     profile: str
+    workspace_id: str | None
+    runtime_id: str | None
     session_id: str
     started_at: float
     ended_at: float
@@ -385,6 +388,8 @@ class HermesRuns:
         finally:
             event = SessionSetupTiming(
                 profile=profile,
+                workspace_id=os.environ.get("IDE_WORKSPACE_ID"),
+                runtime_id=os.environ.get("IDE_RUNTIME_ID"),
                 session_id=session_id,
                 started_at=start,
                 ended_at=time.time(),

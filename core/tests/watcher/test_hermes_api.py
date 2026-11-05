@@ -379,7 +379,9 @@ def test_session_messages_reads_the_list_and_empties_on_404(gateway, client):
     assert client.session_messages("api_1_zzz", profile="orchestrator") == []
 
 
-def test_create_session_posts_the_id(gateway, client, capsys):
+def test_create_session_posts_the_id(gateway, client, capsys, monkeypatch):
+    monkeypatch.setenv("IDE_WORKSPACE_ID", "workspace-api-proof")
+    monkeypatch.setenv("IDE_RUNTIME_ID", "runtime-api-proof")
     gateway.answer(200, {"id": "api_1_c", "source": "api_server"})
     assert client.create_session("api_1_c", profile="researcher") is None
     request = gateway.last
@@ -387,6 +389,8 @@ def test_create_session_posts_the_id(gateway, client, capsys):
     assert request["body"] == {"id": "api_1_c"}
     event = json.loads(capsys.readouterr().err)
     assert event["event"] == "workspace_session_setup"
+    assert event["workspace_id"] == "workspace-api-proof"
+    assert event["runtime_id"] == "runtime-api-proof"
     assert event["outcome"] == "accepted" and event["elapsed_ms"] >= 0
     assert event["boundary"] == "native_create_session_http"
     assert "Authorization" not in json.dumps(event)
