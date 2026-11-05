@@ -28,19 +28,35 @@ identity survive retries; execution sessions do not. `task_assignments.current_a
 identifies the authoritative worker attempt. A successor receives the durable task record,
 worktree, branch, pending inputs, previous outcome, and bounded recent transcript.
 
+An assignment's Task revision is the one its session last saw: `task_views` records what each
+Orchestrator session was shown by `task` results and by the planning wake's text, and
+`task.assign` is refused when the Task has changed since. A session that has seen no revision
+gets the current one. The assignment's own identity is its command's id.
+
 Task ownership is recorded before native start. Holder transfer requires the expected previous
 holder and advances the lease epoch. Lease age alone never proves that execution stopped.
 Admission locking precedes the Coworld writer when both boundaries are needed.
 
 ## Commands and worker reports
 
-Mutating native tools require caller-stable `operation_id` values. Repeating an ID returns the
-same durable receipt; changing its payload or caller epoch is refused. Human store edits can
-also supply an operation ID. `task.command` reads the result after a pending response.
+Mutating native tools take no identity from the model. A call with the same fields, role, session
+and lease epoch as a command whose finished result has not yet been returned to that session is a
+retry: it joins that command, and if the work was already done it says so in
+`repeat_of_earlier_call`. Once the result has been returned (by the call or by `task.command`),
+an identical call is a new intent, so a deliberate second message and a call after a refusal both
+run. This is `transitions.request_generated`. A retry whose fields differ is a new intent, which
+the domain rules bound: a second assignment or completion is refused, a reworded message is sent.
+A gateway that stops in the moment between marking a result returned and Hermes saving it would
+see its retry applied as new.
+
+An explicit `operation_id` is still accepted, without being offered in any schema, because a chat
+keeps the tool schema it started with. Internal callers (capability reports, platform waits,
+human store edits) use it too. Repeating such an ID returns the same durable receipt; changing its
+payload or caller epoch is refused.
 
 Acceptance remains durable when the coordinator is unavailable. The caller waits briefly and
-can receive `transition_pending`; it must reuse the operation ID rather than invent a retry.
-Commands have no expiry or coordinator retry cutoff. Unexpected coordinator faults preserve
+can receive `transition_pending`, with `task.command` to read the result; calling again with the
+same fields joins the command. Commands have no expiry or coordinator retry cutoff. Unexpected coordinator faults preserve
 accepted intent, record the error, and schedule another attempt with bounded backoff. The retry
 count is diagnostic. A domain refusal is an explicit terminal result; coordinator unavailability
 is not. Committed workspace effect receipts remain recoverable across coordinator failures.
