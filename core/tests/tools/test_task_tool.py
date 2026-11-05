@@ -12,6 +12,7 @@ import research_core.tools.task  # noqa: F401
 from research_core import gitops
 from research_core.store import claims, sessions, settings, versions
 from research_core.store.actors import Actor
+from research_core.tools import catalog
 from research_core.tools.base import run_tool
 
 GOAL = {"action": "create", "title": "Beat the house", "end_state": "rank first", "reason": "asked"}
@@ -486,3 +487,10 @@ def test_settings_gate_reads_the_coworld_store(call, ctx_factory, goal):
     gate = {"action": "update", "key": "approval_required.task_types", "cites": "m"}
     call("settings", {**gate, "value": ["ideation"]})
     assert settings.get(ctx_factory().store, "approval_required.task_types") == ["ideation"]
+
+
+def test_a_proposal_offers_no_ideation_round():
+    """The store allows it only on an ideation Task, and a round is set when that is created."""
+    spec = catalog.TOOLS["task"]
+    assert "ideation_round" not in spec.accepted(spec.action("propose"))
+    assert "ideation_round" in spec.accepted(spec.action("create"))

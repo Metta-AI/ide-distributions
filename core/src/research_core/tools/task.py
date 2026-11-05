@@ -74,7 +74,6 @@ CREATE_PARAMS = {
     "experiment": EXPERIMENT,
     "priority": a.string("Default normal.", enum=["normal", "high"]),
     "depends_on": a.strings('Tasks that must complete first, such as ["T-1"].'),
-    "ideation_round": a.integer("Round number of an ideation Task."),
 }
 
 
@@ -395,7 +394,11 @@ SPEC = durable_tool(
                 "create",
                 "Create an accepted Task (stored as proposed when its type needs the user's "
                 "approval and no cites is given).",
-                {**CREATE_PARAMS, "cites": CITES},
+                {
+                    **CREATE_PARAMS,
+                    "ideation_round": a.integer("Round number of an ideation Task."),
+                    "cites": CITES,
+                },
                 ("type", "title", "description"),
                 ORCHESTRATOR,
                 example_fields=("goal",),

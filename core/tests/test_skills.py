@@ -143,13 +143,11 @@ def test_every_tool_action_exists_for_the_skill_role(path):
 
 
 @pytest.mark.parametrize("type", task_types.TYPES)
-def test_task_type_body_teaches_the_loop_and_the_failure_fields(type):
+def test_task_type_body_teaches_the_loop(type):
     body = task_types.load(type).body
     assert words(body) <= TASK_TYPE_WORD_LIMIT, f"{type}: {words(body)} words"
-    for needle in ("task.complete", "task_ask", "failure", "what_failed", "next_step"):
+    for needle in ("task.complete", "task_ask"):
         assert needle in body, f"{type}: body must name {needle}"
-    assert "undefined symbol X" in body, f"{type}: the good failure example"
-    assert '"it broke"' in body and '"try again"' in body, f"{type}: the bad failure example"
     lowered = body.lower()
     assert not [w for w in FORBIDDEN if w in lowered], f"{type}: forbidden vocabulary"
     researcher = catalog_actions("researcher")

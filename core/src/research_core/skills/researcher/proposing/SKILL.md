@@ -12,7 +12,7 @@ you anything.
 ## Proposed Tasks
 
 `task_propose {goal, type, title, description, reasoning, for_human, end_condition, end_detail,
-priority, depends_on, experiment, ideation_round}`.
+priority, depends_on, experiment}`.
 
 - `description`: what to do and what to deliver, concrete enough that another Researcher starts
   cold: the lever, the metric, the design, the episodes.
