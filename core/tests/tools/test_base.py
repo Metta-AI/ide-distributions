@@ -98,9 +98,9 @@ def test_validate_action_gating(demo_tool):
     assert problems[0].startswith("action is required")
 
 
-def test_run_tool_success_and_errors(demo_tool, tmp_path):
+def test_run_tool_success_and_errors(demo_tool, tmp_path, spans):
     ctx = make_ctx(tmp_path)
-    ok = json.loads(base.run_tool("demo", {"action": "read", "goal": "G-1"}, ctx))
+    ok = json.loads(base.run_tool("demo", {"action": "read", "goal": "secret-token"}, ctx))
     assert ok["ok"] is True and ok["record"]["action"] == "read"
 
     refused = json.loads(base.run_tool("demo", {"action": "boom"}, ctx))
@@ -114,10 +114,28 @@ def test_run_tool_success_and_errors(demo_tool, tmp_path):
     assert store["problems"] == ["bad write"]
     crash = json.loads(base.run_tool("demo", {"action": "crash"}, ctx))
     assert crash["error"] == "RuntimeError: unexpected" and "traceback" in crash["context"]
+    failed = json.loads(base.run_tool("demo", {"action": "failed"}, ctx))
+    assert failed["ok"] is False
     invalid = json.loads(base.run_tool("demo", {"action": "read"}, ctx))
     assert invalid["problems"] == ["goal is required for read"]
-    unknown = json.loads(base.run_tool("nope", {}, ctx))
+    bad_action = json.loads(base.run_tool("demo", {"action": "secret-token"}, ctx))
+    assert bad_action["ok"] is False
+    unknown = json.loads(base.run_tool("secret-token", {}, ctx))
     assert unknown["ok"] is False
+
+    events = spans.get_finished_spans()
+    assert [e.attributes["outcome"] for e in events] == [
+        "succeeded",
+        "tool_rejected",
+        "store_rejected",
+        "internal_error",
+        "failed",
+        "validation_rejected",
+        "validation_rejected",
+        "unknown_tool",
+    ]
+    assert all(e.attributes["session.id"] == "s1" for e in events)
+    assert all("secret-token" not in e.to_json() for e in events)
 
 
 def test_a_field_the_action_does_not_take_is_refused(demo_tool):
@@ -217,38 +235,6 @@ def test_an_action_that_needs_an_object_gets_no_guessed_example(tmp_path):
     assert "example" not in refused["usage"]
     assert "evidence" in refused["usage"]["required"]
     assert refused["error"].endswith("usage.required describes each.")
-
-
-@pytest.mark.parametrize(
-    ("name", "args", "outcome", "action"),
-    [
-        ("demo", {"action": "read", "goal": "secret-token"}, "succeeded", "read"),
-        ("demo", {"action": "create"}, "validation_rejected", "create"),
-        ("demo", {"action": "secret-token"}, "validation_rejected", None),
-        ("demo", {"action": "failed"}, "failed", "failed"),
-        ("demo", {"action": "boom"}, "tool_rejected", "boom"),
-        ("demo", {"action": "store"}, "store_rejected", "store"),
-        ("demo", {"action": "crash"}, "internal_error", "crash"),
-        ("secret-token", {}, "unknown_tool", None),
-    ],
-)
-def test_tool_telemetry_outcomes_and_payload_privacy(
-    demo_tool, tmp_path, capsys, name, args, outcome, action
-):
-    base.run_tool(name, args, make_ctx(tmp_path))
-    output = capsys.readouterr().err
-    assert "secret-token" not in output
-    (event,) = [json.loads(line) for line in output.splitlines()]
-    assert event.pop("elapsed_ms") >= 0
-    assert event == {
-        "event": "workspace_tool",
-        "schema_version": 1,
-        "session_id": "s1",
-        "role": "orchestrator",
-        "tool": "unknown" if name == "secret-token" else "demo",
-        "action": action,
-        "outcome": outcome,
-    }
 
 
 def test_a_refusal_example_shows_the_format_without_a_value_that_could_be_taken_as_real():

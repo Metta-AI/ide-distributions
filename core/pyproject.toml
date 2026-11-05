@@ -3,8 +3,11 @@ name = "research-core"
 version = "0.1.0"
 description = "Shared code of the Softmax IDE research profiles: store, tools, plugin, watcher, CLI"
 requires-python = ">=3.12"
-# The base package is stdlib only: the Hermes plugin imports it inside Hermes's own interpreter.
-dependencies = []
+# OpenTelemetry is installed in both interpreters by the supported image build.
+dependencies = [
+    "opentelemetry-exporter-otlp-proto-http==1.45.1",
+    "opentelemetry-sdk==1.45.1",
+]
 
 [project.optional-dependencies]
 # Everything that talks to the Softmax platform or computes statistics runs in the workspace

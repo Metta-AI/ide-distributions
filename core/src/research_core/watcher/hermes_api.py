@@ -38,8 +38,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
+from opentelemetry import trace
+
 from research_core import inference
 from research_core.platform.errors import PlatformError
+from research_core.telemetry import span
 
 DEFAULT_HOST = "127.0.0.1"
 DEFAULT_PORT = 8642
@@ -355,8 +358,10 @@ class HermesRuns:
                 return messages
         return []
 
+    @span("hermes.session.create")
     def create_session(self, session_id: str, *, profile: str) -> None:
         """Create the native session before any run; replay keeps the existing transcript."""
+        trace.get_current_span().set_attributes({"session.id": session_id, "role": profile})
         response = self._request(
             "POST", profile, "/api/sessions", body={"id": session_id}, accept=(409,)
         )

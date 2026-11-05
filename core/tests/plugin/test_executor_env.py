@@ -1,6 +1,5 @@
 """The plugin reads its environment through the routed profile's secret scope."""
 
-import json
 import subprocess
 import sys
 import types
@@ -61,34 +60,33 @@ def test_workspace_process_env_drops_hermes_interpreter_variables(tmp_path):
     assert clean["OPENROUTER_API_KEY"] == "k" and clean["IDE_WORKSPACE"] == env["IDE_WORKSPACE"]
 
 
-def test_workspace_tool_telemetry_relay_is_once_and_omits_other_stderr(
-    tmp_path, monkeypatch, capsys
-):
-    from research_core import layout
+def test_workspace_tools_inherit_logs_and_propagate_standard_context(tmp_path, monkeypatch):
+    from research_core import layout, telemetry
 
     env = {"IDE_WORKSPACE": str(tmp_path / "ws")}
+    monkeypatch.setenv("IDE_WORKSPACE", env["IDE_WORKSPACE"])
     ws = layout.from_env(env)
     ws.venv_python.parent.mkdir(parents=True)
     ws.venv_python.touch()
-    event = json.dumps(
-        {
-            "event": "workspace_tool",
-            "schema_version": 1,
-            "session_id": "s1",
-            "role": "researcher",
-            "tool": "demo",
-            "action": None,
-            "outcome": "validation_rejected",
-            "elapsed_ms": 0.2,
-        },
-        separators=(",", ":"),
+    calls = []
+
+    def run(*args, **kwargs):
+        calls.append(kwargs)
+        return subprocess.CompletedProcess(args[0], 0, stdout='{"ok":false}')
+
+    monkeypatch.setattr(executor.subprocess, "run", run)
+    # Match Hermes's isolated handler worker: the parent exists but is not current.
+    with telemetry.tracer().start_span("native.tool") as parent:
+        tool = types.SimpleNamespace(name="demo", executor="workspace", timeout_s=1)
+        handler = executor.make_handler(tool, "researcher", lambda session: parent)
+        assert handler({}, session_id="s1") == '{"ok":false}'
+    assert "stderr" not in calls[0] and "capture_output" not in calls[0]
+    context = telemetry.process_context(calls[0]["env"])
+    from opentelemetry import trace
+
+    remote = trace.get_current_span(context).get_span_context()
+    assert (remote.trace_id, remote.span_id) == (
+        parent.get_span_context().trace_id,
+        parent.get_span_context().span_id,
     )
-    monkeypatch.setattr(
-        executor.subprocess,
-        "run",
-        lambda *a, **kw: subprocess.CompletedProcess(
-            a[0], 0, stdout='{"ok":false}', stderr=f"secret diagnostic\n{event}\n"
-        ),
-    )
-    assert executor.run_in_workspace("demo", {}, env) == '{"ok":false}'
-    assert capsys.readouterr().err == event + "\n"
+    assert remote.is_remote

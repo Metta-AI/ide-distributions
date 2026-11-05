@@ -54,14 +54,11 @@ The open receipt and local session registration commit in one transaction. A tem
 opening failure stays queued with its original identity; a permanent failure also fails its
 queued messages. Neither stops the dispatcher from processing unrelated sessions.
 
-Each successful intake emits one `workspace_intake` JSON event to stderr, correlated by
-`op_id`, `session_id` and operation. Durations in milliseconds distinguish validation,
-store opening, metadata preparation, writer acquisition, writing, commit, session registration
-and total intake time. `writer_wait_ms` includes SQLite transaction setup. Replayed requests
-emit the same measurements with `replayed: true`. Events contain no message or attachment
-contents. Track total intake latency and its stage breakdown independently of attachment
-preparation and Hermes execution; a slow writer wait indicates database contention rather
-than time spent preparing or running a message.
+Session intake emits OpenTelemetry `session.open` and `session.message` spans, correlated
+by `op.id`, `session.id`, and `replayed`. Child `intake.transaction` spans mark writer wait,
+acquisition, admission write, registration, and commit with SDK-timestamped events. These
+boundaries preserve the distinction between database contention and execution preparation.
+No message or attachment contents are captured. See [OpenTelemetry](#opentelemetry) below.
 
 The image obtains its spend-capped model credential from
 `PUT /v2/workspaces/{workspace_id}/inference`, using the bootstrap credential. It installs
@@ -131,10 +128,9 @@ chat remains a target-environment acceptance check with an authorized inference 
 Run `bash image/system_tests/start-stop.sh ide-distribution:local` after building. The smoke
 uses a fresh volume, then restarts with the same volume under the hosting filesystem
 restrictions. It checks adapter operations, explicit clean-sleep refusal, retained sessions and transport failures.
-It also validates all sixteen startup timing events on each boot: profile install/update,
-preparation, gateway readiness, application wake/readiness and total startup. Missing phases,
-reused boot IDs, malformed events and extra telemetry fields fail the check.
-Startup timing events are separate from the per-request intake events described above.
+It validates eight completed startup spans on each boot: profile install/update, preparation,
+gateway readiness, application wake/readiness and total startup. Missing phases, reused boot
+IDs, broken parent relationships and unexpected startup attributes fail the check.
 
 ## Repeatable startup measurements
 
@@ -148,7 +144,7 @@ STARTUP_CYCLES=6 STARTUP_ARTIFACTS=/tmp/ide-startup-baseline \
 The artifact directory must not already exist. It retains the image ID/architecture, checkout
 revision, per-boot logs and per-stage median/minimum/maximum durations. The first boot uses an
 empty volume; later boots retain state and run the same adapter, sleep and persistence checks.
-`workspace_state` in each timing event distinguishes fresh from previously prepared workspaces.
+`workspace.state` on the startup span distinguishes fresh from previously prepared workspaces.
 This is workspace state, not whether the Kubernetes host or image cache was cold.
 
 The readiness wait has a four-minute wall-clock budget between Docker probes. A stalled Docker
@@ -165,21 +161,21 @@ timing reports are retained as artifacts.
 On container stop, the supervisor cancels ongoing startup/control work, terminates its owned
 application and gateway processes, and waits for them to exit. A child that ignores termination
 is killed after ten seconds. The smoke requires a zero container exit code and retains gateway
-file logs alongside startup events when STARTUP_ARTIFACTS is set. These fixture logs contain no
+file logs alongside startup spans when STARTUP_ARTIFACTS is set. These fixture logs contain no
 real model credentials or user conversations.
 
-## Startup timing
+## Startup tracing
 
-`workspace_startup` JSON lines join on `workspace_id` and `boot_id`, with `workspace_state`
-set to `fresh` or `retained`. `startup_total` ends at application health. Two concurrent
-phases follow: `relay_connected` ends after the authenticated websocket handshake, and
-`inference_ready` ends only after the first lease is installed in every profile and its
-expiry marker is persisted. Each reports started/passed and elapsed seconds. Missing
-passed events indicate incomplete readiness, not zero latency. Renewal and reconnection
-do not duplicate these first-readiness events.
+`workspace.startup` spans join on resource attributes `workspace.id` and
+`service.instance.id` (the boot ID). `workspace.state` is `fresh` or `retained`.
+The root ends at application health. Child spans cover profile installation/preparation,
+gateway readiness, and application wake/readiness. Concurrent `workspace.inference_ready`
+and `workspace.relay_connected` spans end at first credential installation and first
+websocket handshake respectively. Cancelled readiness is an error observation, never a
+successful zero-duration milestone. Missing completion can also mean process termination.
+Renewal and reconnection do not duplicate these first-readiness spans.
 
-These milestones do not claim a completed model turn. Use Metta's packaged chat harness
-for container-to-completed-chat measurements and retained-session verification.
+These milestones do not claim a completed model turn or browser delivery.
 
 The container starts the gateway through Hermes's supported `python -m gateway.run` entrypoint.
 The general CLI remains installed for tools and profile operations; its full dispatcher is not
@@ -214,29 +210,67 @@ real builder and platform Player credential. Pass `SOFTMAX_PLAYER_CREDENTIAL` an
 It creates one uniquely named policy with two versions, verifies an ordinary upload and
 recovery after a deliberately lost response and deleted archive, and never submits or evaluates.
 
-## Distribution tool timing
+## OpenTelemetry
 
-`workspace_tool` schema version 1 is one JSON stderr line per completed `run_tool` invocation.
-It covers registered distribution tools in both executors. Workspace subprocess telemetry is
-relayed once by the plugin; the parent does not emit a second event. Native Hermes built-in
-tools are outside this boundary.
+All timing/tracing uses the OpenTelemetry Python SDK. The locked workspace package and
+native build requirements select version 1.45.1, already shipped in the pinned Hermes image.
+No packages install at runtime. Standalone profile installations need the same native SDK.
 
-Fields are `session_id` (native session, possibly empty outside Hermes), `role`, `tool`,
-`action` (registered action or null), `outcome`, and `elapsed_ms`. Unknown tool names are
-recorded as `unknown`. No arguments, results, prompt content or error text are emitted.
-`elapsed_ms` uses a monotonic clock from tool-module loading through validation, execution,
-JSON rendering and state-path scrubbing. It excludes workspace subprocess startup, Hermes
-post-result processing, model calls and transport delivery. A timeout or terminated subprocess
-can exit without an event; this is completion coverage, not an attempted-call denominator.
+Every process uses the SDK's `ConsoleSpanExporter` to emit one standard span JSON object per
+line on stderr. This is enabled without a feature flag or collector. Span `start_time` and
+`end_time` replace custom elapsed fields. Existing dashboards querying `workspace_startup`,
+`workspace_intake`, or `workspace_tool` need migration to these spans; old events are removed.
+Console JSON is diagnostic output, not the OTLP wire format.
 
-Outcomes distinguish `validation_rejected` (handler never ran), `tool_rejected` (`ToolError`),
-`store_rejected` (`StoreError`), `internal_error` (unexpected error), `failed` (handler returned
-false `ok`), `succeeded`, and `unknown_tool`. Count events, rather than summing elapsed time,
-for tool counts; concurrent tool durations can overlap. Session IDs are join fields, not
-metric tags. There is no inferred run ID or provider cache classification.
+To export to any OTLP/HTTP backend or an OpenTelemetry Collector, configure
+`OTEL_EXPORTER_OTLP_ENDPOINT` (base URL) or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (full trace URL)
+on the workspace container. The SDK handles protobuf, batching, retry, TLS and shutdown.
+Standard `OTEL_EXPORTER_OTLP_HEADERS`, timeout, certificate and batch-processor settings apply.
+The supervisor inherits these settings into both interpreters. Export is asynchronous with a
+bounded SDK queue; backend outages or abrupt process termination can lose spans. Console
+output remains independent. `OTEL_SERVICE_NAME` defaults to `ide-distributions`.
 
-These are structured logs, not custom Datadog metrics. Release the normal distribution image
-and verify log ingestion before making dashboard availability claims. A current model trace,
-time to first token, provider cached-token usage, session restoration and cache-miss evidence
-must come from the supported native runtime/provider surfaces. Retained workspace startup
-alone does not prove a warm model context or provider key/value cache hit.
+Hosting must configure an accessible, authorized endpoint before claiming remote trace delivery.
+The distribution neither provisions a collector nor assumes a Datadog endpoint. Changing
+backend routing requires exporter/collector configuration, not instrumentation changes.
+The pinned Relay plugin configuration explicitly disables its separate prompt/response
+exporter, so configuring an OTLP endpoint does not enable content capture.
+
+Spans and boundaries:
+
+| Span | Meaning |
+| --- | --- |
+| `workspace.request` | Adapter request, through response consumption; header event and child validation/annotation spans |
+| `session.open`, `session.message` | Durable intake, with child transaction events |
+| `hermes.session.create` | Native session-create HTTP exchange, including replay |
+| `invoke_agent` | Observed pre-LLM callback to session-end callback |
+| `chat` | One observed physical model attempt; retries have separate spans |
+| `execute_tool`, `tool.boundary=native` | Native pre/post-tool callbacks, including built-ins |
+| `execute_tool`, `tool.boundary=distribution` | Distribution validation, execution, rendering and scrubbing |
+| `workspace.run.observed` | Durable acceptance to coordinator terminal observation, including polling delay |
+
+Native model/tool spans are children of the turn. Hermes isolates tool workers, so distribution
+tool handlers explicitly bind the unique active turn for their native session. Subprocesses
+carry W3C trace context through `TRACEPARENT`/`TRACESTATE`; adapter HTTP requests use the same
+propagator through normal trace headers. Durable asynchronous intake and native execution
+remain separate traces correlated by exact `op.id` and native session/run IDs. No latest-run
+heuristic or process-global session context is used.
+
+Distribution outcomes preserve `validation_rejected`, `tool_rejected`, `store_rejected`,
+`internal_error`, `failed`, `succeeded` and `unknown_tool`. Unknown tool/action inputs are
+not logged. Native semantic tool errors and failed model attempts set error status. No
+arguments, results, messages, prompts, credential values or exception text are captured.
+Token usage uses `gen_ai.usage.*`; positive native cache buckets are evidence of reported
+usage, while absent/zero buckets do not prove a cache miss. The first-chunk event does not
+claim first visible text or first-token latency.
+
+Do not sum overlapping span durations. Waterfalls expose concurrency and gaps; exact busy
+unions and unaccounted-time summaries can be calculated from exported intervals. The runtime
+no longer maintains a second interval-accounting system. Native and distribution tool spans
+measure different boundaries and must not be added together as independent tool counts.
+
+The Hermes adapter retains only live callback correlation. Read-only authoritative leases
+reclaim orphaned observations without evicting active calls or backoff. An observed orphan or
+missing callback ends with `observation.complete=false` and a reason. Its end is an observation
+boundary, not an invented native completion timestamp. Capacity rejection emits a diagnostic
+span. Session restoration, isolated retry backoff, and frontend delivery are not inferred.

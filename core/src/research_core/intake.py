@@ -1,18 +1,17 @@
-"""HTTP intake validation, atomic receipts and latency telemetry.
+"""HTTP intake validation and atomic receipts.
 
-Kept outside the shared admission ledger so in-process native tools stay stdlib-only.
+OpenTelemetry spans record transaction boundaries without copying request payloads.
 """
 
 import json
-import sys
-import time
-from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, NonNegativeFloat
+from opentelemetry import trace
+from pydantic import BaseModel, ConfigDict
 
 from research_core.store import admissions, sessions
 from research_core.store.actors import Actor
 from research_core.store.db import Store
+from research_core.telemetry import span
 
 
 class OpenRegistration(BaseModel):
@@ -30,26 +29,9 @@ class Receipt(BaseModel):
     session_id: str
     run_id: str | None
     replayed: bool
-    writer_wait_ms: NonNegativeFloat
-    write_ms: NonNegativeFloat
-    commit_ms: NonNegativeFloat
-    registration_ms: NonNegativeFloat = 0
 
 
-class IntakeTiming(Receipt):
-    event: Literal["workspace_intake"] = "workspace_intake"
-    operation: Literal["session.open", "session.message"]
-    op_id: str
-    validation_ms: NonNegativeFloat
-    store_open_ms: NonNegativeFloat
-    metadata_ms: NonNegativeFloat
-    total_ms: NonNegativeFloat
-
-    def emit(self) -> None:
-        sys.stderr.write(self.model_dump_json() + "\n")
-        sys.stderr.flush()
-
-
+@span("intake.transaction")
 def accept(
     store: Store,
     actor: Actor,
@@ -62,9 +44,11 @@ def accept(
     payload: str,
     registration: OpenRegistration | None = None,
 ) -> Receipt:
-    started = time.monotonic()
+    current = trace.get_current_span()
+    current.set_attributes({"op.id": op_id, "session.id": session_id})
+    current.add_event("writer.wait")
     with store.tx(actor) as tx:
-        acquired = time.monotonic()
+        current.add_event("writer.acquired")
         existing = admissions.read(store, op_id, kind, request)
         if existing is None:
             tx.execute(
@@ -83,7 +67,7 @@ def accept(
                 ),
             )
             tx.event("client.accepted", op_id, {"kind": kind, "session_id": session_id})
-        registering = time.monotonic()
+        current.add_event("admission.written")
         if registration is not None:
             sessions.register_in_transaction(
                 tx,
@@ -91,14 +75,11 @@ def accept(
                 kind="chat",
                 **registration.model_dump(),
             )
-        written = time.monotonic()
-    committed = time.monotonic()
+            current.add_event("session.registered")
+    current.add_event("transaction.committed")
+    current.set_attribute("replayed", existing is not None)
     return Receipt(
         session_id=existing["session_id"] if existing is not None else session_id,
         run_id=existing["run_id"] if existing is not None else None,
         replayed=existing is not None,
-        writer_wait_ms=(acquired - started) * 1000,
-        write_ms=(registering - acquired) * 1000,
-        commit_ms=(committed - written) * 1000,
-        registration_ms=(written - registering) * 1000 if registration is not None else 0,
     )

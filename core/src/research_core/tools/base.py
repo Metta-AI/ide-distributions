@@ -12,7 +12,7 @@ That refusal says what the call sent and carries ``usage`` (the action's require
 fields and an example call), so a model can fix the call in one try instead of repeating it.
 Empty placeholders for fields the action does not take are dropped, not refused.
 
-Stdlib only: store-only tools run inside Hermes.
+Store-only tools run inside Hermes, with the packaged OpenTelemetry SDK.
 """
 
 from __future__ import annotations
@@ -20,11 +20,9 @@ from __future__ import annotations
 import json
 import os
 import re
-import sys
-import time
 import traceback
 from collections.abc import Callable, Mapping
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass, field
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -494,94 +492,82 @@ def error_payload(problems: list[str], context: dict | None = None) -> dict:
     }
 
 
-@dataclass(frozen=True)
-class ToolTiming:
-    """Payload-free completion telemetry for the shared distribution tool boundary."""
-
-    # Discriminators lead the wire encoding so the workspace relay can select this event.
-    event: Literal["workspace_tool"] = field(default="workspace_tool", init=False)
-    schema_version: Literal[1] = field(default=1, init=False)
-    session_id: str
-    role: Role
-    tool: str
-    action: str | None
-    outcome: Literal[
-        "unknown_tool",
-        "validation_rejected",
-        "succeeded",
-        "failed",
-        "tool_rejected",
-        "store_rejected",
-        "internal_error",
-    ]
-    elapsed_ms: float
-
-
 def run_tool(name: str, args: Mapping[str, Any], ctx: ToolContext) -> str:
     """Validate, run and render a tool call as JSON text. Never raises."""
+    from opentelemetry import trace
+    from opentelemetry.trace import StatusCode
+
+    from research_core import telemetry
     from research_core.tools.catalog import _load_tool_modules
 
-    started = time.monotonic()
-    tool_name = "unknown"
-    action = None
-    outcome = "internal_error"
-    spec = None
-    try:
-        _load_tool_modules()
-        spec = TOOLS.get(name)
-        if spec is None or ctx.role not in spec.roles:
-            outcome = "unknown_tool"
-            return json.dumps(error_payload([f"unknown tool {name!r} for the {ctx.role}"]))
-        tool_name = spec.name
-        action, problems = validate_args(spec, ctx.role, args)
-        if problems:
-            outcome = "validation_rejected"
-            return json.dumps(argument_error(spec, ctx.role, action, args, problems))
+    parent = (
+        trace.set_span_in_context(trace.get_current_span())
+        if trace.get_current_span().get_span_context().is_valid
+        else telemetry.process_context(os.environ)
+    )
+    with telemetry.span("execute_tool", context=parent) as span:
+        tool_name = "unknown"
+        action = None
+        outcome = "internal_error"
+        spec = None
         try:
-            args = drop_unused_empty(spec, action, args)
-            call = ToolCall(
-                spec=spec, args=coerce_args(spec, ctx.role, args), ctx=ctx, action=action
-            )
-            result = spec.handler(call)
-            if not isinstance(result, dict):
-                result = {"result": result}
-            result.setdefault("ok", True)
-            outcome = "succeeded" if result["ok"] else "failed"
-            text = json.dumps(result, default=str)
-        except ToolError as error:
-            outcome = "tool_rejected"
-            text = json.dumps(error_payload(error.problems, {"tool": name, **error.context}))
-        except StoreError as error:
-            outcome = "store_rejected"
-            text = json.dumps(
-                error_payload(
-                    list(error.problems) or [str(error)], {"tool": name, "action": action}
+            _load_tool_modules()
+            spec = TOOLS.get(name)
+            if spec is None or ctx.role not in spec.roles:
+                outcome = "unknown_tool"
+                return json.dumps(error_payload([f"unknown tool {name!r} for the {ctx.role}"]))
+            tool_name = spec.name
+            action, problems = validate_args(spec, ctx.role, args)
+            if problems:
+                outcome = "validation_rejected"
+                return json.dumps(argument_error(spec, ctx.role, action, args, problems))
+            try:
+                args = drop_unused_empty(spec, action, args)
+                call = ToolCall(
+                    spec=spec, args=coerce_args(spec, ctx.role, args), ctx=ctx, action=action
                 )
-            )
-        except Exception as error:  # the agent must see what failed, with context
-            outcome = "internal_error"
-            text = json.dumps(
-                error_payload(
-                    [f"{type(error).__name__}: {error}"],
-                    {"tool": name, "action": action, "traceback": traceback.format_exc()[-2000:]},
+                result = spec.handler(call)
+                if not isinstance(result, dict):
+                    result = {"result": result}
+                result.setdefault("ok", True)
+                outcome = "succeeded" if result["ok"] else "failed"
+                text = json.dumps(result, default=str)
+            except ToolError as error:
+                outcome = "tool_rejected"
+                text = json.dumps(error_payload(error.problems, {"tool": name, **error.context}))
+            except StoreError as error:
+                outcome = "store_rejected"
+                text = json.dumps(
+                    error_payload(
+                        list(error.problems) or [str(error)], {"tool": name, "action": action}
+                    )
                 )
+            except Exception as error:  # the agent must see what failed, with context
+                outcome = "internal_error"
+                text = json.dumps(
+                    error_payload(
+                        [f"{type(error).__name__}: {error}"],
+                        {
+                            "tool": name,
+                            "action": action,
+                            "traceback": traceback.format_exc()[-2000:],
+                        },
+                    )
+                )
+            return ctx.scrub(text)
+        finally:
+            # No arguments, results, prompts or error text: tool payloads may contain secrets.
+            span.set_attributes(
+                {
+                    "gen_ai.operation.name": "execute_tool",
+                    "tool.boundary": "distribution",
+                    "gen_ai.tool.name": tool_name,
+                    "session.id": ctx.hermes_session_id(),
+                    "role": ctx.role,
+                    "outcome": outcome,
+                }
             )
-        return ctx.scrub(text)
-    finally:
-        # No arguments, results, prompts or error text: tool payloads may contain secrets.
-        event = ToolTiming(
-            session_id=ctx.hermes_session_id(),
-            role=ctx.role,
-            tool=tool_name,
-            action=action if spec is not None and spec.action(action) is not None else None,
-            outcome=outcome,
-            elapsed_ms=round((time.monotonic() - started) * 1000, 3),
-        )
-        sys.stderr.write(
-            json.dumps(
-                asdict(event),
-                separators=(",", ":"),
-            )
-            + "\n"
-        )
-        sys.stderr.flush()
+            if spec is not None and spec.action(action) is not None and action is not None:
+                span.set_attribute("tool.action", action)
+            if outcome != "succeeded":
+                span.set_status(StatusCode.ERROR)

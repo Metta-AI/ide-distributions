@@ -1,10 +1,4 @@
-import subprocess
-import sys
-from pathlib import Path
-
 from research_core.plugin import register
-
-CORE_SRC = Path(__file__).resolve().parents[1] / "src"
 
 
 class FakeContext:
@@ -49,21 +43,3 @@ def test_firmer_refusal_registers_before_the_advisory_note():
         "research_core.plugin.repeats",
         "research_core.plugin.advisory",
     ]
-
-
-def test_plugin_imports_are_stdlib_only():
-    code = (
-        "import sys\n"
-        f"sys.path.insert(0, {str(CORE_SRC)!r})\n"
-        "import research_core.plugin.register, research_core.plugin.executor\n"
-        "import research_core.plugin.advisory, research_core.plugin.rules\n"
-        "import research_core.layout, research_core.tools.base\n"
-        "import research_core.inference, research_core.plugin.inference_hook\n"
-        "third = sorted(m for m in sys.modules if m.split('.')[0] in "
-        "{'yaml','numpy','coworld','softmax_client','softmax','httpx','pydantic','jsonschema'})\n"
-        "assert not third, third\n"
-        "print('ok')\n"
-    )
-    result = subprocess.run([sys.executable, "-I", "-c", code], capture_output=True, text=True)
-    assert result.returncode == 0, result.stderr
-    assert result.stdout.strip() == "ok"

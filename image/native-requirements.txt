@@ -2,3 +2,7 @@
 faster-whisper==1.2.1
 # faster-whisper 1.2.1 uses av.open(metadata_errors), removed in PyAV 19.
 av==18.1.0
+
+# Same tracing SDK as the locked workspace environment.
+opentelemetry-sdk==1.45.1
+opentelemetry-exporter-otlp-proto-http==1.45.1

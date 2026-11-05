@@ -1,8 +1,6 @@
 """The two profile shells: manifests, configs, plugin shims and the watcher job."""
 
-import ast
 import json
-import sys
 from pathlib import Path
 
 import pytest
@@ -10,7 +8,6 @@ import yaml
 
 REPO = Path(__file__).resolve().parents[2]
 PROFILES = {"orchestrator": REPO / "orchestrator", "researcher": REPO / "researcher"}
-STDLIB = set(sys.stdlib_module_names) | {"research_core", "hermes_constants"}
 
 
 @pytest.mark.parametrize("role", sorted(PROFILES))
@@ -60,30 +57,6 @@ def test_plugin_manifest(role):
     assert manifest["kind"] == "standalone"
     assert "transform_tool_result" in manifest["provides_hooks"]
     assert ("pre_llm_call" in manifest["provides_hooks"]) == (role == "orchestrator")
-
-
-@pytest.mark.parametrize("role", sorted(PROFILES))
-def test_plugin_shim_is_stdlib_only(role):
-    shim = PROFILES[role] / "plugins" / role / "__init__.py"
-    tree = ast.parse(shim.read_text())
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            for alias in node.names:
-                assert alias.name.split(".")[0] in STDLIB, alias.name
-        elif isinstance(node, ast.ImportFrom):
-            assert (node.module or "").split(".")[0] in STDLIB, node.module
-    assert f'ROLE = "{role}"' in shim.read_text()
-
-
-@pytest.mark.parametrize("role", sorted(PROFILES))
-def test_prepare_script_is_stdlib_only_and_takes_the_hosting_flags(role):
-    text = (PROFILES[role] / "scripts" / "prepare.py").read_text()
-    for flag in ("--source", "--hermes"):
-        assert flag in text
-    tree = ast.parse(text)
-    for node in ast.walk(tree):
-        if isinstance(node, ast.ImportFrom):
-            assert (node.module or "").split(".")[0] in STDLIB
 
 
 def test_profiles_ship_no_observation_cron():

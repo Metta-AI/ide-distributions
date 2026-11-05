@@ -12,7 +12,6 @@ from __future__ import annotations
 import json
 import os
 import subprocess
-import sys
 from collections.abc import Callable
 from typing import Any
 
@@ -103,48 +102,52 @@ def run_in_workspace(
             expected=str(python),
         )
     command = [str(python), "-m", "research_core.cli", "tool", name, "--args", json.dumps(args)]
+    from research_core.telemetry import process_env
+
     timeout = timeout_s or TOOL_TIMEOUT_S
     try:
         completed = subprocess.run(
             command,
-            env=workspace_process_env(env, ws),
-            capture_output=True,
+            env=process_env(workspace_process_env(env, ws)),
+            stdout=subprocess.PIPE,
             text=True,
             timeout=timeout,
             check=False,
         )
     except subprocess.TimeoutExpired:
         return error_result(f"tool {name} timed out after {timeout} s", command=command)
-    # The child owns execution/validation telemetry. Relay only its allowlisted event;
-    # emitting another event here would count workspace calls twice.
-    for line in completed.stderr.splitlines():
-        if line.startswith('{"event":"workspace_tool","schema_version":1,'):
-            sys.stderr.write(line + "\n")
-            sys.stderr.flush()
+    # Inherit stderr: the SDK exports directly to normal process logs, once.
     stdout = completed.stdout.strip()
     if completed.returncode != 0 or not stdout:
         return error_result(
             f"tool {name} process failed",
             exit_code=completed.returncode,
             stdout_tail=stdout[-2000:],
-            stderr_tail=completed.stderr[-2000:],
             command=command,
         )
     return stdout.splitlines()[-1]
 
 
-def make_handler(spec: Any, role: Role) -> Callable[..., str]:
+def make_handler(spec: Any, role: Role, session_span: Callable) -> Callable[..., str]:
     def handler(args: dict | None = None, session_id: str = "", **_: Any) -> str:
         args = dict(args or {})
         env = tool_env(role, session_id)
-        try:
-            if spec.executor == "inproc":
-                from research_core.tools.base import ToolContext, run_tool
+        from opentelemetry import trace
 
-                return run_tool(spec.name, args, ToolContext.from_env(role, env))
-            return run_in_workspace(spec.name, args, env, spec.timeout_s)
-        except Exception as error:  # never raise into Hermes
-            return error_result(f"{type(error).__name__}: {error}", tool=spec.name)
+        with trace.use_span(
+            session_span(session_id),
+            end_on_exit=False,
+            record_exception=False,
+            set_status_on_exception=False,
+        ):
+            try:
+                if spec.executor == "inproc":
+                    from research_core.tools.base import ToolContext, run_tool
+
+                    return run_tool(spec.name, args, ToolContext.from_env(role, env))
+                return run_in_workspace(spec.name, args, env, spec.timeout_s)
+            except Exception as error:  # never raise into Hermes
+                return error_result(f"{type(error).__name__}: {error}", tool=spec.name)
 
     handler.__name__ = f"tool_{spec.name}"
     return handler

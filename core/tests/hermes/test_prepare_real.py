@@ -200,15 +200,26 @@ captured = []
 class Provider(BaseHTTPRequestHandler):
     def do_POST(self):
         request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        captured.append(request)
+        if self.path.endswith("/chat/completions") and not request.get("response_format"):
+            captured.append(request)
+            if len(captured) == 1:
+                body = b'{"error":{"message":"fixture rate limit"}}'
+                self.send_response(429)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+                return
         message = {"role": "assistant", "content": "Chat received"}
         choice = {"index": 0, "finish_reason": "stop", "message": message}
+        usage = {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12,
+                 "prompt_tokens_details": {"cached_tokens": 5}}
         body = json.dumps({"id": "proof", "object": "chat.completion", "created": 1,
             "model": "proof", "choices": [choice],
-            "usage": {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}}).encode()
+            "usage": usage}).encode()
         if request.get("stream"):
             chunk = {"id": "proof", "object": "chat.completion.chunk", "created": 1,
-                "model": "proof", "choices": [
+                "model": "proof", "usage": usage, "choices": [
                     {"index": 0, "finish_reason": "stop", "delta": message}]}
             body = ("data: " + json.dumps(chunk) + "\\n\\ndata: [DONE]\\n\\n").encode()
         self.send_response(200)
@@ -258,6 +269,21 @@ finally:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "PASS pinned native text chat and resume" in result.stdout
+
+    # Registration, retry boundaries and usage mapping are our Hermes integration contract.
+    events = [
+        json.loads(line) for line in result.stderr.splitlines() if line.startswith('{"name":')
+    ]
+    models = [e for e in events if e["name"] == "chat"]
+    turns = [e for e in events if e["name"] == "invoke_agent"]
+    assert len(turns) == 2 and len(models) == 3, events
+    assert [e["attributes"]["retry.count"] for e in models] == [0, 1, 0]
+    assert models[0]["attributes"]["http.response.status_code"] == 429
+    assert models[0]["status"]["status_code"] == "ERROR"
+    assert all(e["attributes"]["gen_ai.usage.input_tokens"] == 10 for e in models[1:])
+    assert all(e["attributes"]["gen_ai.usage.cache_read.input_tokens"] == 5 for e in models[1:])
+    assert all(e["attributes"]["observation.complete"] for e in turns)
+    assert all("Hello from the OpenAI message contract" not in json.dumps(e) for e in events)
 
 
 def test_installed_agent_reads_attachment_after_resume(hermes_bin, host):
@@ -351,6 +377,15 @@ finally:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "PASS native file read before and after agent resume" in result.stdout
+
+    events = [
+        json.loads(line) for line in result.stderr.splitlines() if line.startswith('{"name":')
+    ]
+    tools = [e for e in events if e["name"] == "execute_tool"]
+    assert len(tools) == 2 and all(
+        e["attributes"]["gen_ai.tool.name"] == "read_file" for e in tools
+    ), events
+    assert all("cedar-7381-native-read" not in json.dumps(e) for e in events)
 
 
 def test_disabled_toolsets_remove_the_named_tools_and_keep_the_working_ones(hermes_bin, host):
