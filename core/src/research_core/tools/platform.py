@@ -39,7 +39,7 @@ NO_FILE_STATUS = 409
 LEAGUE_EPISODE_POLICIES = 10
 
 LEAGUE = a.string("The League id (league_...) or a platform URL carrying it.")
-IDENTITY = a.string("Default player; the Researcher is Player only.", enum=["player", "user"])
+IDENTITY = a.string("Default player.", enum=["player", "user"])
 
 
 def handle(call: ToolCall) -> dict:
@@ -551,14 +551,14 @@ SPEC = tool(
             ),
             ActionSpec(
                 "active_policies",
-                "A league's active memberships; exclude_player drops this Player's, "
-                "exclude_user drops every Player of the user (needs the User identity).",
+                "A league's active memberships, with the opponents after the exclusions.",
                 {
                     "league": LEAGUE,
                     "exclude_player": a.boolean("Drop this Player's policies."),
                     "exclude_user": a.boolean("Drop the policies of all the user's Players."),
                 },
                 ("league",),
+                orchestrator_fields=("exclude_user",),
             ),
             ActionSpec(
                 "policy_versions",
@@ -568,6 +568,7 @@ SPEC = tool(
                     "name": a.string("A policy name; every version of it."),
                     "identity": IDENTITY,
                 },
+                orchestrator_fields=("identity",),
             ),
             ActionSpec(
                 "policy_file",

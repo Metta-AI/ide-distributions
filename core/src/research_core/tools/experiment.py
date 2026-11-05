@@ -30,8 +30,10 @@ on the run with ``update_run {results: {"rows": [...]}}``. Each row is an object
 - ``metrics`` (object of metric name to number; every metric named in ``methods.metrics``),
 - ``status`` (``"completed"`` by default, or ``"failed"``) and ``reason`` (string, optional).
 
-Rows with ``status: failed``, a repeated ``episode_id``, another game version or a missing
-metric are dropped and counted in the result's ``evaluation.rows.dropped``. Several rows for one
+Rows of a run marked invalid do not count; the result names those runs in
+``evaluation.invalid_runs``. Rows with ``status: failed``, a repeated ``episode_id``, another game
+version or a missing metric are dropped and counted in ``evaluation.rows.dropped``. Several rows
+for one
 ``(policy_version, game_version, seed, opponents)`` - per-seat rows from a mixin's ``evaluate``
 output, or several episodes on one seed - are averaged into one row whose seats are their
 union, so each seed makes exactly one baseline/candidate pair. The ``evaluation`` design's
@@ -105,36 +107,19 @@ MEASUREMENT = a.obj(
         "baseline": {"type": "number", "description": "The baseline arm's value."},
         "candidate": {"type": "number", "description": "The candidate arm's value."},
         "n": a.integer("How many pairs."),
-        "effect": {"type": "number", "description": "candidate minus baseline."},
+        "effect": {
+            "type": "number",
+            "description": "Candidate minus baseline, signed so that positive is better.",
+        },
     },
     required=experiments.MEASUREMENT_KEYS,
 )
-RESULT_ROW = a.obj(
-    "",
-    {
-        "episode_id": a.string("Unique within the Experiment."),
-        "game_version": a.string("The game version played."),
-        "policy_version": a.string("The Version the run played, such as V-3."),
-        "seed": a.integer("The game seed."),
-        "seats": {"type": "array", "items": a.INTEGER, "description": "Seats played."},
-        "opponents": a.strings("Opponent policies."),
-        "metrics": {
-            "type": "object",
-            "description": "Metric name to number, for every metric in the methods.",
-            "properties": {},
-            "additionalProperties": {"type": "number"},
-        },
-        "status": a.string("Default completed.", enum=["completed", "failed"]),
-        "reason": a.string("Why it failed."),
-    },
+# xp.status writes rows, so a call rarely does; a bad row is named at close. The keys are spelled
+# out in words, not as a schema: a schema with them was the largest single part of this tool.
+RESULTS = a.free_object(
+    "The run's results. xp.status writes evaluation rows under rows: [{episode_id, game_version, "
+    "policy_version, seed, seats, opponents, metrics, status?, reason?}]."
 )
-RESULTS = {
-    **a.obj(
-        "The run's results; evaluation rows go under rows (xp.status writes them).",
-        {"rows": a.objects("Evaluation rows.", RESULT_ROW)},
-    ),
-    "additionalProperties": True,
-}
 # The design fields create takes and update replaces (a section or a list as a whole).
 DESIGN = {
     "summary": a.string("What is being tested, in at most 40 words."),
@@ -143,6 +128,47 @@ DESIGN = {
     "methods": {**METHODS, "description": "experiment.start needs all but candidate."},
     "related_claims": a.strings("Claims it builds on, such as C-12."),
     "related_experiments": a.strings("Experiments it follows, such as X-4."),
+}
+SAME_KEY = "As in experiment_create."
+# What update takes: the same sections, whose keys experiment_create describes in the same list.
+DESIGN_UPDATE = {
+    **DESIGN,
+    "hypothesis": a.obj(
+        "Replaces the hypothesis whole.",
+        {key: a.string(SAME_KEY) for key in experiments.HYPOTHESIS_KEYS},
+        closed=True,
+    ),
+    "methods": a.obj(
+        "Replaces the methods whole.",
+        {
+            "baseline": a.string(SAME_KEY),
+            "candidate": a.string(SAME_KEY),
+            "procedure": a.string(SAME_KEY),
+            "metrics": a.objects(
+                SAME_KEY,
+                a.obj(
+                    "",
+                    {
+                        "name": a.string(SAME_KEY),
+                        "direction": a.string(SAME_KEY, enum=list(experiments.METRIC_DIRECTIONS)),
+                        "role": a.string(SAME_KEY, enum=list(experiments.METRIC_ROLES)),
+                        "min_effect": {"type": "number", "description": SAME_KEY},
+                        "tolerance": {"type": "number", "description": SAME_KEY},
+                    },
+                    required=("name", "direction", "role"),
+                    closed=True,
+                ),
+                min_items=1,
+            ),
+            "decision_rule": a.obj(
+                SAME_KEY,
+                {"text": a.string(SAME_KEY), "n_min": a.integer(SAME_KEY)},
+                required=("text", "n_min"),
+                closed=True,
+            ),
+        },
+        closed=True,
+    ),
 }
 UPDATABLE = ("summary", "hypothesis", "methods", "tags", "related_claims", "related_experiments")
 NO_ROWS = "no evaluation rows recorded yet; run xp.status first or close with an explicit verdict"
@@ -195,18 +221,6 @@ def handle(call: ToolCall) -> dict:
         return {"record": experiments.update(store, actor, experiment_id, **fields)}
     if call.action == "start":
         return {"record": experiments.start(store, actor, experiment_id)}
-    if call.action == "add_run":
-        record = experiments.add_run(
-            store,
-            actor,
-            experiment_id,
-            kind=call.get("kind"),
-            platform_request_id=call.get("platform_request_id"),
-            arm=call.get("arm"),
-            seed=call.get("seed"),
-            episodes_total=call.get("episodes_total"),
-        )
-        return {"record": record}
     if call.action == "close":
         if call.get("verdict") is not None:
             return explicit_close(call, experiment_id)
@@ -255,10 +269,12 @@ def computed_close(call: ToolCall, experiment_id: int) -> dict:
             f"{record['id']} is {record['status']}; an Experiment closes only while it is running"
         )
     candidate = candidate_version(record)
-    rows = stored_rows(record["runs"])
+    counted = [run for run in record["runs"] if run["validity"] == "valid"]
+    excluded = [run["id"] for run in record["runs"] if run["validity"] != "valid"]
+    rows = stored_rows(counted)
     if not rows:
-        raise ToolError(NO_ROWS)
-    design = design_from(record["methods"], candidate, record["runs"], rows)
+        raise ToolError(NO_ROWS, invalid_runs=excluded)
+    design = design_from(record["methods"], candidate, counted, rows)
     kept, report = ingest.ingest_rows(rows, design.game_version, [m.name for m in design.metrics])
     pairs = ingest.pair(one_row_per_seed(kept), design)
     if not pairs:
@@ -287,13 +303,14 @@ def computed_close(call: ToolCall, experiment_id: int) -> dict:
         "evaluation": {
             "pairs": len(pairs),
             "rows": {"kept": report.kept, "dropped": dropped(report)},
+            "invalid_runs": excluded,
             "reason_codes": verdict.reason_codes,
         },
     }
 
 
 def stored_rows(runs: list[dict]) -> list[EpisodeRow]:
-    """Every row under ``results.rows`` of every run; every malformed row is named at once."""
+    """Every row under ``results.rows`` of the runs given; every malformed row is named at once."""
     rows: list[EpisodeRow] = []
     problems: list[str] = []
     for run in runs:
@@ -387,7 +404,7 @@ def design_from(
     seeds |= {row.seed for row in rows}
     rule = methods.get("decision_rule") or {}
     return EvaluationDesign(
-        game_version=methods.get("game_version") or first.game_version,
+        game_version=first.game_version,
         baseline_version=methods["baseline"],
         candidate_version=candidate,
         seats=first.seats,
@@ -502,9 +519,8 @@ SPEC = tool(
         name="experiment",
         description=(
             "Experiments: a comparison of Versions whose hypothesis and methods lock at start "
-            "and end in a verdict. Runs are recorded as the platform accepts them; close "
-            "applies the pre-registered decision rule to the stored rows, or records an "
-            "explicit verdict with its reason."
+            "and end in a verdict. xp.request records the runs; close applies the pre-registered "
+            "decision rule to the stored rows, or records an explicit verdict with its reason."
         ),
         handler=handle,
         executor="workspace",
@@ -545,8 +561,9 @@ SPEC = tool(
                 "update",
                 "Change a proposed Experiment's design; each section or list given replaces the "
                 "stored one whole.",
-                {"experiment": EXPERIMENT, **DESIGN},
+                {"experiment": EXPERIMENT, **DESIGN_UPDATE},
                 ("experiment",),
+                example_fields=("summary",),
             ),
             ActionSpec(
                 "start",
@@ -555,34 +572,20 @@ SPEC = tool(
                 ("experiment",),
             ),
             ActionSpec(
-                "add_run",
-                "Record an evaluation run the moment the platform accepts it.",
-                {
-                    "experiment": EXPERIMENT,
-                    "kind": a.string("The run kind, such as xp."),
-                    "platform_request_id": a.string("The platform's request id."),
-                    "arm": a.string("baseline or candidate."),
-                    "seed": a.integer("The game seed the run plays."),
-                    "episodes_total": a.integer("Episodes the request will play."),
-                },
-                ("experiment", "kind", "platform_request_id", "arm"),
-                own_tool=True,
-            ),
-            ActionSpec(
                 "update_run",
-                "Progress on a run: platform state, episodes done, result rows, validity.",
+                "Progress on a run: platform state, episodes done, result rows, validity. "
+                "An invalid run's rows do not count at close.",
                 {
-                    "run": a.integer("The run id from experiment_add_run."),
-                    "experiment": {
-                        **EXPERIMENT,
-                        "description": "Not needed: the run names it. Refused if it is another.",
-                    },
+                    "run": a.integer("The run id from the Experiment's runs."),
                     "state": a.string("The platform's state of the request."),
                     "episodes_completed": a.integer("Episodes finished so far."),
                     "results": RESULTS,
                     "validity": a.string("valid, or 'invalid: <reason>'."),
                 },
                 ("run",),
+                example_fields=("validity",),
+                # A chat keeps the schema it started with until the next release's refresh.
+                hidden_params={"experiment": EXPERIMENT},
             ),
             ActionSpec(
                 "close",

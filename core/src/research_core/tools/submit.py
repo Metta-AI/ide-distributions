@@ -92,7 +92,7 @@ def handle(call: ToolCall) -> dict:
         except PlatformError as error:
             if pending:
                 finish(ctx, intent, "failed", error.to_dict())
-            raise version_tool.platform_refusal(SUBMIT_ROUTE, error) from error
+            raise version_tool.platform_refusal(ctx, SUBMIT_ROUTE, error) from error
         if pending:
             finish(ctx, intent, "done", asdict(submitted))
     submission.invalidate(policy_version_id)
@@ -139,8 +139,8 @@ def find_league(ctx: ToolContext, value: Any) -> League:
         return with_retries(lambda: platform.league(text), sleep=version_tool.sleep)
     except PlatformError as error:
         if error.status != 404:
-            raise version_tool.platform_refusal("GET /v2/leagues/<id>", error) from error
-    leagues = version_tool.platform_call("GET /v2/leagues", platform.leagues)
+            raise version_tool.platform_refusal(ctx, "GET /v2/leagues/<id>", error) from error
+    leagues = version_tool.platform_call(ctx, "GET /v2/leagues", platform.leagues)
     for league in leagues:
         if league.name.casefold() == text.casefold():
             return league
@@ -152,6 +152,7 @@ def find_submission(ctx: ToolContext, policy_version_id: str, league_id: str) ->
     """The platform's newest submission of this policy version to the league, if any."""
     platform = ctx.platform()
     found = version_tool.platform_call(
+        ctx,
         "GET /v2/league-submissions",
         lambda: platform.submissions(policy_version_id=policy_version_id, league_id=league_id),
     )
@@ -172,6 +173,7 @@ def sync_champion(
     """
     platform = ctx.platform()
     memberships = version_tool.platform_call(
+        ctx,
         "GET /v2/league-policy-memberships",
         lambda: platform.memberships(league_id=league.id, mine=True),
     )
@@ -232,10 +234,9 @@ SPEC = tool(
     ToolSpec(
         name="submit",
         description=(
-            "Submit an uploaded Version to a league. A user's request (user_requested=true,"
-            " cites=<their message>) always runs and may warn; a submission on your own"
-            " initiative must pass the submissions settings and the quality bar, and the"
-            " refusal names each reason. Syncs the champion record and notifies the user."
+            "Submit an uploaded Version to a league. A user's request always runs and may warn;"
+            " a submission on your own initiative must pass the submissions settings and the"
+            " quality bar, and the refusal names each reason. Notifies the user."
         ),
         handler=handle,
         roles=version_tool.ORCHESTRATOR,
@@ -251,8 +252,7 @@ SPEC = tool(
             ),
             "reason": a.string("Why this Version is submitted now."),
             "user_requested": a.boolean(
-                "true when the user asked for this submission: no setting or quality bar"
-                " applies. false (default) for your own initiative."
+                "true when the user asked for this submission: no setting or quality bar applies."
             ),
             "cites": a.string("The reference of the user's message that asked for it."),
         },

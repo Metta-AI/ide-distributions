@@ -26,12 +26,11 @@ ORCHESTRATOR = {
     "github",
 }
 # Actions with a tool of their own (ActionSpec.own_tool). The two roles have different ones.
-OWN_TOOLS_BOTH = {"claim_write", "claim_add_evidence", "experiment_create", "experiment_add_run"}
+OWN_TOOLS_BOTH = {"claim_write", "claim_add_evidence", "experiment_create"}
 OWN_TOOLS_ORCHESTRATOR = {
     "goal_set_status",
     "settings_update",
     "task_abandon",
-    "task_propose",
     "ui_panel_set",
 }
 OWN_TOOLS_RESEARCHER = {
@@ -48,7 +47,6 @@ INPROC = {
     "goal_set_status",
     "task",
     "task_abandon",
-    "task_propose",
     "directive",
     "claim",
     "claim_write",
@@ -75,8 +73,8 @@ def test_a_broken_tool_module_fails_loudly(tmp_path, monkeypatch):
 
 
 def test_tool_counts_match_the_design():
-    assert names("orchestrator") == ORCHESTRATOR and len(ORCHESTRATOR) == 26
-    assert names("researcher") == RESEARCHER and len(RESEARCHER) == 23
+    assert names("orchestrator") == ORCHESTRATOR and len(ORCHESTRATOR) == 24
+    assert names("researcher") == RESEARCHER and len(RESEARCHER) == 22
     assert len(ORCHESTRATOR) <= catalog.TOOL_BUDGET
 
 

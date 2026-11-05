@@ -35,6 +35,7 @@ from research_core import gitops, mixin
 from research_core.platform import submission
 from research_core.platform.errors import PlatformError
 from research_core.platform.protocol import PolicyVersion, with_retries
+from research_core.platform.wait import tool_error
 from research_core.store import sessions, tasks, versions
 from research_core.store._common import parse_display_id
 from research_core.tools import _args as a
@@ -46,6 +47,8 @@ BOTH = frozenset({"orchestrator", "researcher"})
 
 BUILD_BUDGET_S = 240
 RUNTIME_MARKER = ".softmax-runtime.json"
+# A build's resume token is the commit it started at, this, then the mixin command's token.
+RESUME_SEPARATOR = ":"
 
 # Git-ignored paths that are caches or OS droppings, never build inputs: a path with one of
 # these as a component does not stop a build, nor is it searched for nested repositories.
@@ -70,20 +73,18 @@ sleep: Callable[[float], None] = time.sleep
 # --- shared by the upload and submit tools ------------------------------------------------
 
 
-def platform_call[T](route: str, fn: Callable[[], T]) -> T:
+def platform_call[T](ctx: ToolContext, route: str, fn: Callable[[], T]) -> T:
     """Run a platform call with retries; an error that escapes is a refusal with its context."""
     try:
         return with_retries(fn, sleep=sleep)
     except PlatformError as error:
-        raise platform_refusal(route, error) from error
+        raise platform_refusal(ctx, route, error) from error
 
 
-def platform_refusal(route: str, error: PlatformError) -> ToolError:
-    """The refusal for a platform error: its detail plus route, status and request id (B.15)."""
-    context = error.to_dict()
-    context.pop("error", None)
-    context["route"] = error.route or route
-    return ToolError([f"{route}: {error.detail}"], **context)
+def platform_refusal(ctx: ToolContext, route: str, error: PlatformError) -> ToolError:
+    """The refusal every platform tool gives: route, status and request id (B.15), the login report
+    and the Task's wait on the platform."""
+    return tool_error(ctx, route, error)
 
 
 def intent_number(intent: dict[str, Any]) -> int:
@@ -133,9 +134,9 @@ def handle_create(call: ToolCall) -> dict:
     if branch is None:
         raise ToolError(f"{tree_name(coworld, tree)} is on a detached HEAD; check out a branch")
     commit = gitops.rev_parse(tree, "HEAD")
-    result = run_build(call, loaded, tree, coworld.documents / "logs")
+    result = run_build(call, loaded, tree, coworld.documents / "logs", commit)
     if not result.finished:
-        return background_result(ctx.role, result)
+        return background_result(ctx.role, result, commit)
     if result.exit_code != 0:
         raise build_failure(ctx, result, f"exit code {result.exit_code}")
     artifact_file = tree / artifact_path
@@ -308,10 +309,18 @@ def is_build_output(entry: str, artifact_path: str) -> bool:
 
 
 def run_build(
-    call: ToolCall, loaded: mixin.Mixin, tree: Path, log_dir: Path
+    call: ToolCall, loaded: mixin.Mixin, tree: Path, log_dir: Path, commit: str
 ) -> mixin.CommandResult:
-    token = call.get("resume")
-    if token:
+    resume = call.get("resume")
+    if resume:
+        built_commit, _, token = str(resume).partition(RESUME_SEPARATOR)
+        if built_commit != commit:
+            # The artifact on disk is the started build's: it must not be recorded against a
+            # commit made since. Build again.
+            raise ToolError(
+                f"the resumed build started at commit {built_commit[:12]}, but the tree is now at"
+                f" {commit[:12]}; call version.create again without resume"
+            )
         try:
             return mixin.resume(token)
         except mixin.MixinError as error:
@@ -319,7 +328,7 @@ def run_build(
     return mixin.run_command(loaded, "build", cwd=tree, log_dir=log_dir, budget_s=BUILD_BUDGET_S)
 
 
-def background_result(role: str, result: mixin.CommandResult) -> dict:
+def background_result(role: str, result: mixin.CommandResult, commit: str) -> dict:
     if role == "researcher":
         next_step = (
             f"the build is still running: task_wait {{task, kind: process, ref: {result.pid},"
@@ -336,7 +345,7 @@ def background_result(role: str, result: mixin.CommandResult) -> dict:
         "background": {
             "pid": result.pid,
             "log": str(result.log_path),
-            "resume": result.resume_token,
+            "resume": f"{commit}{RESUME_SEPARATOR}{result.resume_token}",
         },
         "output_tail": result.output_tail,
         "next": next_step,
@@ -409,11 +418,13 @@ def handle_adopt(call: ToolCall) -> dict:
         if not name or not number.isdigit():
             raise ToolError(f"label must look like name:v3, not {label!r}")
         candidates = platform_call(
-            "GET /v2/policy-versions", lambda: platform.policy_versions(name=name)
+            ctx, "GET /stats/policy-versions", lambda: platform.policy_versions(name=name)
         )
         found = [p for p in candidates if p.version == int(number)]
     else:
-        candidates = platform_call("GET /v2/policy-versions", lambda: platform.policy_versions())
+        candidates = platform_call(
+            ctx, "GET /stats/policy-versions", lambda: platform.policy_versions()
+        )
         found = [p for p in candidates if p.id == policy_version_id]
     if not found:
         known = ", ".join(f"{p.label} ({p.id})" for p in candidates) or "none"
@@ -493,15 +504,13 @@ SPEC = tool(
                         "The Task this Version belongs to (a Researcher's held Task)."
                     ),
                     "experiment": a.string("The Experiment it is a candidate for, such as X-2."),
-                    "worktree": a.string(
-                        "Orchestrator only: the worktree to build in, such as orch-2; omit"
-                        " for code/."
-                    ),
+                    "worktree": a.string("The worktree to build in, such as orch-2; omit: code/."),
                     "resume": a.string(
                         "The resume token from an earlier background answer, once the build ended."
                     ),
                 },
                 ("summary",),
+                orchestrator_fields=("worktree",),
             ),
             ActionSpec(
                 "adopt",

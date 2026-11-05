@@ -71,7 +71,7 @@ A standing instruction or preference becomes a directive (`directive.add`) so it
 
 - `claim`: search, read, retire, inspect_evidence, `claim_write`, `claim_add_evidence`
 - `directive`: add, update, retire, list
-- `experiment`: read, search, update, start, update_run, close, abandon, `experiment_create`, `experiment_add_run`
+- `experiment`: read, search, update, start, update_run, close, abandon, `experiment_create`
 - `forum_post`: post, comment
 - `github`: repositories, clone
 - `goal`: create, update, read, list, `goal_set_status`
@@ -79,7 +79,7 @@ A standing instruction or preference becomes a directive (`directive.add`) so it
 - `settings`: read, `settings_update`
 - `softmax_api` (inputs: method, path, params, json, identity)
 - `submit` (inputs: version, league, auto_champion, reason, user_requested, cites)
-- `task`: command, workers, assign, create, approve, link, answer, message, review, reject, read, list, `task_propose`, `task_abandon`
+- `task`: command, workers, assign, create, approve, link, answer, message, review, reject, read, list, `task_abandon`
 - `ui`: show, notify, ask, `ui_panel_set`
 - `upload` (inputs: version, user_requested)
 - `version`: create, adopt, read, list

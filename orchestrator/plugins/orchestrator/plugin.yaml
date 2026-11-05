@@ -11,7 +11,6 @@ provides_tools:
   - claim_write
   - directive
   - experiment
-  - experiment_add_run
   - experiment_create
   - forum_post
   - github
@@ -24,7 +23,6 @@ provides_tools:
   - submit
   - task
   - task_abandon
-  - task_propose
   - ui
   - ui_panel_set
   - upload

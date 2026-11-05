@@ -6,7 +6,7 @@ import pytest
 
 import research_core.tools.experiment as experiment_tool
 import research_core.tools.goal  # noqa: F401  (registers the goal tool for the Goal-ref test)
-from research_core.store import versions
+from research_core.store import experiments, versions
 
 ARTIFACT = {"kind": "file", "path": "dist/policy.bin", "digest": "sha256:" + "0" * 64, "size": 2048}
 HYPOTHESIS = {
@@ -87,30 +87,31 @@ def running(call, two_versions):
     return started["record"]
 
 
-def record_runs(call, rows_by_arm: dict[str, list[dict]]):
+@pytest.fixture
+def add_run(ctx_factory):
+    """Records a run on X-1 the way xp.request does when the platform accepts a request."""
+    ctx = ctx_factory("researcher")
+
+    def add(**fields):
+        return experiments.add_run(ctx.store, ctx.actor, "X-1", **fields)
+
+    return add
+
+
+def record_runs(add_run, call, rows_by_arm: dict[str, list[dict]]):
     """One run per row per arm, its rows stored through update_run; returns the run ids."""
     run_ids = []
     for arm, rows in rows_by_arm.items():
         for index, data in enumerate(rows):
-            added = call(
-                "experiment",
-                {
-                    "action": "add_run",
-                    "experiment": 1,
-                    "kind": "xp",
-                    "platform_request_id": f"xreq_{arm}_{index}",
-                    "arm": arm,
-                    "seed": data["seed"],
-                },
-                role="researcher",
+            added = add_run(
+                kind="xp", platform_request_id=f"xreq_{arm}_{index}", arm=arm, seed=data["seed"]
             )
-            assert added["ok"] is True, added
-            assert added["record"]["arm"] == arm
+            assert added["arm"] == arm
             updated = call(
                 "experiment",
                 {
                     "action": "update_run",
-                    "run": added["record"]["id"],
+                    "run": added["id"],
                     "state": "completed",
                     "episodes_completed": 1,
                     "results": {"rows": [data]},
@@ -118,7 +119,7 @@ def record_runs(call, rows_by_arm: dict[str, list[dict]]):
                 role="researcher",
             )
             assert updated["ok"] is True, updated
-            run_ids.append(added["record"]["id"])
+            run_ids.append(added["id"])
     return run_ids
 
 
@@ -214,7 +215,6 @@ def test_researcher_may_use_every_action(call, two_versions):
         "search",
         "update",
         "start",
-        "add_run",
         "update_run",
         "close",
         "abandon",
@@ -227,22 +227,11 @@ def test_researcher_may_use_every_action(call, two_versions):
 # --- runs and the computed verdict -----------------------------------------------------------
 
 
-def test_add_run_and_update_run(call, running):
-    added = call(
-        "experiment",
-        {
-            "action": "add_run",
-            "experiment": "X-1",
-            "kind": "xp",
-            "platform_request_id": "xreq_1",
-            "arm": "baseline",
-            "seed": 7,
-            "episodes_total": 1,
-        },
-        role="researcher",
+def test_update_run(add_run, call, running):
+    added = add_run(
+        kind="xp", platform_request_id="xreq_1", arm="baseline", seed=7, episodes_total=1
     )
-    assert added["ok"] is True, added
-    run = added["record"]
+    run = added
     assert run["id"] == 1 and run["experiment_id"] == "X-1" and run["validity"] == "valid"
 
     updated = call(
@@ -258,9 +247,10 @@ def test_add_run_and_update_run(call, running):
     assert nothing["ok"] is False and "nothing to update" in nothing["error"]
 
 
-def test_computed_close_confirms_a_clear_margin(call, running):
+def test_computed_close_confirms_a_clear_margin(add_run, call, running):
     seeds = range(N_MIN)
     record_runs(
+        add_run,
         call,
         {
             "baseline": [row("V-1", s, 0.50 + (0.01 if s % 2 else -0.01)) for s in seeds],
@@ -288,8 +278,9 @@ def test_computed_close_confirms_a_clear_margin(call, running):
     assert closed["evaluation"]["rows"]["kept"] == 2 * N_MIN
 
 
-def test_computed_close_with_two_seeds_is_inconclusive(call, running):
+def test_computed_close_with_two_seeds_is_inconclusive(add_run, call, running):
     record_runs(
+        add_run,
         call,
         {
             "baseline": [row("V-1", s, 0.50) for s in range(2)],
@@ -305,9 +296,10 @@ def test_computed_close_with_two_seeds_is_inconclusive(call, running):
     assert "n_short" in results["interpretation"]
 
 
-def test_computed_close_refutes_a_guardrail_breach(call, running):
+def test_computed_close_refutes_a_guardrail_breach(add_run, call, running):
     seeds = range(N_MIN)
     record_runs(
+        add_run,
         call,
         {
             "baseline": [row("V-1", s, 0.50, step_ms=12.0) for s in seeds],
@@ -322,7 +314,7 @@ def test_computed_close_refutes_a_guardrail_breach(call, running):
     assert closed["record"]["results"]["reason_codes"] == ["guardrail_breach:step_ms"]
 
 
-def test_computed_close_averages_per_seat_rows_into_one_pair_per_seed(call, running):
+def test_computed_close_averages_per_seat_rows_into_one_pair_per_seed(add_run, call, running):
     """Per-seat rows (seats [0] and [1] of one episode) make one pair per seed, not two."""
     seeds = range(N_MIN)
     baseline, candidate = [], []
@@ -332,23 +324,12 @@ def test_computed_close_averages_per_seat_rows_into_one_pair_per_seed(call, runn
     # Two rows per run here: a run holds whatever rows its request produced.
     for arm, rows in (("baseline", baseline), ("candidate", candidate)):
         for s in seeds:
-            added = call(
-                "experiment",
-                {
-                    "action": "add_run",
-                    "experiment": "X-1",
-                    "kind": "xp",
-                    "platform_request_id": f"xreq_{arm}_{s}",
-                    "arm": arm,
-                    "seed": s,
-                },
-                role="researcher",
-            )
+            added = add_run(kind="xp", platform_request_id=f"xreq_{arm}_{s}", arm=arm, seed=s)
             call(
                 "experiment",
                 {
                     "action": "update_run",
-                    "run": added["record"]["id"],
+                    "run": added["id"],
                     "results": {"rows": [r for r in rows if r["seed"] == s]},
                 },
                 role="researcher",
@@ -361,19 +342,34 @@ def test_computed_close_averages_per_seat_rows_into_one_pair_per_seed(call, runn
     assert closed["record"]["status"] == "confirmed"
 
 
-def test_computed_close_without_rows_is_refused(call, running):
-    added = call(
-        "experiment",
+def test_computed_close_leaves_out_runs_marked_invalid(add_run, call, running):
+    run_ids = record_runs(
+        add_run,
+        call,
         {
-            "action": "add_run",
-            "experiment": "X-1",
-            "kind": "xp",
-            "platform_request_id": "xreq_1",
-            "arm": "baseline",
+            "baseline": [row("V-1", s, 0.50) for s in range(N_MIN)],
+            "candidate": [row("V-2", s, 0.60) for s in range(N_MIN)],
         },
-        role="researcher",
     )
-    assert added["ok"] is True
+    extra = record_runs(add_run, call, {"candidate": [row("V-2", N_MIN, 0.0)]})
+    update = {"action": "update_run", "run": extra[0], "validity": "invalid: wrong seat"}
+    assert call("experiment", update, role="researcher")["ok"] is True
+    closed = call("experiment", {"action": "close", "experiment": "X-1"})
+    assert closed["ok"] is True, closed
+    assert closed["evaluation"]["invalid_runs"] == extra and extra[0] not in run_ids
+    assert closed["evaluation"]["rows"]["kept"] == 2 * N_MIN
+
+
+def test_computed_close_with_only_invalid_runs_is_refused(add_run, call, running):
+    [only] = record_runs(add_run, call, {"baseline": [row("V-1", 1, 0.5)]})
+    update = {"action": "update_run", "run": only, "validity": "invalid: wrong seat"}
+    call("experiment", update, role="researcher")
+    refused = call("experiment", {"action": "close", "experiment": "X-1"})
+    assert refused["ok"] is False and refused["context"]["invalid_runs"] == [only]
+
+
+def test_computed_close_without_rows_is_refused(add_run, call, running):
+    add_run(kind="xp", platform_request_id="xreq_1", arm="baseline")
     refused = call("experiment", {"action": "close", "experiment": "X-1"})
     assert refused["ok"] is False
     assert refused["problems"] == [
@@ -382,29 +378,19 @@ def test_computed_close_without_rows_is_refused(call, running):
     assert call("experiment", {"action": "read", "experiment": 1})["record"]["status"] == "running"
 
 
-def test_computed_close_refuses_when_no_rows_pair(call, running):
+def test_computed_close_refuses_when_no_rows_pair(add_run, call, running):
     """Rows that name a policy outside the design never pair; closing would waste the record."""
     record_runs(
+        add_run,
         call,
         {"baseline": [row("V-1", s, 0.5) for s in range(3)]},
     )
-    stray = call(
-        "experiment",
-        {
-            "action": "add_run",
-            "experiment": "X-1",
-            "kind": "xp",
-            "platform_request_id": "xreq_stray",
-            "arm": "candidate",
-            "seed": 0,
-        },
-        role="researcher",
-    )
+    stray = add_run(kind="xp", platform_request_id="xreq_stray", arm="candidate", seed=0)
     call(
         "experiment",
         {
             "action": "update_run",
-            "run": stray["record"]["id"],
+            "run": stray["id"],
             "results": {"rows": [row("pv-elsewhere", 0, 0.9)]},
         },
         role="researcher",
@@ -415,36 +401,26 @@ def test_computed_close_refuses_when_no_rows_pair(call, running):
     assert refused["context"]["rows_by_policy"] == {"V-1": 3, "pv-elsewhere": 1}
 
 
-def test_computed_close_drops_failed_rows_and_reports_it(call, running):
+def test_computed_close_drops_failed_rows_and_reports_it(add_run, call, running):
     seeds = range(N_MIN + 1)
     baseline = [row("V-1", s, 0.50) for s in seeds]
     candidate = [row("V-2", s, 0.60 + (0.01 if s % 2 else -0.01)) for s in seeds]
     candidate[-1] = row("V-2", N_MIN, 0.0, status="failed", reason="crashed")
     candidate[-1]["metrics"] = {}
-    record_runs(call, {"baseline": baseline, "candidate": candidate})
+    record_runs(add_run, call, {"baseline": baseline, "candidate": candidate})
     closed = call("experiment", {"action": "close", "experiment": "X-1"})
     assert closed["ok"] is True, closed
     assert closed["evaluation"]["pairs"] == N_MIN
     assert closed["evaluation"]["rows"]["dropped"]["failed"] == 1
 
 
-def test_malformed_stored_rows_are_named(call, running):
-    added = call(
-        "experiment",
-        {
-            "action": "add_run",
-            "experiment": "X-1",
-            "kind": "xp",
-            "platform_request_id": "xreq_1",
-            "arm": "baseline",
-        },
-        role="researcher",
-    )
+def test_malformed_stored_rows_are_named(add_run, call, running):
+    added = add_run(kind="xp", platform_request_id="xreq_1", arm="baseline")
     call(
         "experiment",
         {
             "action": "update_run",
-            "run": added["record"]["id"],
+            "run": added["id"],
             "results": {"rows": [{"episode_id": "e1", "seed": "seven"}, "not a row"]},
         },
         role="researcher",
@@ -457,7 +433,7 @@ def test_malformed_stored_rows_are_named(call, running):
 
 
 def test_computed_close_takes_the_version_built_for_it_as_candidate(
-    call, ctx_factory, two_versions
+    add_run, call, ctx_factory, two_versions
 ):
     """methods.candidate may stay empty at start; the Version built for X-1 is the candidate."""
     created = call("experiment", create_args(methods=methods(candidate=None)), role="researcher")
@@ -478,6 +454,7 @@ def test_computed_close_takes_the_version_built_for_it_as_candidate(
     assert built["id"] == "V-3"
     seeds = range(N_MIN)
     record_runs(
+        add_run,
         call,
         {
             "baseline": [row("V-1", s, 0.50) for s in seeds],
@@ -506,8 +483,8 @@ def test_computed_close_without_any_candidate_is_refused(call, two_versions):
 # --- the explicit verdict --------------------------------------------------------------------
 
 
-def test_explicit_close_records_the_reason(call, running):
-    record_runs(call, {"baseline": [row("V-1", 0, 0.5)]})
+def test_explicit_close_records_the_reason(add_run, call, running):
+    record_runs(add_run, call, {"baseline": [row("V-1", 0, 0.5)]})
     closed = call(
         "experiment",
         {
@@ -529,8 +506,8 @@ def test_explicit_close_records_the_reason(call, running):
     assert "evaluation" not in closed
 
 
-def test_explicit_close_with_reason_codes_keeps_them(call, running):
-    record_runs(call, {"baseline": [row("V-1", 0, 0.5)]})
+def test_explicit_close_with_reason_codes_keeps_them(add_run, call, running):
+    record_runs(add_run, call, {"baseline": [row("V-1", 0, 0.5)]})
     closed = call(
         "experiment",
         {
@@ -580,17 +557,8 @@ def test_results_never_show_a_store_path(call, running):
     assert ".state/" not in text and "store.db" not in text
 
 
-def test_update_run_takes_the_runs_own_experiment_and_refuses_another(call, running):
-    run = call(
-        "experiment",
-        {
-            "action": "add_run",
-            "experiment": 1,
-            "kind": "xp",
-            "platform_request_id": "xreq_1",
-            "arm": "baseline",
-        },
-    )["record"]["id"]
+def test_update_run_takes_the_runs_own_experiment_and_refuses_another(add_run, call, running):
+    run = add_run(kind="xp", platform_request_id="xreq_1", arm="baseline")["id"]
     args = {"action": "update_run", "run": run, "validity": "invalid: wrong seat"}
     assert call("experiment", {**args, "experiment": "X-1"})["ok"] is True
     refused = call("experiment", {**args, "experiment": "X-2"})

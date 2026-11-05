@@ -41,7 +41,8 @@ def test_upload_sends_exact_bytes_once(lab):
     assert state["counts"]["upload"] == 1
     assert [e["policy_version_id"] for e in lab.events("version.uploaded")] == [row["id"]]
     intent = intents.read(lab.store, 1)
-    assert intent["state"] == "done" and intent["key"] == digest and intent["subject"] == "V-1"
+    assert intent["state"] == "done" and intent["subject"] == "V-1"
+    assert intent["key"] == f"{version['policy_name']}:{digest}"
 
     again = lab.upload("V-1", role="researcher", session_id="s9")
     assert again["already_uploaded"] is True
@@ -295,7 +296,8 @@ def test_upload_refuses_when_the_kept_artifact_is_gone(lab):
     gone = lab.run("upload", {"version": "V-1"})
     assert gone["ok"] is False and "is gone" in gone["error"]
     assert lab.platform().snapshot()["counts"]["upload"] == 0
-    assert intents.find(lab.store, kind="upload", key=version["artifact"]["digest"]) is None
+    key = f"{version['policy_name']}:{version['artifact']['digest']}"
+    assert intents.find(lab.store, kind="upload", key=key) is None
 
 
 def test_upload_refusal_carries_the_route(lab, monkeypatch):

@@ -875,7 +875,8 @@ def review(
         row = _row(store, n)
         problems: list[str] = []
         require(problems, isinstance(accept, bool), "accept must be true or false")
-        require(problems, merge in ("yes", "no"), "merge must be yes or no")
+        if accept:
+            require(problems, merge in ("yes", "no"), "merge must be yes or no when accepting")
         require(problems, _text(reason), "reason is required")
         if row["status"] != "complete":
             problems.append(f"{_t(n)} is {row['status']}, not complete")

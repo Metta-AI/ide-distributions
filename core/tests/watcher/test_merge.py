@@ -175,7 +175,12 @@ def test_merging_a_submission_candidate_wakes_the_orchestrator(tmp_path):
         ctx.store,
         Actor.session(SESSION),
         n,
-        checklist={"commit": sha, "summary": "raised aggression", "submission_candidate": "yes"},
+        checklist={
+            "commit": sha,
+            "summary": "raised aggression",
+            "submission_candidate": "yes",
+            "submission_reason": "beats the champion",
+        },
         commit=sha,
         merge_request="yes",
         submission_candidate="yes",
@@ -187,6 +192,7 @@ def test_merging_a_submission_candidate_wakes_the_orchestrator(tmp_path):
 
     assert [entry["task"] for entry in report["merged"]] == [task["id"]]
     candidates = events_of(ctx.store, "submission.candidate")
+    assert candidates[0]["payload"]["reason"] == "beats the champion"
     assert [e["payload"]["task"] for e in candidates] == [task["id"]]
     assert candidates[0]["payload"]["merge_commit"] == gitops.rev_parse(ctx.coworld.code, "main")
     assert events_of(ctx.store, "task.merged")  # the plain merge event is still there

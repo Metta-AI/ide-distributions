@@ -49,8 +49,9 @@ from research_core.platform import xp as xp_module
 from research_core.platform.errors import CreditsRefused, PlatformError
 from research_core.platform.protocol import Credits, Platform, XpRequest, with_retries
 from research_core.stats.ingest import rows_from_evaluate_output
-from research_core.store import experiments, intents, settings, versions
+from research_core.store import experiments, intents, settings, tasks, versions
 from research_core.store._common import parse_display_id
+from research_core.store.errors import StoreError
 from research_core.tools import _args as a
 from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolError, ToolSpec, tool
 from research_core.transitions import report_capability
@@ -182,6 +183,13 @@ def _plan(call: ToolCall, record: dict) -> dict:
         problems.append(f"{xid} is proposed; start the experiment first (experiment.start)")
     elif record["status"] != "running":
         problems.append(f"{xid} is {record['status']}; runs are added only while it is running")
+    if record["task_id"] is not None:
+        # The store records a run only for the Task's holder; finding out after the platform
+        # accepted the request would spend credits on a run nobody can record.
+        try:
+            tasks.require_holder(ctx.store, record["task_id"], ctx.actor)
+        except StoreError as error:
+            problems.append(f"{xid} belongs to T-{record['task_id']}: {error}")
     methods = record["methods"]
     arms = call.get("arms") or list(ARMS)
     for arm in arms:
@@ -486,7 +494,7 @@ def _evaluate(ctx: ToolContext, record: dict, run: dict) -> dict | None:
     dest = coworld.documents / "xp" / record["id"] / request_id
     files = wait.call_platform(
         ctx,
-        f"GET /v2/experience-requests/{request_id}/download",
+        "GET /v2/episode-requests/download-manifest",
         lambda: platform.xp_download(request_id, include=["results"], dest=dest),
     )
     try:

@@ -123,7 +123,7 @@ def _paths(checkout: Path | None, coworld) -> list[str]:
         lines.append("- Writable: the session Coworld's `code/`, `documents/` and `worktrees/`.")
     lines += [
         f"- Read-only: the profile source checkout `{checkout or '(unknown)'}` (plugin, store "
-        "library and schema, tools, prompts, cron definitions). Report a bug there instead of "
+        "library and schema, tools, prompts). Report a bug there instead of "
         "patching it; `config.yaml` is writable but `prepare.py` re-applies the protected keys.",
         "- Shipped skills live in that checkout, whatever Hermes's skill index says about "
         "fixing them. Where it is read-only, as in hosting, `skill_manage` `patch`, `write_file` "
@@ -197,7 +197,7 @@ def _sleep_and_wake() -> list[str]:
     return [
         "## Sleep and wake",
         "",
-        f"- The watcher runs every {WATCHER_TICK_S} seconds (a Hermes cron job without a model). "
+        f"- The watcher runs every {WATCHER_TICK_S} seconds (`research serve`, with no model). "
         "It starts Task runs, resolves waits, recovers dead runs and runs capability checks.",
         "- `task_wait` ends your run; the same Session resumes with its history when the wait "
         "resolves. Nothing you started in the foreground survives the end of a run.",

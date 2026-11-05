@@ -116,10 +116,12 @@ SPEC = tool(
             ),
             ActionSpec(
                 "update",
-                "Change a directive's text or scope.",
+                "Change a directive's text, or move a D-n to another Goal; a W-n stays on the "
+                "workspace.",
                 {"directive": DIRECTIVE, "text": TEXT, "scope": SCOPE},
                 ("directive",),
                 ORCHESTRATOR,
+                example_fields=("text",),
             ),
             ActionSpec(
                 "retire",

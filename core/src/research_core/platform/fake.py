@@ -1071,7 +1071,7 @@ class FakePlatform:
             "coworld_manifest", lambda state: self._manifest(state, coworld_id), persist=False
         )
 
-    # --- forum (one forum; the slug is accepted and ignored) --------------------------------
+    # --- forum --------------------------------------------------------------------------------
 
     def _author(self, identity: Identity) -> dict:
         if identity == "user":

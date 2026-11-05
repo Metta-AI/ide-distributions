@@ -384,13 +384,6 @@ ORCHESTRATOR_CHATS = [
         x5="stored",
     ),
     chat(
-        "experiment-add-run",
-        "I started an XP request by hand for X-5 and the platform accepted it as xreq_77: "
-        "baseline arm, seed 12, 1 episode. Put it on the record.",
-        ("experiment.add_run",),
-        ("experiment",),
-    ),
-    chat(
         "xp-request",
         "X-5 has started. Send its evaluation for seeds 1 to 20, both arms against the same "
         "fixed opponents pv-1 and pv-2.",
@@ -821,6 +814,7 @@ BUILD_BACKGROUND = json.dumps(
             pid=4242,
             resume_token="res_8c1",
         ),
+        "4f1c9a2",
     )
 )
 # ``_credits_refused`` in tools/xp.py, as a Researcher gets it; an Orchestrator's ``next`` differs.

@@ -15,7 +15,7 @@ the tools, prompts or skills:
 ``usability_hermes.json`` holds what is Hermes's, as the pinned image (v0.22.6) gives it: the
 prompt sections around the skill index (from a request captured on 2026-11-03) and the built-in
 tools. The tools are ``model_tools.get_tool_definitions(enabled_toolsets=["hermes-api-server"],
-disabled_toolsets=["browser", "connections", "cronjob"])`` run inside the image, without
+disabled_toolsets=["browser", "connections", "cronjob", "todo"])`` run inside the image, without
 ``memory`` (the profiles turn it off) and with ``vision_analyze`` (it appears only with a vision
 provider; its schema is from the same capture). ``delegate_task`` has the text a real session
 froze, which leaves out the sentence on what children may call. The ``Execution discipline`` section is the one Hermes adds only for Kimi models, so it

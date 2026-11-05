@@ -94,8 +94,7 @@ SPEC = tool(
         description=(
             "Call any Softmax Observatory route with authentication handled, for routes no tool "
             "covers (see the softmax-api-routes skill). Paths are relative to /observatory. "
-            "Runs as the Player; the Orchestrator may name identity user, which notifies the "
-            "user of every write. Every call is logged."
+            "Runs as the Player. Every call is logged."
         ),
         handler=handle,
         roles=BOTH,
@@ -106,10 +105,10 @@ SPEC = tool(
             "params": a.free_object("Query parameters, name to value."),
             "json": a.free_object("A JSON body for POST, PUT or PATCH."),
             "identity": a.string(
-                "Default player; the Researcher is Player only.",
-                enum=["player", "user"],
+                "Default player; user notifies the user of every write.", enum=["player", "user"]
             ),
         },
         required=("method", "path"),
+        orchestrator_fields=("identity",),
     )
 )

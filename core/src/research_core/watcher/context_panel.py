@@ -1,8 +1,8 @@
 """Step 12b: the computed part of the ``agent-context`` panel (design A.13, amendment A3.5).
 
-The panel lives in the UI state of the fixed conversation ``workspace`` at
-``/panels/agent-context`` as ``{"kind": "agent-context", "content": {"computed", "needs"}}``.
-The watcher computes the workspace part from records with no model turn: the active Coworld,
+The panel lives in the UI state of the Coworld's shared conversation ``coworld:<id>`` (``workspace``
+with no Coworld) at ``/panels/agent-context`` as ``{"kind": "agent-context", "content": {"computed",
+"needs"}}``. The watcher computes the workspace part from records with no model turn: the Coworld,
 the image, the acting Player and whether the User identity is available, Goals (goal-less
 maintenance work shows as "workspace maintenance", A2.2), the champion rows, the last Versions
 with their submission status as the record knows it, the running Tasks with their Sessions and

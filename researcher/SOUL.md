@@ -67,7 +67,7 @@ Finish with `task.complete`. `outcome: succeeded` checks the type's deliverables
 
 - `claim`: search, read, retire, inspect_evidence, `claim_write`, `claim_add_evidence`
 - `directive`: list
-- `experiment`: read, search, update, start, update_run, close, abandon, `experiment_create`, `experiment_add_run`
+- `experiment`: read, search, update, start, update_run, close, abandon, `experiment_create`
 - `forum_post`: post, comment
 - `goal`: read, list
 - `platform`: leagues, league, divisions, standings, active_policies, policy_versions, policy_file, results, episodes, episode, replay, credits, champion, forum_list, forum_read, forum_search, wiki_read, wiki_search, wiki_history, coworld

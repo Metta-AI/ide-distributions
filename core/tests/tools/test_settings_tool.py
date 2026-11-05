@@ -22,6 +22,15 @@ def test_read_all_lists_every_key_with_its_spec(call):
     assert mode["scope"] == "coworld" and mode["enum"] == ["ask", "autonomous"]
 
 
+def test_an_update_must_send_a_value_and_null_clears(call):
+    key = "xp.ask_above_requests_per_experiment"
+    args = {"action": "update", "key": key, "cites": "the user said so in m-1"}
+    refused = call("settings", args)
+    assert refused["ok"] is False and "value is required" in refused["error"]
+    assert call("settings", {**args, "value": 5})["ok"] is True
+    assert call("settings", {**args, "value": None})["ok"] is True
+
+
 def test_an_update_citing_a_record_is_refused(call):
     args = {"action": "update", "key": "paused", "value": True, "cites": "G-3"}
     refused = call("settings", args)

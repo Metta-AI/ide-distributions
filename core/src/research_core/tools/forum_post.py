@@ -77,9 +77,8 @@ SPEC = tool(
     ToolSpec(
         name="forum_post",
         description=(
-            "Post or comment on the Coworld's forum as your Player (or, for the Orchestrator, as "
-            "the User). The platform_writes.forum setting bounds posts you make on your own; a "
-            "user request (cites) always runs."
+            "Post or comment on the session Coworld's forum as your Player. The "
+            "platform_writes.forum setting bounds posts you make on your own."
         ),
         handler=handle,
         roles=BOTH,
@@ -96,6 +95,7 @@ SPEC = tool(
                     "cites": a.string("The user's message that asked for this, if any."),
                 },
                 ("title", "body"),
+                orchestrator_fields=("identity", "cites"),
             ),
             ActionSpec(
                 "comment",
@@ -108,6 +108,7 @@ SPEC = tool(
                     "cites": a.string("The user's message that asked for this, if any."),
                 },
                 ("post_id", "body"),
+                orchestrator_fields=("identity", "cites"),
             ),
         ),
     )

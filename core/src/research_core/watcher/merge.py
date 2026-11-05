@@ -111,7 +111,7 @@ def integrate(ctx: TickContext, task: dict[str, Any]) -> dict[str, Any]:
                 "commit": commit,
                 "merge_commit": new_tip,
                 "versions": list((task.get("checklist") or {}).get("versions") or []),
-                "reason": task.get("submission_reason") or "",
+                "reason": (task.get("checklist") or {}).get("submission_reason") or "",
             },
         )
     return {

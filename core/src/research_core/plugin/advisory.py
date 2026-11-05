@@ -77,7 +77,7 @@ def make_hooks(role: Role) -> dict[str, Callable[..., Any]]:
             broken = (
                 _broken_capabilities(role, session_id) if any(r.capability for r in matched) else {}
             )
-            notes = rules.notes_for(tool_name, args, broken)
+            notes = rules.notes_for(tool_name, args, broken, role)
             return result + "\n\n" + "\n".join(notes) if notes else None
         except Exception as error:  # never break a tool result
             log.debug("advisory hook failed: %s", error)

@@ -39,7 +39,7 @@ EVIDENCE_LINK = a.obj(
     },
     required=("type", "ref", "stance"),
 )
-TAGS = a.strings("Keywords from the shared vocabulary, including the Goal's id (G-n).")
+TAGS = a.strings("Keywords from the shared vocabulary, and the Goal's id (G-n) to count for it.")
 
 _EVIDENCE_SELECTOR = re.compile(r"^(?:[A-Z]-[0-9]+#)?(?:evidence-)?(?P<number>[1-9][0-9]*)$")
 
@@ -148,7 +148,6 @@ def inspect_env(ctx: ToolContext) -> evidence_types.InspectEnv:
         code_repo=coworld.code,
         hermes_state_db=Path(hermes_home).expanduser() / "state.db" if hermes_home else None,
         documents=coworld.documents,
-        coworld_id=coworld.coworld_id,
     )
 
 
@@ -230,6 +229,7 @@ SPEC = tool(
                     "note": NOTE,
                 },
                 ("claim", "status"),
+                example_fields=("superseded_by",),
             ),
             ActionSpec(
                 "inspect_evidence",

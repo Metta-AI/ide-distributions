@@ -79,8 +79,7 @@ SPEC = tool(
         description=(
             "Edit a Coworld wiki page with compare-and-swap: pass the revision you read as "
             "base_revision_id; a conflict returns the current body to merge. The "
-            "platform_writes.wiki setting bounds edits you make on your own; a user request "
-            "(cites) always runs."
+            "platform_writes.wiki setting bounds edits you make on your own."
         ),
         handler=handle,
         roles=BOTH,
@@ -98,5 +97,6 @@ SPEC = tool(
             "cites": a.string("The user's message that asked for this, if any."),
         },
         required=("wiki", "page", "title", "body"),
+        orchestrator_fields=("identity", "cites"),
     )
 )

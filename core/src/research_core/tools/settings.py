@@ -70,6 +70,8 @@ def handle(call: ToolCall) -> dict:
     if call.action == "update":
         if refs.names_only_records(call.get("cites")):
             raise ToolError(f"cites must be the user's message, not the record {call.get('cites')}")
+        if "value" not in call.args:
+            raise ToolError("value is required: the new value, or null to clear the setting")
         found = settings.spec(call.get("key"))
         record = settings.update(
             store_for(ctx, found),
@@ -117,6 +119,7 @@ SPEC = tool(
                 },
                 ("key", "cites"),
                 ORCHESTRATOR,
+                example_fields=("value",),
                 own_tool=True,
             ),
         ),

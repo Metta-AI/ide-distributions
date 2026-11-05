@@ -37,6 +37,15 @@ def test_rules_stay_quiet(tool, args):
     assert rules.matches(tool, args) == []
 
 
+def test_a_note_names_a_tool_the_role_has():
+    submit = {"command": "coworld submit x"}
+    assert "task_propose_submission" in rules.notes_for("terminal", submit, {}, "researcher")[0]
+    assert "submit tool" in rules.notes_for("terminal", submit, {}, "orchestrator")[0]
+    push = {"command": "git push --force origin main"}
+    assert "workspace.change_complete" in rules.notes_for("terminal", push, {}, "orchestrator")[0]
+    assert "task.complete" in rules.notes_for("terminal", push, {}, "researcher")[0]
+
+
 def test_notes_point_at_repair_task():
     notes = rules.notes_for("terminal", {"command": "coworld submit x"}, {"upload": "T-9"})
     assert notes[0].startswith("[note]")

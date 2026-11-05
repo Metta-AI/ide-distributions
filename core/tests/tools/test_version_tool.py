@@ -390,6 +390,16 @@ def test_version_create_build_failure_reports_capability(lab):
     assert lab.store.one("SELECT COUNT(*) FROM versions")[0] == 0
 
 
+def test_a_build_resumed_after_a_new_commit_is_refused(lab, monkeypatch):
+    set_build_command(lab.code, "sleep 0.2 && sh mixin/tools/build.sh")
+    monkeypatch.setattr(version_tool, "BUILD_BUDGET_S", 0.05)
+    started = lab.run("version", {"action": "create", "summary": "Slow"})
+    token = started["background"]["resume"]
+    commit_policy(lab.code, 4, 6, "A later commit")
+    refused = lab.run("version", {"action": "create", "summary": "Slow", "resume": token})
+    assert refused["ok"] is False and "without resume" in refused["error"]
+
+
 def test_version_create_background_and_resume(lab, monkeypatch):
     set_build_command(lab.code, "sleep 0.6 && sh mixin/tools/build.sh")
     monkeypatch.setattr(version_tool, "BUILD_BUDGET_S", 0.1)
@@ -398,7 +408,7 @@ def test_version_create_background_and_resume(lab, monkeypatch):
     background = started["background"]
     assert background["pid"] > 0 and background["resume"] and "resume" in started["next"]
     deadline = time.time() + 10
-    while not mixin.resume(background["resume"]).finished:
+    while not mixin.resume(background["resume"].partition(":")[2]).finished:
         assert time.time() < deadline, "the detached build never ended"
         time.sleep(0.05)
     finished = lab.run(

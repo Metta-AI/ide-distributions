@@ -1,16 +1,15 @@
-"""The evidence type registry (design B.7): reference formats, validators, inspectors, skills.
+"""The evidence type registry (design B.7): reference formats, validators, inspectors.
 
 Every evidence link on a claim has a type from this registry. A type names how its reference
 is written (``ref_format``, quoted back in refusals), checks one (``validate`` returns the
-problems), shows what the evidence says (``inspect``) and points at the skill or tool for
-reading it in depth (``skill``). The record types (``claim``, ``experiment``, ``version``) also
-``resolve`` against the store: the record must exist.
+problems) and shows what the evidence says (``inspect``). The record types (``claim``,
+``experiment``, ``version``) also ``resolve`` against the store: the record must exist.
 
 Inspectors take ``(ref, env)``: an :class:`InspectEnv` carries the store and whatever else the
 inspectors read (the Coworld code repository for ``code``, the Hermes ``state.db`` for
 ``transcript``, the documents folder for ``measurement``). Callers go through
 :func:`inspect_evidence`, which never raises: every answer is a dict with at least ``type``,
-``ref``, ``summary`` and ``skill``, and anything that could not be read is a ``problem``.
+``ref`` and ``summary``, and anything that could not be read is a ``problem``.
 
 The profile and client types are registered below; a mixin adds game types with
 ``register_type``. ``replay`` is registered here as well so its format is checked everywhere,
@@ -46,15 +45,14 @@ class InspectEnv:
 
     ``code_repo`` is the active Coworld's code repository (``<coworld>/code``),
     ``hermes_state_db`` this profile's ``<HERMES_HOME>/state.db`` (sibling profiles' databases
-    are searched too, since a transcript reference carries no profile), ``documents`` the
-    Coworld's documents folder and ``coworld_id`` the id the mixin's skill names carry.
+    are searched too, since a transcript reference carries no profile) and ``documents`` the
+    Coworld's documents folder.
     """
 
     store: Store
     code_repo: Path | None = None
     hermes_state_db: Path | None = None
     documents: Path | None = None
-    coworld_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -62,7 +60,6 @@ class EvidenceType:
     name: str
     ref_format: str
     validate: Validator
-    skill: str
     inspect: Inspector | None = None
     resolve: Resolver | None = None
 
@@ -163,13 +160,12 @@ def _record_inspector(name: str, table: str, prefix: str) -> Inspector:
     return inspect
 
 
-def _record_type(name: str, table: str, prefix: str, skill: str) -> EvidenceType:
+def _record_type(name: str, table: str, prefix: str) -> EvidenceType:
     ref_format = f"{prefix}-<n>"
     return EvidenceType(
         name=name,
         ref_format=ref_format,
         validate=_record_validator(name, ref_format),
-        skill=skill,
         inspect=_record_inspector(name, table, prefix),
         resolve=_record_resolver(table, prefix),
     )
@@ -321,23 +317,21 @@ def _output_path(output: str, documents: Path | None) -> Path | None:
 
 
 def _inspect_replay(ref: str, env: InspectEnv) -> dict[str, Any]:
-    """The replay's pin (its download data) and the mixin skill that reads replays."""
+    """The replay's pin (its download data), kept under ``episode:<id>`` by ``platform.replay``."""
     match = _REPLAY.match(ref)
     episode = match["episode"]
-    pin = _pin(env.store, "replay", episode) or _pin(env.store, "replay", ref)
-    prefix = f"{env.coworld_id}-" if env.coworld_id else ""
-    skill = f"{prefix}replay-inspection"
+    pin = _pin(env.store, "replay", f"episode:{episode}")
     state = "pinned" if pin is not None else "not downloaded yet"
     return _result(
         "replay",
         ref,
-        f"episode {episode} ({state}); read it with the {skill} skill",
+        f"episode {episode} ({state}); the game's replay skill, if it has one, is listed in the"
+        " session context",
         episode=episode,
         seat=match["seat"],
         phase=match["phase"],
         xp_request=match["request"],
         pin=pin,
-        skill=skill,
     )
 
 
@@ -352,7 +346,7 @@ def _pin(store: Store, kind: str, ref: str) -> dict[str, Any] | None:
 
 CODE_FORMAT = "<path>:<a>-<b>@<sha>"
 DOC_FORMAT = "<repo-or-url>#<section> or <url> (retrieved <date>): <quote>"
-TRANSCRIPT_FORMAT = "session:<id>/<message id>#<sha256 of the quote>"
+TRANSCRIPT_FORMAT = "session:<id>/<message id>#<sha256 of the whole message>"
 MEASUREMENT_FORMAT = "<command> @<sha> -> <stored output path or pin id>"
 REPLAY_FORMAT = "episode:<id>[/seat <n>][/phase <p>] xp:<request id, or none outside an XP request>"
 ANNOTATION_FORMAT = "annotation:<id>"
@@ -360,49 +354,43 @@ ANNOTATION_FORMAT = "annotation:<id>"
 EVIDENCE_TYPES: dict[str, EvidenceType] = {
     kind.name: kind
     for kind in (
-        _record_type("claim", "claims", "C", "claim"),
+        _record_type("claim", "claims", "C"),
         EvidenceType(
             name="code",
             ref_format=CODE_FORMAT,
             validate=_validate_code,
-            skill="code-citations",
             inspect=_inspect_code,
         ),
         EvidenceType(
             name="doc",
             ref_format=DOC_FORMAT,
             validate=_validate_doc,
-            skill="documents",
             inspect=_inspect_doc,
         ),
         EvidenceType(
             name="transcript",
             ref_format=TRANSCRIPT_FORMAT,
             validate=_pattern_validator(_TRANSCRIPT, TRANSCRIPT_FORMAT),
-            skill="session-search",
             inspect=_inspect_transcript,
         ),
         EvidenceType(
             name="measurement",
             ref_format=MEASUREMENT_FORMAT,
             validate=_pattern_validator(_MEASUREMENT, MEASUREMENT_FORMAT),
-            skill="measurements",
             inspect=_inspect_measurement,
         ),
-        _record_type("experiment", "experiments", "X", "experiment"),
-        _record_type("version", "versions", "V", "version"),
+        _record_type("experiment", "experiments", "X"),
+        _record_type("version", "versions", "V"),
         EvidenceType(
             name="replay",
             ref_format=REPLAY_FORMAT,
             validate=_pattern_validator(_REPLAY, REPLAY_FORMAT),
-            skill="replay",
             inspect=_inspect_replay,
         ),
         EvidenceType(
             name="annotation",
             ref_format=ANNOTATION_FORMAT,
             validate=_pattern_validator(_ANNOTATION, ANNOTATION_FORMAT),
-            skill="annotations",
             inspect=_inspect_annotation,
         ),
     )
@@ -432,25 +420,21 @@ def check_ref(store: Store, type_name: object, ref: object) -> list[str]:
 def inspect_evidence(type_name: str, ref: str, env: InspectEnv) -> dict[str, Any]:
     """What one evidence link says, by its type's inspector. Never raises.
 
-    The answer always has ``type``, ``ref``, ``summary`` and ``skill``; an unknown type, a
-    malformed reference, a type without an inspector or an inspector failure is a ``problem``.
+    The answer always has ``type``, ``ref`` and ``summary``; an unknown type, a malformed
+    reference, a type without an inspector or an inspector failure is a ``problem``.
     """
     kind = EVIDENCE_TYPES.get(type_name)
     if kind is None:
-        return {**_result(type_name, ref, ref, problem=_unknown_type(type_name)), "skill": None}
+        return _result(type_name, ref, ref, problem=_unknown_type(type_name))
     problems = kind.validate(ref)
     if problems:
-        return _result(type_name, ref, ref, problem="; ".join(problems), skill=kind.skill)
+        return _result(type_name, ref, ref, problem="; ".join(problems))
     if kind.inspect is None:
-        problem = f"{type_name} evidence has no inspector; read it with the {kind.skill} skill"
-        return _result(type_name, ref, ref, problem=problem, skill=kind.skill)
+        return _result(type_name, ref, ref, problem=f"{type_name} evidence has no inspector")
     try:
-        result = kind.inspect(ref, env)
+        return kind.inspect(ref, env)
     except Exception as error:  # an inspector reads git, sqlite and files; report, never raise
-        problem = f"{type(error).__name__}: {error}"
-        return _result(type_name, ref, ref, problem=problem, skill=kind.skill)
-    result.setdefault("skill", kind.skill)
-    return result
+        return _result(type_name, ref, ref, problem=f"{type(error).__name__}: {error}")
 
 
 def _unknown_type(type_name: object) -> str:

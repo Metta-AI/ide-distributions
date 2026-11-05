@@ -75,6 +75,9 @@ class ActionSpec:
     # the required fields as required, which the grouped tool's schema cannot. The grouped tool no
     # longer offers the action but still runs a call that names it.
     own_tool: bool = False
+    # Fields only the Orchestrator can use. A Researcher's schema and refusals leave them out; a
+    # call that sends one anyway still reaches the handler, which says why it does not apply.
+    orchestrator_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -96,6 +99,7 @@ class ToolSpec:
     # action's hidden fields, so a retry of an older grouped call can keep its operation_id.
     split_from: tuple[str, str] | None = None
     hidden_params: dict[str, dict] = field(default_factory=dict)
+    orchestrator_fields: tuple[str, ...] = ()  # see ActionSpec.orchestrator_fields
 
     def actions_for(self, role: Role) -> list[ActionSpec]:
         """Every action a call may name for this role, offered here or as a tool of its own."""
@@ -132,19 +136,25 @@ class ToolSpec:
             }
             takers: dict[str, list[ActionSpec]] = {}
             for action in actions:
-                for name in action.params:
-                    takers.setdefault(name, []).append(action)
+                for name in self.offered(action, role):
+                    if name in action.params:
+                        takers.setdefault(name, []).append(action)
             for name, taking in takers.items():
                 schema = taking[0].params[name]
                 described = field_description(name, taking, len(actions))
                 properties[name] = {**schema, "description": described}
-        for name, schema in self.params.items():
+        for name, schema in self.offered(None, role).items():
             properties.setdefault(name, schema)
         return properties
 
-    def offered(self, action: ActionSpec | None) -> dict[str, dict]:
-        """The fields a model is told about: the action's own inputs plus the tool's common ones."""
-        return {**(action.params if action else {}), **self.params}
+    def offered(self, action: ActionSpec | None, role: Role | None = None) -> dict[str, dict]:
+        """The fields a model is told about: the action's own inputs plus the tool's common ones;
+        with a role, those it can use."""
+        fields = {**(action.params if action else {}), **self.params}
+        if role == "researcher":
+            kept_back = {*self.orchestrator_fields, *(action.orchestrator_fields if action else ())}
+            return {name: schema for name, schema in fields.items() if name not in kept_back}
+        return fields
 
     def accepted(self, action: ActionSpec | None) -> dict[str, dict]:
         """The fields one call may carry: the offered ones plus the action's hidden ones."""
@@ -210,6 +220,7 @@ def own_tool(grouped: ToolSpec, action: ActionSpec) -> ToolSpec:
         example_fields=action.example_fields,
         split_from=(grouped.name, action.name),
         hidden_params=action.hidden_params,
+        orchestrator_fields=(*action.orchestrator_fields, *grouped.orchestrator_fields),
     )
 
 
@@ -313,7 +324,8 @@ class ToolContext:
         )
         if not coworld_id:
             raise ToolError(
-                "this session has no Coworld; open a session with session_context.coworld"
+                "this session has no Coworld; the client must open a session for one, so tell "
+                "the user. A delegated child never has one: return your findings to the parent"
             )
         return self.workspace.coworld(coworld_id)
 
@@ -384,7 +396,7 @@ def validate_args(
         else:
             action_name = str(raw)
             required.extend(spec.action(action_name).required)  # type: ignore[union-attr]
-    known = {*properties, *spec.hidden_params} | {
+    known = {*properties, *spec.params, *spec.hidden_params} | {
         name for action in spec.actions or () for name in (*action.params, *action.hidden_params)
     }
     accepted = spec.accepted(spec.action(action_name)) if action_name else None
@@ -513,7 +525,7 @@ def usage(spec: ToolSpec, role: Role, action: str | None) -> dict:
             **({"own_tools": own} if own else {}),
         }
     selected = spec.action(action) if action else None
-    schemas = spec.offered(selected)
+    schemas = spec.offered(selected, role)
     required = [*(selected.required if selected else ()), *spec.required]
     optional = [name for name in schemas if name not in required]
     names = [*required, *(selected.example_fields if selected else spec.example_fields)]

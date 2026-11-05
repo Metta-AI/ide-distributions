@@ -3,8 +3,8 @@
 Everything is a store write, never a wait on a browser: ``show`` and ``panel_set`` patch the
 conversation's UI state document, ``ask`` opens a question in it, and ``notify`` writes a
 notice. The conversation key follows A3.5: a chat Session writes under its own session id; a
-wake Session, or one with no Session row, writes under the fixed conversation ``workspace``,
-which every client sees. The ``agent-context`` panel always lives in the Coworld's shared
+wake Session writes under its Coworld's shared conversation ``coworld:<id>``, and one with no
+Coworld under ``workspace``. The ``agent-context`` panel always lives in the Coworld's shared
 conversation, where the watcher keeps its computed part: a write sets only the needs. UI state and
 notices live in the workspace store.
 """

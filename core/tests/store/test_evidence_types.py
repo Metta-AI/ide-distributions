@@ -74,7 +74,6 @@ def test_every_profile_type_is_registered_with_all_four_parts():
         assert kind.name == name
         assert kind.ref_format.strip()
         assert callable(kind.validate)
-        assert kind.skill.strip()
 
 
 @pytest.mark.parametrize(("type_name", "ref"), VALID_REFS)
@@ -170,7 +169,7 @@ def test_record_inspectors_return_the_record_summary(coworld_store, harness):
         "summary": "a version",
     }
     missing = evidence_types.inspect_evidence("claim", "C-9", env)
-    assert missing["problem"] == "C-9 does not exist" and missing["skill"] == "claim"
+    assert missing["problem"] == "C-9 does not exist"
 
 
 def test_every_type_has_an_inspector_and_only_records_resolve():
@@ -184,10 +183,10 @@ def test_inspect_evidence_never_raises(coworld_store):
     unknown = evidence_types.inspect_evidence("screenshot", "x", env)
     assert unknown["type"] == "screenshot" and "not registered" in unknown["problem"]
     malformed = evidence_types.inspect_evidence("code", "agent.py", env)
-    assert "<path>:<a>-<b>@<sha>" in malformed["problem"] and malformed["skill"] == "code-citations"
+    assert "<path>:<a>-<b>@<sha>" in malformed["problem"]
     for name, ref in VALID_REFS:
         result = evidence_types.inspect_evidence(name, ref, env)
-        assert {"type", "ref", "summary", "skill"} <= set(result), (name, ref)
+        assert {"type", "ref", "summary"} <= set(result), (name, ref)
 
 
 def test_register_type_adds_a_type_and_refuses_duplicates(coworld_store, monkeypatch):
@@ -196,7 +195,6 @@ def test_register_type_adds_a_type_and_refuses_duplicates(coworld_store, monkeyp
         name="screenshot",
         ref_format="shot:<id>",
         validate=lambda ref: [] if ref.startswith("shot:") else ["shot:<id>"],
-        skill="screenshots",
     )
     evidence_types.register_type(screenshot)
     assert evidence_types.EVIDENCE_TYPES["screenshot"] is screenshot

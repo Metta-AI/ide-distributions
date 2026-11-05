@@ -28,7 +28,7 @@ def test_intents_reconcile_upload(lab):
     assert crashed["ok"] is False and "injected fault after upload" in crashed["error"]
     assert lab.platform().snapshot()["counts"]["upload"] == 1
     (pending,) = intents.pending(lab.store, "upload")
-    assert pending["key"] == version["artifact"]["digest"] and pending["subject"] == "V-1"
+    assert pending["key"].endswith(version["artifact"]["digest"]) and pending["subject"] == "V-1"
     assert pending["request"]["file_hash"] == version["artifact"]["digest"]
     assert lab.read("V-1")["record"]["uploaded"] is None
     # Recovery reads the platform with the saved inputs, so the kept copy is not needed.

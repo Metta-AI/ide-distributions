@@ -207,7 +207,7 @@ def test_claim_from_a_second_session_is_refused(call, goal, code_repo):
     call("task", task_args())
     claim(call)
     refused = claim(call, session_id="r2")
-    assert refused["ok"] is False and "recorded assignment" in refused["error"]
+    assert refused["ok"] is False and "no assignment" in refused["error"]
 
 
 def test_claim_needs_a_session_and_a_code_repository(call, ctx_factory, goal):
@@ -227,7 +227,7 @@ def test_claim_needs_a_session_and_a_code_repository(call, ctx_factory, goal):
 def test_claim_rejects_unapproved_or_blocked_tasks(call, goal, code_repo):
     as_researcher(call, task_args(action="propose"))
     refused = claim(call)
-    assert refused["ok"] is False and "recorded assignment" in refused["error"]
+    assert refused["ok"] is False and "no assignment" in refused["error"]
 
 
 def test_orchestrator_cannot_claim_and_researcher_cannot_create(call, goal):
@@ -326,6 +326,23 @@ def complete_args(**overrides):
     }
     args.update(overrides)
     return args
+
+
+def test_a_rejection_needs_no_merge_choice(call, ctx_factory, goal, code_repo):
+    call("task", task_args())
+    claim(call)
+    claims.write(
+        ctx_factory().store,
+        Actor.session("r1"),
+        summary="Scouts open left.",
+        body="12 of 20 episodes.",
+        tags=["opening"],
+        evidence=EVIDENCE,
+    )
+    assert as_researcher(call, complete_args(claims=["C-1"]))["ok"] is True
+    rejected = call("task", {"action": "review", "task": "T-1", "accept": False, "reason": "no"})
+    assert rejected["ok"] is True, rejected
+    assert rejected["record"]["status"] != "complete"
 
 
 def test_complete_research_task_and_review(call, ctx_factory, goal, code_repo):

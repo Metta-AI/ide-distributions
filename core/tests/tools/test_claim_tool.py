@@ -317,7 +317,7 @@ def test_doc_measurement_replay_and_annotation_inspectors(call, ctx_factory):
         ctx.store,
         harness,
         kind="replay",
-        ref="ereq_abc",
+        ref="episode:ereq_abc",
         download={"path": "replays/ereq_abc.json", "size": 10},
     )
     sha = "0123abcd"
@@ -327,7 +327,7 @@ def test_doc_measurement_replay_and_annotation_inspectors(call, ctx_factory):
         assert result["ok"] is True, result
         [inspection] = result["inspections"]
         assert inspection["type"] == type_name and inspection["ref"] == ref
-        assert inspection["summary"] and inspection["skill"]
+        assert inspection["summary"]
         return inspection
 
     quoted = inspect("doc", "https://example.org/page (retrieved 2026-10-28): the quoted passage")
@@ -345,7 +345,7 @@ def test_doc_measurement_replay_and_annotation_inspectors(call, ctx_factory):
     assert replay["episode"] == "ereq_abc" and replay["seat"] == "2"
     assert replay["xp_request"] == "xreq_123"
     assert replay["pin"]["path"] == "replays/ereq_abc.json"
-    assert replay["skill"] == "cow_fake-replay-inspection"
+    assert "(pinned)" in replay["summary"]
     unpinned = inspect("replay", "episode:ereq_zzz xp:xreq_123")
     assert unpinned["pin"] is None
 

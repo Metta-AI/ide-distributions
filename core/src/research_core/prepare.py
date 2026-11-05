@@ -88,7 +88,9 @@ PROTECTED_KEYS: dict[str, Any] = {
     "tool_loop_guardrails.hard_stop_after.idempotent_no_progress": 10,
     # Hermes tools these agents never called, each sent on every model call (JAME-178). Hermes
     # disables whole toolsets: `browser` also takes browser_vault, browser_cdp and browser_dialog.
-    "agent.disabled_toolsets": ["browser", "connections", "cronjob"],
+    # `todo`: the plan is Goals and Tasks, and no call in 1,981 used it. `delegation` stays: the
+    # expert-consultation skill needs it, and a child without a Coworld is told so when it tries.
+    "agent.disabled_toolsets": ["browser", "connections", "cronjob", "todo"],
     # Compaction starts above 500,000 tokens on the shipped Kimi models, so old tool output
     # otherwise stays in every request. From this request size, Hermes replaces results over 8,000
     # characters that are older than compression.protect_last_n messages with a one-line summary

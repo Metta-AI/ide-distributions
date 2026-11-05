@@ -181,12 +181,6 @@ ORCHESTRATOR = [
     Case(
         "orchestrator",
         "experiment",
-        "add_run",
-        "Record xp request req-9f2 as the candidate run of experiment X-4.",
-    ),
-    Case(
-        "orchestrator",
-        "experiment",
         "abandon",
         "Abandon experiment X-6: its baseline Version was deleted.",
     ),
@@ -225,12 +219,6 @@ RESEARCHER = [
         "Add replay evidence (ref 'episode:ep-77 xp:none') to claim C-5, supporting it.",
     ),
     Case("researcher", "experiment", "create", EXPERIMENT_CREATE),
-    Case(
-        "researcher",
-        "experiment",
-        "add_run",
-        "Record xp request req-1c0 as the baseline run of experiment X-4.",
-    ),
     Case(
         "researcher",
         "task",

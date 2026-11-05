@@ -303,7 +303,7 @@ def _capabilities(inputs: Inputs) -> Section:
         )
         broken = [row for row in rows if row["status"] == "broken"]
         if checked is None:
-            lines.append("Capability check: none yet (the watcher runs it within the hour)")
+            lines.append("Capability check: none yet (the watcher runs it on its next tick)")
         else:
             ok = sum(1 for row in rows if row["status"] == "ok")
             lines.append(f"Capability check: {_age(checked, inputs.now)}; {ok} of {len(rows)} ok")

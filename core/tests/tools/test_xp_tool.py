@@ -347,6 +347,17 @@ def test_credits_refusal_reports_the_balance_and_sets_no_wait(run, ctx, uploaded
     assert tasks.read(ctx.store, 1)["waiting_on"] is None
 
 
+def test_a_tasks_experiment_is_refused_for_anyone_but_its_holder_before_any_request(
+    run, ctx, uploaded, researcher_task
+):
+    make_experiment(ctx, task_id=researcher_task["id"])
+    refused = run("xp", {"action": "request", "experiment": "X-1"})
+    assert refused["ok"] is False and "belongs to T-1" in str(refused["problems"])
+    assert ctx.platform().snapshot()["counts"]["xp_create"] == 0
+    held = run("xp", {"action": "request", "experiment": "X-1"}, role="researcher", session_id="r1")
+    assert held["ok"] is True, held
+
+
 def test_ask_above_warns_the_orchestrator_and_asks_the_researcher(run, ctx, uploaded):
     make_experiment(ctx)
     settings.update(ctx.store, ctx.actor, xp_tool.ASK_ABOVE_KEY, 2, cites="the user said so")

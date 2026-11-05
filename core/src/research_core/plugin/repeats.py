@@ -63,7 +63,7 @@ _ONLY_GUARD_NOTES = re.compile(
 # How each role reports a problem it cannot fix itself.
 WAY_OUT: dict[str, str] = {
     "orchestrator": "report the problem with ui.notify",
-    "researcher": "report the problem to the Orchestrator with task_ask",
+    "researcher": "report the problem with task_ask if you hold a Task",
 }
 
 _lock = threading.Lock()
@@ -242,7 +242,7 @@ def write_halt_notice(role: Role, session_id: str, failures: Counter[str]) -> No
         ctx.actor,
         text=(
             f"Hermes's loop guard stopped the {role}'s {about} after repeated calls"
-            f"{most_failures}. Its work may be unfinished, and nothing retries it."
+            f"{most_failures}. Its work may be unfinished."
         ),
         refs=refs,
         urgency="high",
