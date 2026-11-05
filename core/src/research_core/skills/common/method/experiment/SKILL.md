@@ -11,13 +11,13 @@ An Experiment compares two Versions and ends in the verdict its pre-registered d
 
 1. Read the Goal, its directives and the Task's reasoning.
 2. `claim.search {query: <lever>, include_retired: true}`: a refuted claim closes a lever until new evidence meets its "what would change our mind". `experiment.search` finds earlier attempts; cite them in `related_experiments`.
-3. Choose the baseline. Any Version can be one. When the purpose is a submission, the baseline is the League's champion (`platform.champion {league}`); if it is not a Version yet, `version.adopt {policy_version, summary}`.
-4. Know the cost (`credits` skill): `platform.credits`, then seeds × arms × episodes.
+3. Choose the baseline. Any Version can be one. When the purpose is a submission, the baseline is the League's champion (`platform.champion {league}`); if it is not a Version yet, `version.adopt {policy_version, summary}`, which finds only this Player's uploads.
+4. Know the cost (`credits` skill): `platform.credits`, then seeds × arms requests of `episodes` episodes each.
 
 ## Design with `experiment_create`
 
 - `summary`: at most 40 words.
-- `hypothesis {statement, if_true, if_false, motivation}`: a mechanism ("X because Y, so Z"), not a tweak. `if_true` and `if_false` must differ and name the metric that moves.
+- `hypothesis {statement, if_true, if_false, motivation}`: a mechanism ("X because Y, so Z"), not a tweak. `if_true` and `if_false` say what we do in each case and must differ.
 - `methods {baseline, candidate, procedure, metrics, decision_rule}`: Versions as `V-n`; leave `candidate` empty until it is built, the one Version built for the Experiment fills it. `metrics`: `[{name, direction, role, min_effect?, tolerance?}]` with roles `primary`, `guardrail`, `performance`. Every behavioural primary metric gets an anti-gaming guardrail; a rate metric needs its volume counterparts. `decision_rule {text, n_min}`: `n_min` pairs from the noise record (`calibrate-noise`) or the mixin's floors.
 - Metric names, directions, rosters and floors are game-specific: see the mixin's `<coworld>-eval-design` and `<coworld>-ab` skills or docs. Without them, say so and treat the result as directional.
 - `tags`: the lever and the Goal (`G-n`).
@@ -35,7 +35,7 @@ Attack the design before starting: does the metric measure the mechanism or a co
 
 ## Close
 
-`experiment.close {experiment}` pairs baseline and candidate rows by seed and applies the rule: `confirmed` (no reason codes), `inconclusive` (`n_short`), or `refuted` (`primary_not_significant`, `guardrail_breach`, `performance_slip`). Give an explicit `verdict` with `measurements`, `interpretation` and `reason` only when the rule cannot be applied as registered. Never move a threshold after seeing data; N was committed with the rule, so do not peek and stop early. `experiment.abandon {experiment, reason}` stops before a verdict; the record stays and a replacement cites it.
+`experiment.close {experiment}` pairs baseline and candidate rows by seed and applies the rule: `confirmed` (no reason codes), `inconclusive` (`n_short`), or `refuted` (`primary_not_significant`, `guardrail_breach`, `performance_slip`, `performance_slip_without_significance`); `no_primary_metric` alone is `inconclusive`. Give an explicit `verdict` with `measurements`, `interpretation` and `reason` only when the rule cannot be applied as registered. Never move a threshold after seeing data; N was committed with the rule, so do not peek and stop early. `experiment.abandon {experiment, reason}` stops before a verdict; the record stays and a replacement cites it.
 
 ## Record
 

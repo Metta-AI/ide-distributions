@@ -9,7 +9,7 @@ A survey turns a pile of finished episodes into a finding: what happened, decomp
 
 ## Inputs
 
-- An Experiment's downloaded results: `xp.status {experiment}` stores the mixin's `evaluate` rows on the runs; `experiment.read {experiment, section: results}` lists them with request ids and the results folder.
+- An Experiment's downloaded results: `xp.status {experiment}` stores the mixin's `evaluate` rows on the runs; `experiment.read {experiment, section: results}` lists them with request ids; the files are under `documents/xp/<X-n>/<request id>/`.
 - League play: `platform.episodes {league}` or `{policy_version}`, `platform.episode {episode}` for scores and participants, `platform.results` for our standing rows.
 - Per-seat metrics come from the mixin's `evaluate` command on downloaded results; what it produces is game-specific: see the mixin's `<coworld>-survey` skill or docs.
 

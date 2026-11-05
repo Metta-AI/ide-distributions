@@ -247,10 +247,7 @@ def _credits(inputs: Inputs) -> str:
     credits = _meta_json(inputs.store, "credits") if inputs.store is not None else None
     if not isinstance(credits, dict) or credits.get("balance") is None:
         return "unknown"
-    text = f"{credits['balance']}"
-    if credits.get("held"):
-        text += f" ({credits['held']} held)"
-    return text
+    return f"{credits['balance']}"
 
 
 def _cli_staleness(wstore: Store) -> str | None:
