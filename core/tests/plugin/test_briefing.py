@@ -322,3 +322,11 @@ def test_make_section_reads_the_session_id_and_never_raises(tmp_path, monkeypatc
 
     monkeypatch.setattr(briefing, "render", boom)
     assert section({"session_id": "chat1"}) == "Briefing unavailable: RuntimeError: boom"
+
+
+def test_the_briefing_says_when_it_was_written_and_that_it_does_not_update(tmp_path):
+    ctx = make_ctx(tmp_path)
+    moment = datetime(2026, 11, 4, 18, 5, tzinfo=UTC)
+    first_line = briefing.render(ctx, "chat1", role="orchestrator", now=moment).splitlines()[0]
+    assert first_line.startswith("[briefing] Written 2026-11-04 18:05 UTC")
+    assert "not updated in this Session" in first_line

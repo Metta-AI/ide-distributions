@@ -151,3 +151,9 @@ def test_reactions_reach_the_agent_at_its_next_turn(tmp_path):
     assert "m-9" not in text  # another conversation's reaction
     assert "ui.patch" not in text  # not counted as a changed-since kind
     assert "[reactions" not in turn.render_turn(ctx, "chat1", is_first_turn=False, now=NOW)
+
+
+def test_an_opening_goal_is_said_to_be_the_first_request():
+    block = turn.render_context_block({"opening_goal": "Reach the top 10"})
+    assert "opening_goal: Reach the top 10" in block and session_context.OPENING_GOAL in block
+    assert session_context.OPENING_GOAL not in turn.render_context_block({"league": "league_x"})

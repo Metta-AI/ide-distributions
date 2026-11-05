@@ -14,8 +14,7 @@ judge the result.
 something that can be judged: "a Version beats the champion by 2 points of mean score over 200
 episodes with the mixin's guardrails met", not "improve the policy". `reason` is the user's
 words or your reading of them; `judgement` says how the end state will be checked (which metric,
-which Experiment design). Keep `where_it_stands` current with `goal.update` after each review:
-one line the user reads. `goal.set_status {goal, status, status_reason}` to park (waiting on the user or on
+which Experiment design). Keep `where_it_stands` current with `goal.update` after each review. `goal.set_status {goal, status, status_reason}` to park (waiting on the user or on
 credits), complete (the end state was met; cite the Experiment) or abandon.
 
 A read-only question needs no Goal. A request that takes more than a turn does.
@@ -71,7 +70,7 @@ Settings bound only the agents' own initiative;
 nothing the user asks for in a turn is refused by one.
 
 `paused: true` stops everything in the background: no Researcher starts, no merge, no recovery,
-no autonomous submission; running Researcher Sessions are drained and resume on `paused: false`.
+no autonomous submission; running Sessions are drained and resume on `paused: false`.
 You still answer the user, and what they ask for in a turn runs.
 
 ## Abandoning
