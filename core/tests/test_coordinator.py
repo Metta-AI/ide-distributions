@@ -305,3 +305,32 @@ def test_recovery_replays_old_message_ids_and_counts_a_running_continuation(tmp_
             context="work",
             rationale="fit",
         )
+
+
+@pytest.mark.parametrize(
+    "outcome,error",
+    [("completed", None), ("failed", "fixture failure"), ("failed", "HTTP 429 rate limit")],
+)
+def test_terminal_observation_is_after_settlement_and_not_a_native_completion_clock(
+    tmp_path, capsys, outcome, error
+):
+    ctx = make_ctx(tmp_path)
+    native = FakeHermesRuns()
+    coordinator = Coordinator(ctx.workspace, native)
+    run_id = coordinator.start(**chat(ctx))
+    [row] = ctx.wstore.q("SELECT * FROM client_admissions")
+    with ctx.wstore.tx(HARNESS) as tx:
+        tx.execute("UPDATE client_admissions SET origin='client' WHERE op_id=?", (row["op_id"],))
+    native.runs[run_id].status = outcome
+    native.runs[run_id].error = error
+    status = native.status(run_id, profile="orchestrator")
+    coordinator.settle_attempt(ctx.wstore, row["op_id"], status)
+    coordinator.settle_attempt(ctx.wstore, row["op_id"], status)
+    events = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    (event,) = [event for event in events if event["event"] == "workspace_run_observation"]
+    assert event["run_id"] == run_id and event["op_id"] == row["op_id"]
+    assert event["outcome"] == outcome and event["elapsed_ms"] >= 0
+    assert event["boundary"] == "message_acceptance_to_terminal_observation"
+    assert event["native_terminal_at"] is None
+    assert event["terminal_observation_delay_ms"] is None
+    assert "fixture failure" not in json.dumps(event)

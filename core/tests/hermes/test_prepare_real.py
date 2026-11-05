@@ -463,3 +463,111 @@ finally:
     )
     assert result.returncode == 0, result.stdout + result.stderr
     assert "PASS" in result.stdout
+
+
+def test_installed_native_timing_captures_model_and_rejected_tool(hermes_bin, host):
+    """Native lifecycle dispatch, real HTTP provider, and the installed distribution plugin."""
+    prepare(hermes_bin, host, "orchestrator")
+    script = """
+import json, threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from hermes_state_registry import acquire, release
+from run_agent import AIAgent
+calls = []
+class Provider(BaseHTTPRequestHandler):
+    def do_POST(self):
+        request = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if not self.path.endswith("/chat/completions") or request.get("response_format"):
+            body = json.dumps({"id":"metadata", "object":"chat.completion", "created":1,
+                "model":"proof", "choices":[{"index":0,"finish_reason":"stop",
+                    "message":{"role":"assistant",
+                        "content":json.dumps({"title":"Timing proof"})}}]}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type","application/json")
+            self.send_header("Content-Length",str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        calls.append(request)
+        if len(calls) == 1:
+            body = json.dumps({"error":{"message":"fixture rate limit"}}).encode()
+            self.send_response(429)
+            self.send_header("Content-Type","application/json")
+            self.send_header("Content-Length",str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+            return
+        message = {"role":"assistant", "content":"Finished"}
+        reason = "stop"
+        if len(calls) == 2:
+            message = {"role":"assistant", "content":None, "tool_calls":[{
+                "id":"rejected-task-message", "type":"function", "function":{
+                    "name":"task", "arguments":json.dumps(
+                        {"action":"message", "task":"T-1", "text":"fixture"})
+                }}]}
+            reason = "tool_calls"
+        body = json.dumps({"id":"timing-proof", "object":"chat.completion", "created":1,
+            "model":"proof", "choices":[{"index":0,"finish_reason":reason,"message":message}],
+            "usage":{"prompt_tokens":20,"completion_tokens":3,"total_tokens":23,
+                     "prompt_tokens_details":{"cached_tokens":5}}}).encode()
+        if request.get("stream"):
+            if "tool_calls" in message:
+                message["tool_calls"][0]["index"] = 0
+            chunk = {"id":"timing-proof", "object":"chat.completion.chunk", "created":1,
+                "model":"proof", "choices":[{"index":0,"finish_reason":reason,"delta":message}],
+                "usage":{"prompt_tokens":20,"completion_tokens":3,"total_tokens":23,
+                         "prompt_tokens_details":{"cached_tokens":5}}}
+            body = ("data: " + json.dumps(chunk) + "\\n\\ndata: [DONE]\\n\\n").encode()
+        self.send_response(200)
+        self.send_header("Content-Type",
+            "text/event-stream" if request.get("stream") else "application/json")
+        self.send_header("Content-Length",str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+    def log_message(self,*args): pass
+server = ThreadingHTTPServer(("127.0.0.1",0), Provider)
+threading.Thread(target=server.serve_forever,daemon=True).start()
+db = acquire()
+try:
+    agent = AIAgent(model="proof", provider="custom", api_mode="chat_completions",
+        base_url=f"http://127.0.0.1:{server.server_port}/v1", api_key="fixture",
+        enabled_toolsets=["ide-orchestrator"], quiet_mode=True, skip_context_files=True,
+        skip_memory=True, skip_background_review=True, session_id="native-timing-proof",
+        session_db=db, max_iterations=3)
+    result = agent.run_conversation("Measure this fixture turn", task_id="native-timing-proof")
+    assert result["final_response"] == "Finished", result
+    assert len(calls) == 3, calls
+    tool_results = [m for m in calls[-1]["messages"] if m["role"] == "tool"]
+    assert len(tool_results) == 1
+    assert "operation_id is required" in tool_results[0]["content"]
+    print("PASS native timing fixture")
+finally:
+    server.shutdown()
+    server.server_close()
+    release(db)
+"""
+    result = run([hermes_python(hermes_bin), "-c", script], host.env("orchestrator"))
+    assert result.returncode == 0, result.stdout + result.stderr
+    events = [
+        json.loads(line)
+        for line in result.stderr.splitlines()
+        if line.startswith('{"event":"workspace_')
+    ]
+    models = [event for event in events if event["event"] == "workspace_model_attempt"]
+    tools = [event for event in events if event["event"] == "workspace_native_tool"]
+    turns = [event for event in events if event["event"] == "workspace_turn"]
+    assert len(models) == 3, result.stderr
+    assert len(tools) == len(turns) == 1, result.stderr
+    assert [model["call_index"] for model in models] == [1, 1, 2]
+    assert [model["attempt_index"] for model in models] == [1, 2, 1]
+    assert models[0]["outcome"] == "failed" and models[0]["status_code"] == 429
+    assert models[1]["native_started_at"] == models[0]["native_started_at"]
+    assert models[1]["elapsed_ms"] < models[1]["native_elapsed_ms"]
+    assert all(model["cache_read_tokens"] == 5 for model in models[1:])
+    assert tools[0]["status"] == "error" and tools[0]["outcome"] == "failed"
+    assert tools[0]["started_at"] is not None
+    assert turns[0]["accounting_complete"]
+    assert turns[0]["model_count"] == 3 and turns[0]["tool_count"] == 1
+    assert turns[0]["elapsed_ms"] == pytest.approx(
+        turns[0]["accounted_busy_ms"] + turns[0]["unaccounted_ms"], abs=0.001
+    )

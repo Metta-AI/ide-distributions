@@ -29,13 +29,14 @@ import hashlib
 import json
 import secrets
 import socket
+import sys
 import time
 import urllib.error
 import urllib.request
 from collections.abc import Callable, Iterable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from research_core import inference
 from research_core.platform.errors import PlatformError
@@ -47,6 +48,22 @@ DETAIL_LIMIT = 2000  # characters of an error body kept in an exception's detail
 
 
 # --- results and errors ----------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class SessionSetupTiming:
+    """The supported native create-session HTTP boundary, including retained replay."""
+
+    event: str = field(default="workspace_session_setup", init=False)
+    schema_version: int = field(default=1, init=False)
+    stage: str = field(default="terminal", init=False)
+    profile: str
+    session_id: str
+    started_at: float
+    ended_at: float
+    elapsed_ms: float
+    outcome: Literal["accepted", "existing", "failed"]
+    boundary: Literal["native_create_session_http"] = "native_create_session_http"
 
 
 @dataclass
@@ -356,11 +373,26 @@ class HermesRuns:
 
     def create_session(self, session_id: str, *, profile: str) -> None:
         """Create the native session before any run; replay keeps the existing transcript."""
-        response = self._request(
-            "POST", profile, "/api/sessions", body={"id": session_id}, accept=(409,)
-        )
-        if response.status == 409 and _error_fields(response.payload)[1] != "session_exists":
-            raise self._error_for(f"POST /p/{profile}/api/sessions", response)
+        start, clock = time.time(), time.monotonic()
+        outcome = "failed"
+        try:
+            response = self._request(
+                "POST", profile, "/api/sessions", body={"id": session_id}, accept=(409,)
+            )
+            if response.status == 409 and _error_fields(response.payload)[1] != "session_exists":
+                raise self._error_for(f"POST /p/{profile}/api/sessions", response)
+            outcome = "existing" if response.status == 409 else "accepted"
+        finally:
+            event = SessionSetupTiming(
+                profile=profile,
+                session_id=session_id,
+                started_at=start,
+                ended_at=time.time(),
+                elapsed_ms=round((time.monotonic() - clock) * 1000, 3),
+                outcome=outcome,
+            )
+            sys.stderr.write(json.dumps(asdict(event), separators=(",", ":")) + "\n")
+            sys.stderr.flush()
 
     # -- transport ----------------------------------------------------------------------------
 

@@ -379,20 +379,27 @@ def test_session_messages_reads_the_list_and_empties_on_404(gateway, client):
     assert client.session_messages("api_1_zzz", profile="orchestrator") == []
 
 
-def test_create_session_posts_the_id(gateway, client):
+def test_create_session_posts_the_id(gateway, client, capsys):
     gateway.answer(200, {"id": "api_1_c", "source": "api_server"})
     assert client.create_session("api_1_c", profile="researcher") is None
     request = gateway.last
     assert (request["method"], request["path"]) == ("POST", "/p/researcher/api/sessions")
     assert request["body"] == {"id": "api_1_c"}
+    event = json.loads(capsys.readouterr().err)
+    assert event["event"] == "workspace_session_setup"
+    assert event["outcome"] == "accepted" and event["elapsed_ms"] >= 0
+    assert event["boundary"] == "native_create_session_http"
+    assert "Authorization" not in json.dumps(event)
 
 
-def test_create_session_replay_accepts_only_an_existing_session(gateway, client):
+def test_create_session_replay_accepts_only_an_existing_session(gateway, client, capsys):
     gateway.answer(409, {"error": {"code": "session_exists", "message": "Already exists"}})
     assert client.create_session("api_1_c", profile="orchestrator") is None
     gateway.answer(409, {"error": {"code": "other_conflict", "message": "Not a replay"}})
     with pytest.raises(RunsConflict, match="other_conflict"):
         client.create_session("api_1_c", profile="orchestrator")
+    events = [json.loads(line) for line in capsys.readouterr().err.splitlines()]
+    assert [event["outcome"] for event in events] == ["existing", "failed"]
 
 
 def test_mint_session_id_has_the_hermes_api_shape():

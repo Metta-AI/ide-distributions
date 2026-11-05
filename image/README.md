@@ -225,3 +225,66 @@ and verify log ingestion before making dashboard availability claims. A current 
 time to first token, provider cached-token usage, session restoration and cache-miss evidence
 must come from the supported native runtime/provider surfaces. Retained workspace startup
 alone does not prove a warm model context or provider key/value cache hit.
+
+## Workspace turn breakdown
+
+The profile's supported native lifecycle hooks emit payload-free `workspace_model_attempt`,
+`workspace_native_tool` and `workspace_turn` JSON lines. Every record has `schema_version: 1`
+and `stage: terminal`; these are completion records, not separate start and stop counts.
+`role` is `orchestrator` or `researcher`. Native session/task/turn/request/tool-call IDs remain
+log join fields; they must not become metric tags.
+
+A model attempt runs from the observed `pre_api_request` callback to the native response end.
+Its `elapsed_ms` is **not** Hermes's cumulative retry-window duration: that is retained as
+`native_elapsed_ms` with `native_started_at`. `call_index` is the native logical request
+index; `attempt_index` counts observed starts for that request, and `native_retry_count`
+preserves Hermes's retry counter. `inter_attempt_gap_ms` includes retry wait and preparation;
+it is not a separately measured backoff. `first_chunk_ms` and `post_first_chunk_ms` divide
+an attempt only when the native hook supplies a first chunk. A chunk may contain reasoning
+or tool data; neither field claims first-token or first-visible-text latency.
+
+Native tool `elapsed_ms` measures observed pre/post hook boundaries, while `execution_ms`
+is Hermes's separately reported execution duration. Missing pre callbacks produce null
+bounds, not inferred start times. `status` is the native semantic status: an error result,
+including a rejected distribution tool call, reports `error` and `outcome: failed`.
+Repeated calls have distinct native IDs and an increasing `repeated_tool_index`; repetition
+alone does not establish a bad retry. These records include native built-ins as well as
+registered distribution tools. Do not add their counts to `workspace_tool` counts.
+
+`workspace_turn.elapsed_ms` spans `pre_llm_hook_to_session_end`, after session/prompt setup.
+Model and tool busy fields are clipped interval unions. `accounted_busy_ms` is their combined
+union; `overlap_ms` records double coverage; `unaccounted_ms` is the remaining wall time.
+`accounted_busy_ms + unaccounted_ms = elapsed_ms`, within millisecond rounding. Incomplete
+callback pairs set `accounting_complete: false` and explicit missing counts. Exclude those
+component estimates from complete-accounting distributions.
+
+An exact existing native-message-row binding can attach the client `op_id`, its actual stored
+`run_id`, and `workspace_total_ms` from durable message acceptance to session-end hook.
+`admission_to_dispatch_ms` includes pre-dispatch waiting and preparation; `dispatch_to_hook_ms`
+includes native admission and session/prompt setup. They are not pure queueing or restoration.
+Their sum plus the hook window reconciles this wider envelope. Unbound/background turns keep
+these values null. Terminal hook completion precedes native terminal publication and browser
+delivery; those are separate boundaries.
+
+`workspace_session_setup` measures the supported native create-session HTTP request. Its
+`native_create_session_http` boundary reports `accepted`, `existing` or `failed`. It does not
+attest agent reuse, restored context or a warm provider cache. `is_first_turn` only describes
+conversation-history presence. Session restoration, provider cache-miss classification and
+isolated retry backoff remain explicitly unavailable. Cache usage comes from native canonical
+usage; zero loses provider field-presence information, so zero/absent cache buckets are null
+with `cache_reporting: unavailable_or_zero`. Positive buckets are `positive_normalized`.
+
+Search parsed Datadog attributes, for example
+`service:hermes-runtime @event:workspace_turn @schema_version:1 @stage:terminal`.
+Quoted JSON keys alone do not search the parsed attributes. Verify these events in the normal
+packaged gateway's container logs and then in the adopted runtime's Datadog logs before
+claiming deployed coverage. Historical message-to-message gaps are not model or tool spans.
+
+The hook contract is pinned by `image/Dockerfile`. Relevant native implementations are
+`agent/turn_api_request.py`, `agent/turn_response_intake.py`, `agent/api_request_hooks.py`,
+`model_tools.py`, `agent/turn_context.py` and `agent/turn_finalizer.py`.
+`core/tests/hermes/test_prepare_real.py::test_installed_native_timing_captures_model_and_rejected_tool`
+checks installed profiles with the pinned agent and a scripted external HTTP provider. It
+covers rate-limit retry timing, canonical cache usage, semantic tool rejection and interval
+reconciliation without spending model credits. This component proof does not attest the
+container logging path or deployed Datadog ingestion.

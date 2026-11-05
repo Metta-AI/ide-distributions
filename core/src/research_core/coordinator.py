@@ -13,6 +13,7 @@ import logging
 import sys
 from collections.abc import Callable
 from contextlib import contextmanager
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
@@ -93,6 +94,31 @@ def ownership(ws: layout.Workspace):
             yield
         finally:
             fcntl.flock(lock, fcntl.LOCK_UN)
+
+
+@dataclass(frozen=True)
+class RunObservation:
+    """Terminal native receipt observed by the existing reconciler, not its completion clock."""
+
+    event: str = field(default="workspace_run_observation", init=False)
+    schema_version: int = field(default=1, init=False)
+    stage: str = field(default="terminal", init=False)
+    role: str
+    session_id: str
+    op_id: str
+    run_id: str
+    outcome: str
+    started_at: float
+    ended_at: float
+    elapsed_ms: float
+    native_created_at: float | None
+    native_terminal_at: None = None
+    terminal_observation_delay_ms: None = None
+    boundary: str = "message_acceptance_to_terminal_observation"
+
+    def emit(self) -> None:
+        sys.stderr.write(json.dumps(asdict(self), separators=(",", ":")) + "\n")
+        sys.stderr.flush()
 
 
 class Coordinator:
@@ -1070,6 +1096,7 @@ class Coordinator:
                 and row["delivery_mode"] == "start"
             ):
                 self._hold(store, row, status, error_class)
+                self.observe_terminal(row, status)
                 return
         with store.tx(ACTOR) as tx:
             tx.execute(
@@ -1082,6 +1109,22 @@ class Coordinator:
                 row["op_id"],
                 {"status": status.status, "error_class": error_class},
             )
+        self.observe_terminal(row, status)
+
+    def observe_terminal(self, row, status: hermes_api.RunStatus) -> None:
+        end = self.clock().timestamp()
+        start = parse_iso(row["created_at"]).timestamp()
+        RunObservation(
+            role=row["profile"],
+            session_id=row["session_id"],
+            op_id=row["op_id"],
+            run_id=status.run_id,
+            outcome=status.status,
+            started_at=start,
+            ended_at=end,
+            elapsed_ms=round((end - start) * 1000, 3),
+            native_created_at=status.raw.get("created_at"),
+        ).emit()
 
     def _installed_key_id(self) -> str | None:
         lease = inference.read_lease(self.inference_lease_file)

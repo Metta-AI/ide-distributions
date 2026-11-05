@@ -27,6 +27,10 @@ def make_register(role: Role) -> Callable[[Any], None]:
         from research_core.plugin.messages import record_native_message
 
         ctx.register_hook("pre_api_request", record_native_message)
+        from research_core.plugin.timing import make_hooks as make_timing_hooks
+
+        for hook_name, callback in make_timing_hooks(role).items():
+            ctx.register_hook(hook_name, callback)
 
         for spec in tools_for(role):
             ctx.register_tool(
