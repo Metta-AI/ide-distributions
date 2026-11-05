@@ -333,8 +333,18 @@ def task_list(situation: Situation, args: dict) -> dict:
     rows = [_task_row(task_id) for task_id in OTHER_TASKS]
     if situation.role == "researcher":
         rows.append(own_task(situation))
-    wanted = args.get("status")
-    return {"records": [row for row in rows if wanted in (None, "", row["status"])]}
+    goal = args.get("goal")
+    goal_id = int(_ref("G", goal).split("-")[1]) if goal else None
+    return {
+        "records": [
+            row
+            for row in rows
+            if args.get("status") in (None, "", row["status"])
+            and args.get("type") in (None, "", row["type"])
+            and args.get("held_by") in (None, "", row["held_by"])
+            and goal_id in (None, row["goal_id"])
+        ]
+    }
 
 
 def task_workers(situation: Situation, args: dict) -> dict:
@@ -554,6 +564,8 @@ X5_STATUS = {
 }
 
 
+# An evaluation has played V-12, so it was uploaded, unless the situation is about uploading it.
+X5_EVALUATED = {"pending", "finished", "stored", "renamed", "confirmed", "refuted"}
 # How much a stored X-5's candidate beats its baseline by, in win rate.
 X5_EFFECT = {"stored": 0.04, "renamed": 0.02, "confirmed": 0.04, "refuted": -0.03}
 BASELINE_WIN_RATE = 0.5
@@ -1321,7 +1333,9 @@ ACTIONS: dict[str, Callable[[Situation, dict], dict]] = {
 
 # Which read results a run used, kept in a baseline's ``meta.reads``. ``placeholder`` there means
 # every read got one fixed line. ``usability_results.compare`` says when two runs differ in this.
-READS_HASH = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:10]
+READS_HASH = hashlib.sha256(
+    Path(__file__).read_bytes() + json.dumps(_code_files(), sort_keys=True).encode()
+).hexdigest()[:10]
 
 
 def version_ref(args: dict | None) -> str:
@@ -1349,7 +1363,8 @@ def result(
     the Versions this run has uploaded."""
     answer = ACTIONS[label](situation, args or {})
     if label in ("version.read", "version.list"):
-        _show_uploads(answer, uploaded)
+        evaluated = situation.x5 in X5_EVALUATED and "upload" not in situation.acts
+        _show_uploads(answer, [*uploaded, "V-12"] if evaluated else uploaded)
     if label not in BUILTINS:
         answer.setdefault("ok", True)
     return json.dumps(answer)

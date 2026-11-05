@@ -295,7 +295,8 @@ def test_offline_read_results_agree_with_what_the_situation_says():
 
 def test_offline_a_version_shows_an_upload_only_once_it_has_one():
     for version, status, uploaded in (("V-12", "built", False), ("V-11", "uploaded", True)):
-        record = _read("version.read", {"version": version})["record"]
+        started = dataclasses.replace(SITUATION, x5="started")
+        record = _read("version.read", {"version": version}, started)["record"]
         assert record["submission_status"] == status
         assert bool(record["uploaded"]) is uploaded
 
@@ -364,6 +365,38 @@ def test_offline_a_checklist_nested_or_flat_meets_the_argument_rule(monkeypatch)
     for args in ({**base, **deliverables}, {**base, "checklist": deliverables}):
         run = _run_replies(monkeypatch, situation, [[("task", args)]])
         assert (run.outcome, run.args_right) == ("right", True), args
+
+
+def test_offline_task_list_filters_as_the_real_tool_does():
+    listed = _read("task.list", {"goal": "G-2", "status": "in-progress"})["records"]
+    assert listed == []
+    research = _read("task.list", {"type": "research", "goal": "G-1"})["records"]
+    assert research and all(row["type"] == "research" for row in research)
+
+
+def test_offline_v12_is_uploaded_once_an_evaluation_has_played_it():
+    pending = dataclasses.replace(SITUATION, x5="pending")
+    started = dataclasses.replace(SITUATION, x5="started")
+    assert _read("version.read", {"version": "V-12"}, pending)["record"]["uploaded"]
+    assert not _read("version.read", {"version": "V-12"}, started)["record"]["uploaded"]
+
+
+@pytest.mark.parametrize(
+    ("situation_id", "wrong"),
+    [
+        ("r-hard-supersede", {"claim": "C-400", "superseded_by": "C-410", "status": "superseded"}),
+        ("r-hard-wait-xp-args", {"task": "T-210", "kind": "xp", "ref": ["xreq_10", "xreq_20"]}),
+    ],
+)
+def test_offline_an_argument_rule_tells_one_id_from_a_longer_one(situation_id, wrong):
+    situation = next(s for s in SITUATIONS if s.id == situation_id)
+    assert not usability_probe.args_hold(situation.args, wrong)
+
+
+def test_offline_argument_rules_ignore_list_order():
+    situation = next(s for s in SITUATIONS if s.id == "r-hard-wait-xp-args")
+    args = {"task": "T-21", "kind": "xp", "ref": ["xreq_2", "xreq_1"]}
+    assert usability_probe.args_hold(situation.args, args)
 
 
 def test_offline_a_second_call_in_the_reply_that_settles_it_still_counts(monkeypatch):
