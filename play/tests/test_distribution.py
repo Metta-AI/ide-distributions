@@ -42,6 +42,19 @@ def test_no_research_machinery_mode_flags_or_chat_commands():
     )
 
 
+def test_every_name_the_soul_and_readme_quote_exists_in_the_code():
+    # A backticked tool, field or error code that nothing in the source mentions is a promise the
+    # model or a reader cannot act on (such as a tool that was removed).
+    source = "\n".join(path.read_text() for path in (DISTRIBUTION / "src/play").glob("*.py"))
+    soul = (DISTRIBUTION / "SOUL.md").read_text()
+    # The language sections at the end of the SOUL name the games' own globals, not ours.
+    documents = {"SOUL.md": soul[: soul.index("## GotA BASIC")]}
+    documents["README.md"] = (DISTRIBUTION / "README.md").read_text()
+    for document, text in documents.items():
+        for name in re.findall(r"`([a-z]+(?:_[a-z]+)+)(?:[:`])", text):
+            assert name in source, (document, name)
+
+
 def test_ide_profiles_do_not_import_play():
     for folder in ("orchestrator", "researcher"):
         for path in (REPO / folder).rglob("*.py"):

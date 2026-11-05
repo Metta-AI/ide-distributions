@@ -147,6 +147,7 @@ def test_practice_defaults_to_five_games_with_a_human_title(program, cli):
         "request_id": "xreq_1",
         "games": 5,
         "seats": [0],
+        "already": False,
     }
     body = json.loads(
         cli.inputs[cli.calls.index(["coworld", "xp-request", "create", "-", "--json"])]
@@ -162,6 +163,20 @@ def test_practice_defaults_to_five_games_with_a_human_title(program, cli):
         "title": "Practice: towerless v1",
         "idempotency_key": f"practice:{GOTA.reference_league_id}:towerless:v1:a1",
     }
+
+
+def test_a_repeated_practice_reports_the_first_requests_games_not_the_new_ask(program, cli):
+    first_version(program)
+    program.practice_request(league=GOTA.reference_league_id, episodes=5)
+    cli.requests = 0  # the platform replays on the idempotency key: the same id comes back
+    data = program.practice_request(league=GOTA.reference_league_id, episodes=10, seats=[1])
+    assert (data["request_id"], data["games"], data["seats"], data["already"]) == (
+        "xreq_1",
+        5,
+        [0],
+        True,
+    )
+    assert len(Journal.load(program.workspace).versions[0].practices) == 1
 
 
 @pytest.mark.parametrize("named", ["towerless v1", "towerless:v1", "Towerless V1", "towerless"])

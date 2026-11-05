@@ -879,7 +879,11 @@ class Program:
             request_id = str(json.loads(result.stdout)["id"])
         except (json.JSONDecodeError, KeyError, TypeError):
             raise SoftmaxCliError("xp-request create printed no request id") from None
-        if journal.find_practice(request_id) is None:
+        # The platform replays on the key alone, so a repeat keeps the first request's games.
+        first = journal.find_practice(request_id)
+        if first is not None:
+            episodes, seats = first[1].episodes, first[1].seats
+        else:
             entry = entry or self._remember(journal, ref)
             entry.practices.append(
                 Practice(
@@ -899,6 +903,7 @@ class Program:
             "request_id": request_id,
             "games": episodes,
             "seats": seats,
+            "already": first is not None,
         }
 
     def practice_status(self, request_id: str | None = None, wait_seconds: int = 0) -> dict:
