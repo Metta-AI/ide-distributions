@@ -29,9 +29,10 @@ identifies the authoritative worker attempt. A successor receives the durable ta
 worktree, branch, pending inputs, previous outcome, and bounded recent transcript.
 
 An assignment's Task revision is the one its session last saw: `task_views` records what each
-Orchestrator session was shown by `task` reads, its own applied `task` commands and the planning
-wake's text, and `task.assign` is refused when the Task has changed since. A session that has seen
-no revision gets the current one. The assignment's own identity is its command's id.
+Orchestrator session was given by `task` results and the planning wake's text. `task.assign` fixes
+that revision when its command is accepted and is refused if the Task differs when it is applied.
+A session that has seen no revision gets the current one. The assignment's own identity is its
+command's id.
 
 Task ownership is recorded before native start. Holder transfer requires the expected previous
 holder and advances the lease epoch. Lease age alone never proves that execution stopped.
@@ -46,10 +47,11 @@ retry: it joins that command, and if the work was already done it says so in
 an identical call is a new intent, so a deliberate second message and a call after a refusal both
 run. This is `transitions.request_generated`. A retry whose fields differ is a new intent, which
 the domain rules bound: a second assignment or completion is refused, a reworded message is sent.
-A call Hermes cancelled while it waited (an interrupt such as the user's stop) is not marked as
-returned, so its retry joins too. Two gaps remain: a gateway that stops in the moment between marking a
-result returned and Hermes saving it would see its retry applied as new, and so would a cancelled
-`workspace.change_complete`, whose subprocess cannot see the cancellation.
+A call interrupted while it waited (the user's stop, for one) is not marked as returned, so its
+retry joins too; if Hermes delivered that reply after all, a deliberate repeat gets the note once
+and runs on the next call. Two gaps remain: a gateway that stops in the moment between marking a
+result returned and Hermes saving it would see its retry applied as new, and so would an interrupted
+`workspace.change_complete`, whose subprocess cannot see the interrupt.
 
 An explicit `operation_id` is still accepted, without being offered in any schema, because a chat
 keeps the tool schema it started with. Internal callers (capability reports, platform waits,

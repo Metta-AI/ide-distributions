@@ -92,7 +92,7 @@ so a retry is always the model's new call: a new tool-call id, the same argument
 a restart's "effect is UNKNOWN" notice. So a tool-call id cannot recognise a retry, and arguments
 alone cannot separate it from a deliberate second action or a call after a refusal.
 `request_generated` uses what can: an identical call joins the session's command whose finished
-result has not been returned to it yet, and is a new intent afterwards. A call Hermes cancelled
+result has not been returned to it yet, and is a new intent afterwards. A call interrupted
 while it waited counts as not returned.
 `core/tests/scenarios/test_retry_once.py` runs these cases. `ActionSpec.hidden_params` are the
 fields such code fills in: accepted from chats whose frozen schema still lists them, offered

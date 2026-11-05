@@ -17,7 +17,7 @@ from research_core.coordinator import Coordinator
 from research_core.store import admissions, sessions, tasks
 from research_core.store.registry import TASK_STATUSES, TASK_TYPES, WAIT_KINDS
 from research_core.tools import _args as a
-from research_core.tools.base import ActionSpec, ToolCall, ToolError, ToolSpec
+from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolError, ToolSpec
 from research_core.transitions import durable_tool, read_command, submit
 from research_core.watcher.context import workers
 
@@ -332,16 +332,16 @@ def dispatch(call: ToolCall) -> dict:
     if call.action not in {"read", "list", "workers"} and call.ctx.coordinator_instance is None:
         return submit(call)
     result = execute(call)
-    remember_seen_revisions(call, result)
+    remember_seen_revisions(call.ctx, result)
     return result
 
 
-def remember_seen_revisions(call: ToolCall, result: dict) -> None:
+def remember_seen_revisions(ctx: ToolContext, result: dict) -> None:
     """Note the Task revisions this result shows the Orchestrator; ``assign`` checks them."""
     records = result.get("records") or ([result["record"]] if "record" in result else [])
-    session_id = call.ctx.hermes_session_id()
-    if call.ctx.role == "orchestrator" and session_id and records:
-        tasks.note_seen(call.ctx.store, call.ctx.actor, session_id, records)
+    session_id = ctx.hermes_session_id()
+    if ctx.role == "orchestrator" and session_id and records:
+        tasks.note_seen(ctx.store, ctx.actor, session_id, records)
 
 
 # --- the spec ---------------------------------------------------------------------------------

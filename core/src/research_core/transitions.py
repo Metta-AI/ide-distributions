@@ -138,7 +138,10 @@ def submit(call: ToolCall) -> dict:
     """Hand a tool call to the coordinator under the operation id it names, or a generated one."""
     operation_id = call.get("operation_id")
     if operation_id:  # a chat whose frozen schema still lists the field
-        return request(call.ctx, call.spec.name, call.args, operation_id)
+        result = request(call.ctx, call.spec.name, call.args, operation_id)
+        if CommandReceipt.parse(result).state != "pending":
+            note_delivery(call.ctx, result)
+        return result
     return request_generated(call.ctx, call.spec.name, call.args)
 
 
@@ -199,22 +202,23 @@ def request_generated(ctx: ToolContext, tool: str, args: dict) -> dict:
         return {**result, "next": PENDING_NEXT_STEP}
     if state == "applied" and earlier is not None and earlier["result"] is not None:
         result["repeat_of_earlier_call"] = REPEAT_NOTE
-    if not _hermes_gave_up_on_this_call():
-        mark_reply_seen(ctx, command_id)
+    note_delivery(ctx, result)
     return result
 
 
 def read_command(ctx: ToolContext, command_id: str) -> dict:
-    """``task.command``: a finished result read here has reached the session."""
+    """``task.command``: a finished result read here reaches the session."""
     result = receipt(ctx.store, command_id)
     if CommandReceipt.parse(result).state != "pending":
-        mark_reply_seen(ctx, command_id)
+        note_delivery(ctx, result)
     return result
 
 
-def _hermes_gave_up_on_this_call() -> bool:
-    """An interrupt makes Hermes tell the model the call was cancelled while this thread runs on.
-    This reply then never arrives, so the model's retry must still join the command."""
+def _hermes_was_interrupted() -> bool:
+    """After an interrupt Hermes may tell the model the call was cancelled while this thread runs
+    on, or may still deliver this reply if it comes within its grace period; the code cannot tell
+    which. Treating it as lost keeps a retry safe: at worst a deliberate repeat gets REPEAT_NOTE.
+    """
     try:
         from tools.interrupt import is_interrupted
     except ImportError:  # outside Hermes: tests, the CLI and workspace-executor subprocesses
@@ -222,24 +226,44 @@ def _hermes_gave_up_on_this_call() -> bool:
     return is_interrupted()
 
 
-def mark_reply_seen(ctx: ToolContext, command_id: str) -> None:
-    with ctx.store.tx(ctx.actor) as tx:
-        tx.execute(
-            "UPDATE transition_commands SET reply_seen_at=? WHERE id=? AND reply_seen_at IS NULL",
-            (tx.at, command_id),
-        )
+def note_delivery(ctx: ToolContext, result: dict) -> None:
+    """Record that the session that issued this finished command is being given its result: an
+    identical call is a new intent from now on, and the Task revisions it shows count as seen.
+    Both commit together, so neither can fail after the other. Another session's read changes
+    nothing, and neither does repeating a read of a delivered command."""
+    command_id = result["command_id"]
+    command = ctx.store.one(
+        "SELECT tool,reply_seen_at FROM transition_commands WHERE id=? AND actor=?",
+        (command_id, str(ctx.actor)),
+    )
+    if command is None or command["reply_seen_at"] is not None or _hermes_was_interrupted():
+        return
+    from research_core.tools import task
+
+    with ctx.store.atomic(ctx.actor) as tx:
+        tx.execute("UPDATE transition_commands SET reply_seen_at=? WHERE id=?", (tx.at, command_id))
+        if command["tool"] == "task":
+            task.remember_seen_revisions(ctx, result)
 
 
 def _accept(tx, ctx: ToolContext, tool: str, args: dict, command_id: str, payload: str) -> None:
+    from research_core.store import tasks
+    from research_core.tools import _args as arguments
+
     issuer_attempt_id = None
+    task_updated = None
+    if tool == "task" and args["action"] == "assign" and not args.get("task_updated"):
+        # Fixed now: what the session sees while this waits must not change what it chose from.
+        task_updated = tasks.revision_for_assignment(
+            ctx.store,
+            ctx.hermes_session_id(),
+            arguments.record_number(args["task"], "task", "task"),
+        )
     if (
         ctx.role == "researcher"
         and tool == "task"
         and args["action"] in {"complete", "wait", "ask", "release", "propose_submission"}
     ):
-        from research_core.store import tasks
-        from research_core.tools import _args as arguments
-
         task_id = arguments.record_number(args["task"], "task", "task")
         tasks.require_holder(ctx.store, task_id, ctx.actor)
         assignment = ctx.wstore.one(
@@ -257,7 +281,7 @@ def _accept(tx, ctx: ToolContext, tool: str, args: dict, command_id: str, payloa
         issuer_attempt_id = assignment["current_attempt_id"]
     tx.execute(
         "INSERT INTO transition_commands(id,tool,args,role,actor,actor_epoch,"
-        "issuer_attempt_id,created_at) VALUES (?,?,?,?,?,?,?,?)",
+        "issuer_attempt_id,created_at,task_updated) VALUES (?,?,?,?,?,?,?,?,?)",
         (
             command_id,
             tool,
@@ -267,6 +291,7 @@ def _accept(tx, ctx: ToolContext, tool: str, args: dict, command_id: str, payloa
             ctx.actor.epoch,
             issuer_attempt_id,
             tx.at,
+            task_updated,
         ),
     )
     tx.event("transition.requested", command_id, {"tool": tool})
@@ -322,6 +347,8 @@ def apply(ctx, instance_id: str) -> None:
         if session is not None:
             tool_ctx.env = {**tool_ctx.env, "HERMES_PROFILE_NAME": session["profile"]}
         args = json.loads(command["args"])
+        if command["task_updated"]:
+            args["task_updated"] = command["task_updated"]
         with CommandApplication(store, command["id"]):
             # Lock order is admission lock, then Coworld writer, everywhere.
             with admissions.dispatch_lock(ctx.wstore), store.atomic(actor) as tx:
@@ -333,7 +360,6 @@ def apply(ctx, instance_id: str) -> None:
                 elif command["tool"] == "task":
                     call = ToolCall(spec=task.SPEC, args=args, ctx=tool_ctx, action=args["action"])
                     result = task.execute(call)
-                    task.remember_seen_revisions(call, result)
                 elif command["tool"] == "workspace":
                     from research_core.tools import workspace
 

@@ -338,6 +338,68 @@ def test_a_read_showing_nothing_new_does_not_take_the_write_lock(ctx):
         blocker.conn.execute("ROLLBACK")
 
 
+def test_another_sessions_read_of_a_receipt_leaves_the_retry_protected(ctx, monkeypatch):
+    make_task(ctx, type="maintenance")
+    with monkeypatch.context() as patch:
+        die_before_the_reply(patch)
+        with pytest.raises(ProcessDied):
+            call(ctx, MESSAGE)
+    command_id = ctx.store.one("SELECT id FROM transition_commands")["id"]
+    apply(ctx)
+    assert call(ctx, {"action": "command", "command_id": command_id}, session="other")["ok"]
+    assert call(ctx, MESSAGE)["command_id"] == command_id
+    assert len(messages(ctx)) == 1
+
+
+def test_a_result_the_session_never_got_does_not_count_as_seen(ctx, no_wait):
+    make_task(ctx, type="maintenance")
+    assert call(ctx, {"action": "read", "task": "T-1"})["ok"]
+    assert call(ctx, MESSAGE)["kind"] == "transition_pending"
+    ctx.clock.advance(1)
+    edit_as_user(ctx)
+    apply(ctx)
+    call(ctx, ASSIGN)
+    apply(ctx)
+    assert ctx.wstore.one("SELECT count(*) FROM task_assignments")[0] == 0
+    assert "read the task" in ctx.store.q("SELECT result FROM transition_commands")[-1]["result"]
+
+
+def test_an_accepted_assign_keeps_the_revision_it_was_accepted_with(ctx, no_wait):
+    make_task(ctx, type="maintenance")
+    assert call(ctx, {"action": "read", "task": "T-1"})["ok"]
+    assert call(ctx, ASSIGN)["kind"] == "transition_pending"
+    ctx.clock.advance(1)
+    edit_as_user(ctx)
+    assert call(ctx, {"action": "read", "task": "T-1"})["ok"]
+    apply(ctx)
+    assert ctx.wstore.one("SELECT count(*) FROM task_assignments")[0] == 0
+
+
+def test_a_numeric_operation_id_from_a_frozen_schema_is_still_a_string(ctx, no_wait):
+    first = call(ctx, {**CREATE, "operation_id": 7})
+    assert first["kind"] == "transition_pending"
+    assert (
+        json.loads(ctx.store.one("SELECT args FROM transition_commands")["args"])["operation_id"]
+        == "7"
+    )
+    refused = call(ctx, {**CREATE, "operation_id": ["a"]})
+    assert refused["ok"] is False and "operation_id must be string" in refused["error"]
+
+
+def test_a_read_of_a_delivered_receipt_does_not_take_the_write_lock(ctx, no_wait):
+    pending = call(ctx, CREATE)
+    apply(ctx)
+    read = {"action": "command", "command_id": pending["command_id"]}
+    assert call(ctx, read)["ok"]
+    ctx.store.conn.execute("BEGIN IMMEDIATE")
+    try:
+        started = time.monotonic()
+        assert call(ctx, read)["ok"]
+        assert time.monotonic() - started < 2
+    finally:
+        ctx.store.conn.execute("ROLLBACK")
+
+
 def test_a_planning_wake_counts_as_having_seen_its_tasks(ctx):
     make_task(ctx, type="maintenance")
     report = coordinator(ctx).plan_assignments(ctx)
