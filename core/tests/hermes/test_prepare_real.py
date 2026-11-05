@@ -118,6 +118,18 @@ def test_prepare_orchestrator_end_to_end(hermes_bin, host):
     assert not watcher_job(host)
 
 
+def test_installed_script_finds_its_profile_and_reads_its_env(hermes_bin, host):
+    """The README's install: no HERMES_HOME in the environment, IDE_WORKSPACE only in ``.env``."""
+    profile = host.profile("researcher")
+    workspace = host.workspace.parent / "workspace-from-dotenv"
+    (profile / ".env").write_text(f"IDE_WORKSPACE={workspace}\n")
+    env = {k: v for k, v in os.environ.items() if k not in ("HERMES_HOME", "IDE_WORKSPACE")}
+    argv = [hermes_python(hermes_bin), profile / "scripts" / "prepare.py"]
+    result = run([*argv, "--source", REPO / "researcher", "--hermes", hermes_bin, "--check"], env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.strip().splitlines()[-1])["workspace"] == str(workspace)
+
+
 def test_prepare_again_keeps_environment_without_observation_cron(hermes_bin, host):
     prepare(hermes_bin, host, "orchestrator")
     stamp = host.workspace / "tools" / "venv" / ".lock-sha"
