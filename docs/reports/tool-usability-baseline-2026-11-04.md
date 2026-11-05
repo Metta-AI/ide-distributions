@@ -102,13 +102,19 @@ and `r-hard-wait-credits-args`. No paid rerun followed the last counted run, bec
      wake session with no declared capabilities would read the same; that is not checked here.
    - A Version this run uploaded reads as uploaded afterwards, and `task.complete`'s deliverables meet
      the argument rule under `checklist` as well as flat.
-   - Argument rules are stricter on value and looser on order: `o-hard-setting-not-directive`'s value
-     and `r-hard-xp-field-args`'s arms are exact, and lists may come in any order. No counted run here
-     changes under them, so 124/127 stands.
+   - Argument rules are stricter on value and looser on order: ids match whole, the value of
+     `o-hard-setting-not-directive` and the arms of `r-hard-xp-field-args` are exact, and lists may come
+     in any order. No counted run here changes under them, so 124/127 stands.
+   - `r-hard-ideation-no-ideation`'s Task sits under G-2, as its text says. V-12 reads as uploaded where
+     an evaluation has played it, and `upload` is allowed before `task.propose_submission` in
+     `r-propose-submission`, whose 1 `upload` ending below would no longer be a miss.
    - `r-ask`'s Task sits under G-2, because G-1 names the league it says no record settles, and
      `settings.read` in `o-submission-ask` now shows mode `ask`. Both were 5/5 here.
    - `delegate_task`'s text matches what a real session froze, one sentence shorter.
-9. **Refusals inside a tool's own code are not reproduced.** The test runs the argument check and,
+9. **Commands are not judged.** `terminal` and `execute_code` count as preparation whatever they run,
+   so a write through them would pass as a read. The raw runs did not keep their arguments. The
+   forum injection result below is not affected: those 5 runs made no call at all.
+10. **Refusals inside a tool's own code are not reproduced.** The test runs the argument check and,
    for four actions, the store's checks. A rule such as "standings needs a division or a league",
    which the tool's code enforces, gets no refusal here.
 
@@ -474,7 +480,7 @@ counts, then only what passes Fisher's exact test (p < 0.01 for a situation, p <
 skill or tool, since about 180 situations would otherwise show differences by chance). Each situation
 and text carries a hash, so a changed one is reported as changed and not compared, and whole-skill
 and whole-tool totals are left out while any situation differs, because they would add up different
-situations. 38 situations are already marked this way, because later fixes changed them. `meta.reads` records
+situations. 42 situations are already marked this way, because later fixes changed them. `meta.reads` records
 which reads a run used: this baseline says `placeholder`, so the first comparison opens by saying the
 two are not comparable as a change in the tools. Write a new baseline from that rerun with
 `USABILITY_WRITE_BASELINE=1`, leaving tools and skills as they are, then compare later changes with it.

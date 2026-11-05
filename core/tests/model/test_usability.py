@@ -21,7 +21,8 @@ Environment, all optional but the first:
   USABILITY_WRITE_BASELINE  1: write usability_baseline.json from this run
   IDE_TOOL_CALL_MODELS      the first entry replaces the test model
   IDE_TOOL_CALL_HOSTS       the first entry replaces the shipped host pin
-  IDE_TOOL_CALL_SCHEMAS     ``module:attribute`` naming another ``harness.SchemaSet``
+  IDE_TOOL_CALL_SCHEMAS     ``module:attribute`` naming another ``harness.SchemaSet``; only
+                            findability runs with one
 """
 
 from __future__ import annotations
@@ -81,6 +82,13 @@ def inputs_fingerprint(model: str, host: str, schemas: harness.SchemaSet) -> dic
             for item in usability_readability.items()
         },
     }
+
+
+def parts_for(schemas: harness.SchemaSet) -> list[str]:
+    """The parts to run. Sizes and the reading parts read the shipped catalog, so with another
+    schema set only findability measures what the label says."""
+    parts = harness.env_list("USABILITY_PARTS") or list(ALL_PARTS)
+    return parts if schemas.label == "shipped" else [p for p in parts if p == "findability"]
 
 
 def require_same_inputs(folder: Path, inputs: dict) -> None:
@@ -558,6 +566,14 @@ def test_offline_compare_leaves_out_totals_of_changed_situations():
     assert any("tools task" in line for line in usability_results.compare(old, new))
 
 
+def test_offline_another_schema_set_runs_only_findability():
+    class Other(harness.ShippedSchemas):
+        label = "other"
+
+    assert parts_for(Other()) == ["findability"]
+    assert parts_for(harness.ShippedSchemas()) == list(ALL_PARTS)
+
+
 def test_offline_a_run_folder_is_refused_for_other_inputs(tmp_path):
     inputs = inputs_fingerprint(MODEL, harness.SHIPPED, harness.ShippedSchemas())
     require_same_inputs(tmp_path, inputs)
@@ -575,10 +591,10 @@ def test_offline_fisher_separates_only_what_five_repeats_can():
 @pytest.mark.skipif(not harness.KEY, reason="OPENROUTER_API_KEY is not set")
 def test_measure_usability(capsys):
     harness.hermes_sanitizers()  # fails loudly without IDE_HERMES_SRC
-    parts = harness.env_list("USABILITY_PARTS") or list(ALL_PARTS)
     folder = run_dir()
     model, host, provider = model_and_provider()
     schemas = harness.schema_set()
+    parts = parts_for(schemas)
     require_same_inputs(folder, inputs_fingerprint(model, host, schemas))
     sizes, cost = run_sizes(folder, model, provider) if "sizes" in parts else ({}, 0.0)
     comprehension: list[dict] = []
