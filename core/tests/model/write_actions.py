@@ -10,9 +10,10 @@ refusal when the argument check refuses them, otherwise a plausible result (``RE
 case's ``read_result``). A model that has not called the tool within ``MAX_REQUESTS`` requests
 (``MAX_REQUESTS_REAL_CONTEXT`` with a captured context) fails the case. A recovery case starts
 from a history holding one or three refused calls: the first answered with the refusal the tool
-returns today, a repeat with the shorter one the repeat hook puts in its place. Measured on
-2026-11-04 with a real context, the rate was 60/60 after one refusal and 22/60 after three, so
-both depths are measured.
+returns today, a repeat with the shorter one the repeat hook puts in its place, and is sent as the
+plugin's request middleware sends it, with only the latest of identical refused calls. Measured on
+2026-11-04 with a real context and no such middleware, the rate was 60/60 after one refusal and
+22/60 after three, so both depths are measured.
 
 Which write actions are covered. One case per write action, of the record tools (claim, goal,
 task, experiment, directive, settings, ui), that has at least two required fields, so the model
@@ -36,7 +37,7 @@ import json
 from dataclasses import dataclass
 from typing import Any
 
-from research_core.plugin.repeats import firmer_refusal
+from research_core.plugin.repeats import drop_repeated_refusals, firmer_refusal
 from research_core.store import claims, experiments, goals, settings, tasks
 from research_core.tools import catalog
 from research_core.tools.base import coerce_args, validate_args
@@ -486,7 +487,7 @@ def run_case(model: str, host: str, case: Case, schemas: harness.SchemaSet) -> h
         try:
             reply = harness.complete(
                 model,
-                history,
+                drop_repeated_refusals(history),  # as the plugin's request middleware does
                 tools,
                 tool_choice="auto",
                 provider=harness.provider_for(model, host),

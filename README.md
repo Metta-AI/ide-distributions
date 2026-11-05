@@ -104,10 +104,29 @@ OPENROUTER_API_KEY=... docker run --rm --user 10000:10000 -e OPENROUTER_API_KEY 
 
 `IDE_TOOL_CALL_CONTEXT` is optional and writes the real system prompt and Hermes tool list to that
 path. Give the same variable to the direct calls, pointing at `$out/context.json`, to send
-them in place of the short stand-in prompt. That is also the only way to measure a refusal inside
-one turn: the runs API can only continue a stored history with a new user message, and a model
-recovers far more often after one (40/40 after three refusals, against 22/60 inside a turn,
-November 4, 2026).
+them in place of the short stand-in prompt.
+
+**Refused calls inside one turn** (`test_mid_turn_recovery.py`). The runs API can only continue a
+stored history with a new user message, and a model recovers far more often after one, so
+`test_real_session.py` does not measure this. Here a local proxy (`forcing_proxy.py`) answers a
+conversation's first requests with a broken call, so the refusals, hooks and loop guard are real
+and the model's next call is judged. It runs like the command above, with this file in place of
+`test_real_session.py`.
+
+Each request now keeps only the latest of identical refused calls
+(`plugin/repeats.py`, `without_repeated_refusals`). Rates of the next call on Kimi K3.1 Pro, direct
+calls with the real context, 60 runs per row (November 4, 2026):
+
+| Refused calls in the history | Sent in full | Latest of each only |
+|---|---|---|
+| 3 identical | 30/60, 50% [38-62] | 59/60, 98% [91-100] |
+| 4 identical | 20/60, 33% [23-46] | 56/60, 93% [84-97] |
+| 1 of one, 2 of another | 37/60, 62% [49-73] | 55/60, 92% [82-96] |
+
+Rewording the repeat refusal did not help: a full refusal, a filled-in example from the model's own
+arguments, naming the field, the field first, and no way out all fell between 47% and 62%, with
+overlapping intervals. A schema that lacks the required field stays at 0/60 whatever the text says,
+and the loop guard ends nearly all of those turns (52 to 58 of 60).
 
 **The other two.** `test_undeclared_fields.py` checks that a model on a closed schema sends a field
 only if it is declared, so a provider change is noticed. `test_tool_call_format.py` sends one

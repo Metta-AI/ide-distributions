@@ -169,8 +169,7 @@ def test_a_deeper_recovery_history_repeats_the_call_with_the_short_refusal(scrip
     fake = script(reply(("claim", GOOD_CLAIM)))
     case = next(c for c in write_actions.RECOVERY if c.refusals == 3 and c.tool == "claim")
     assert case.label.endswith("(after 3 refused)")
-    assert run(case).outcome == "valid"
-    history = fake.requests[0][2:]
+    history = write_actions.refused_history(case, harness.ShippedSchemas())
     assert [m["role"] for m in history] == ["assistant", "tool"] * 3
     results = [json.loads(m["content"]) for m in history if m["role"] == "tool"]
     assert "usage" in results[0]
@@ -178,6 +177,9 @@ def test_a_deeper_recovery_history_repeats_the_call_with_the_short_refusal(scrip
         "This exact call was refused" in r["error"] and r["ok"] is False for r in results[1:]
     )
     assert "refused 3 times" in results[2]["error"]
+
+    assert run(case).outcome == "valid"
+    assert fake.requests[0][2:] == history[-2:], "sent as the plugin's request middleware sends it"
 
 
 def test_every_recovery_case_starts_from_a_call_the_tool_refuses():

@@ -267,7 +267,8 @@ daily lock refresh keeps `coworld` and `softmax-cli` current.
 
 ## Output reservations
 
-Both research profiles use Hermes's `llm_request` middleware to cap OpenRouter output at
+Both research profiles use Hermes's `llm_request` middleware to send only the latest of identical
+refused calls (`plugin/repeats.py`; the stored history keeps them all) and to cap OpenRouter output at
 16,384 tokens, preserving smaller explicit caps. This limits the up-front credit reservation
 without changing the context window. A 402 reporting a positive affordable output count does
 not prove exhausted credit: it records `output_limit` and fails that run without locking other

@@ -101,6 +101,68 @@ def test_transform_never_raises_and_ignores_non_refusals():
     assert hook(tool_name="claim", args=object(), result="{", session_id="s") is None
 
 
+def refused_pair(call_id: str, arguments: str = '{"action":"write"}', name: str = "claim") -> list:
+    """A call and its refusal as they appear in a request, with Hermes's loop warning appended."""
+    return [
+        {
+            "role": "assistant",
+            "content": "",
+            "tool_calls": [{"id": call_id, "function": {"name": name, "arguments": arguments}}],
+        },
+        {
+            "role": "tool",
+            "tool_call_id": call_id,
+            "content": claim_refusal() + "\n\n[Tool loop warning: ...]",
+        },
+    ]
+
+
+def test_a_request_keeps_only_the_latest_of_identical_refused_calls():
+    user = {"role": "user", "content": "record it"}
+    first, second, third = refused_pair("a"), refused_pair("b"), refused_pair("c")
+    other = refused_pair("d", arguments='{"action":"write","summary":"x"}')
+    request = {"model": "m", "messages": [user, *first, *other, *second, *third]}
+
+    rewritten = repeats.without_repeated_refusals(request=request, provider="openrouter")["request"]
+
+    assert rewritten["messages"] == [user, *other, *third]
+    assert rewritten["model"] == "m"
+    assert len(request["messages"]) == 9, "the caller's request is not edited in place"
+
+
+def test_a_request_without_repeats_is_left_alone():
+    success = [
+        {
+            "role": "assistant",
+            "tool_calls": [{"id": "a", "function": {"name": "claim", "arguments": "{}"}}],
+        },
+        {"role": "tool", "tool_call_id": "a", "content": '{"ok": true}'},
+    ]
+    two_calls = {
+        "role": "assistant",
+        "tool_calls": [
+            {"id": "b", "function": {"name": "claim", "arguments": "{}"}},
+            {"id": "c", "function": {"name": "claim", "arguments": "{}"}},
+        ],
+    }
+    for messages in (
+        [],
+        refused_pair("a"),
+        [*success, *success],  # identical calls that worked
+        [*refused_pair("a"), *refused_pair("b", name="task")],  # another tool
+        [two_calls, *refused_pair("d")[1:], two_calls, *refused_pair("e")[1:]],  # a parallel batch
+        refused_pair("a")[:1],  # no result yet
+    ):
+        assert repeats.without_repeated_refusals(request={"messages": messages}) is None
+    assert repeats.without_repeated_refusals(request={"input": "a Responses request"}) is None
+
+
+def test_the_middleware_never_raises():
+    broken = {"messages": [{"role": "assistant", "tool_calls": [{"id": "a"}]}, {"content": "{}"}]}
+    assert repeats.without_repeated_refusals(request=broken) is None
+    assert repeats.without_repeated_refusals(request={"messages": "not a list"}) is None
+
+
 def test_halt_writes_one_notice_naming_the_session_kind_and_tool(workspace):
     wstore = Store.open(workspace.store_path, kind="workspace")
     sessions.register(

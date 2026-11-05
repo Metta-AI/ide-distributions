@@ -1,4 +1,4 @@
-"""Repeated failures inside one turn: a firmer refusal, and a notice when Hermes halts the turn.
+"""Repeated failures inside one turn: a shorter history, and a notice when Hermes halts the turn.
 
 Hermes's loop guard (``tool_loop_guardrails``, hard stop on in the shipped configs) ends a turn
 with ``turn_exit_reason = "guardrail_halt"``. In Hermes v0.22.6 the shipped hard stop halts after
@@ -8,19 +8,23 @@ failure-tolerant tools below), blocks after 5 identical failing calls (Hermes's 
 identical call cycle, for any tool but pollers (``idempotent_no_progress``, raised from Hermes's
 5). A block ends the turn too, and so does Hermes's per-turn cap of 50 ``web_search`` calls or
 subagent spawns. So a halt does not always mean a tool failed. The runs API reports such a run
-``completed``, and nobody reads a wake's final reply, so two hooks fill the gaps:
+``completed``, and nobody reads a wake's final reply, so these fill the gaps:
 
+* ``without_repeated_refusals`` (``llm_request`` middleware): a model shown the same refused call
+  several times tends to send it again, whatever the refusal says. So each request keeps only the
+  latest of identical refused calls. Only the request changes: the stored history keeps them all,
+  and Hermes's guard still counts them. Measured on Kimi K3.1 Pro on 2026-11-04 (README, "Develop
+  and test"); changing the refusal's wording made no measurable difference.
 * ``transform_tool_result``: the second time the same call (tool and arguments) is refused in a
   turn, its result is replaced by a short refusal that names what to supply and how to get out
-  (report the problem and end the run). The full refusal, with its usage, was already shown
-  once; repeating it only grows the history. The replacement is still a JSON refusal with an
+  (report the problem and end the run). The replacement is still a JSON refusal with an
   ``"error"`` key, so Hermes's guard keeps counting it as a failure.
 * ``on_session_end``: Hermes fires it at the end of every turn. On ``guardrail_halt`` it writes
   a notice naming the Session, its kind and the tool with the most failures this turn, if any
   (failures of tools Hermes never halts on are not counted).
 
 Counts live in memory per Session and are dropped at the end of each turn, as Hermes resets its
-own counters each turn. Both hooks run inside Hermes: stdlib only, never raising.
+own counters each turn. All of these run inside Hermes: stdlib only, never raising.
 """
 
 from __future__ import annotations
@@ -62,11 +66,14 @@ _failures: dict[str, Counter[str]] = {}
 
 
 def refusal_of(result: Any) -> dict | None:
-    """A profile tool's refusal (``{"ok": false, "error", "problems"}``) parsed; else ``None``."""
+    """A profile tool's refusal (``{"ok": false, "error", "problems"}``) parsed; else ``None``.
+
+    Text after the JSON is allowed: Hermes appends its loop warnings to a result in the history.
+    """
     if not isinstance(result, str) or not result.lstrip().startswith("{"):
         return None
     try:
-        parsed = json.loads(result)
+        parsed, _ = json.JSONDecoder().raw_decode(result.lstrip())
     except ValueError:
         return None
     if isinstance(parsed, dict) and parsed.get("ok") is False and parsed.get("problems"):
@@ -97,6 +104,50 @@ def firmer_refusal(role: Role, tool_name: str, refusal: dict, count: int) -> str
             "context": {"tool": tool_name, "refused": count},
         }
     )
+
+
+def _refused_call(messages: list[dict], index: int) -> tuple[str, str] | None:
+    """(tool, arguments text) when ``messages[index]`` is a single call whose result, the next
+    message, is a refusal. Hermes writes arguments in one compact form, so equal text is an
+    identical call."""
+    calls = messages[index].get("tool_calls") or []
+    if len(calls) != 1 or index + 1 == len(messages):
+        return None
+    result = messages[index + 1]
+    if (
+        result.get("tool_call_id") != calls[0].get("id")
+        or refusal_of(result.get("content")) is None
+    ):
+        return None
+    return calls[0]["function"]["name"], calls[0]["function"]["arguments"]
+
+
+def drop_repeated_refusals(messages: list[dict]) -> list[dict]:
+    """``messages`` with only the latest of each set of identical refused calls."""
+    latest = {}
+    for index in range(len(messages)):
+        call = _refused_call(messages, index)
+        if call is not None:
+            latest[call] = index
+    dropped: set[int] = set()
+    for index in range(len(messages)):
+        call = _refused_call(messages, index)
+        if call is not None and latest[call] != index:
+            dropped |= {index, index + 1}
+    return [message for index, message in enumerate(messages) if index not in dropped]
+
+
+def without_repeated_refusals(*, request: dict[str, Any], **_: Any) -> dict[str, Any] | None:
+    """``llm_request`` middleware: send ``drop_repeated_refusals`` of the request's messages."""
+    try:
+        messages = request.get("messages") or []
+        kept = drop_repeated_refusals(messages)
+        if len(kept) == len(messages):
+            return None
+        return {"request": {**request, "messages": kept}, "reason": "Drop repeated refused calls"}
+    except Exception as error:  # never break a model call
+        log.debug("repeated refusal middleware failed: %s", error)
+        return None
 
 
 def make_hooks(role: Role) -> dict[str, Callable[..., Any]]:
