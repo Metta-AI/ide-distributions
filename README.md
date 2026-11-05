@@ -116,12 +116,13 @@ shapes a request by its base URL, and that name makes the proxy count as OpenRou
 
 Each request keeps only the latest of identical refused calls (`plugin/repeats.py`,
 `without_repeated_refusals`). A batch of calls stays, and so does a result carrying more than loop
-guard notes, such as a user's mid-turn message. Rates of the next call on Kimi K3.1 Pro, November 4, 2026. The first
-row is this test, 40 runs per cell; the others are direct calls with the real context, 60 per cell:
+guard notes, such as a user's mid-turn message. Rates of the next call on Kimi K3.1 Pro. The first
+row is this test, 40 runs per cell (November 5, 2026); the others are direct calls with the real
+context, 60 per cell (November 4):
 
 | Refused calls in the history | Sent in full | Latest of each only |
 |---|---|---|
-| 3 identical, real Hermes | 14/40, 35% [22-50] | 38/40, 95% [83-99] |
+| 3 identical, real Hermes | 21/40, 52% [37-67] | 40/40, 100% [91-100] |
 | 3 identical | 30/60, 50% [38-62] | 59/60, 98% [91-100] |
 | 4 identical | 20/60, 33% [23-46] | 56/60, 93% [84-97] |
 | 1 of one, 2 of another | 37/60, 62% [49-73] | 55/60, 92% [82-96] |
@@ -131,9 +132,9 @@ row is this test, 40 runs per cell; the others are direct calls with the real co
 The last two rows are why copies are dropped across the whole request, not only next to each other
 or within a turn.
 
-What this does to the prompt cache (Moonshot charges $2 per million input tokens, $0.20 when
-cached; cost excludes the first, uncached request). Scripted sessions on real usage, with Hermes's
-cache markers, about 57,000 prompt tokens and 5 to 8 runs per row:
+What this does to the prompt cache, measured on November 4 (Moonshot charges $2 per million input
+tokens, $0.20 when cached; cost excludes the first, uncached request). Scripted sessions on real
+usage, with Hermes's cache markers, about 57,000 prompt tokens and 5 to 8 runs per row:
 
 | Session | Sent in full | Latest only |
 |---|---|---|
