@@ -2,8 +2,8 @@
 
 A Session sees a directive in its briefing only if the directive was active when that Session's
 prompt was written, or through ``directive.list``. A Researcher already running sees neither on its
-own, so ``add`` and ``update`` name the Tasks in progress, and the Orchestrator tells them with
-``task.message``.
+own, so ``add`` and ``update`` name the session Coworld's Tasks in progress, the only ones this
+session can reach, and the Orchestrator tells them with ``task.message``.
 """
 
 from __future__ import annotations

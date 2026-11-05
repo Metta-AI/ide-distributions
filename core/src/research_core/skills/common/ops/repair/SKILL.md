@@ -29,7 +29,7 @@ When a repair cannot finish in this Task, reach the result another reasonable wa
 
 ## Giving up well
 
-`task.complete {task, outcome: failed, failure}` with `what_failed`, `error`, `exit_code`, `tried` and a `next_step` someone can act on (`working-a-task` has the good and bad example). A reported blocker beats an invented result: never present plausible output you did not get. A recurring platform error goes in the result for an upstream report.
+`task.complete {task, outcome: failed, failure}` with `what_failed`, `error`, `exit_code`, `tried` and a `next_step` someone can act on: not "try again" but what to change and where. A reported blocker beats an invented result: never present plausible output you did not get. A recurring platform error goes in the result for an upstream report.
 
 ## Common cases
 

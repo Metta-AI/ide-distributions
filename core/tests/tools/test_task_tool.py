@@ -335,6 +335,14 @@ def test_complete_accepts_none_with_a_reason(call, goal, code_repo):
     assert done["record"]["checklist"]["claims"] == "none: nothing found"
 
 
+def test_complete_still_takes_the_nested_checklist_of_an_earlier_release(call, goal, code_repo):
+    call("task", task_args())
+    claim(call)
+    done = as_researcher(call, complete_args(checklist={"claims": "none: nothing found"}))
+    assert done["ok"] is True, done
+    assert done["record"]["checklist"]["claims"] == "none: nothing found"
+
+
 def test_complete_names_the_missing_checklist_items(call, goal, code_repo):
     call("task", task_args())
     claim(call)

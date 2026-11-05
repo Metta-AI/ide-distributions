@@ -102,7 +102,7 @@ agents are told the briefing is a snapshot and when it was written. A compaction
 agent's turn renders those sections again; the gateway's compaction between turns keeps the stored
 text (`_retain_seeded_system_prompt` in Hermes). So a Researcher already running does not see a new
 directive: a Task started later gets it in its briefing, and `directive.add` and `directive.update`
-name the Tasks in progress so the Orchestrator can tell them with `task.message`.
+name the session Coworld's Tasks in progress so the Orchestrator can tell them with `task.message`.
 
 The Hermes behaviour this depends on is listed in the module's docstring and exercised by
 `core/tests/hermes/test_frozen_sessions_real.py`, which CI runs against the pinned image.

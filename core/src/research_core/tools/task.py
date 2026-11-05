@@ -188,7 +188,10 @@ def handle_complete(call: ToolCall) -> dict:
     reachable from the Task branch."""
     ctx, store = call.ctx, call.ctx.store
     n = a.record_number(call.get("task"), "task", "task")
-    checklist = {key: call.get(key) for key in CHECKLIST_FIELDS if call.get(key) is not None}
+    checklist = dict(call.get("checklist") or {})
+    for key in CHECKLIST_FIELDS:
+        if call.get(key) is not None:
+            checklist.setdefault(key, call.get(key))
     commit = call.get("commit")
     if commit is not None:
         branch = tasks.read(store, n)["branch"]
@@ -516,6 +519,8 @@ SPEC = durable_tool(
                 },
                 ("task",),
                 RESEARCHER,
+                # A command accepted before the release that removed it replays with it.
+                hidden_params={"checklist": {"type": "object"}},
             ),
             ActionSpec(
                 "release",

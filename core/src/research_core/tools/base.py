@@ -467,7 +467,10 @@ def argument_error(
     label = f"{spec.name} {action}" if action else spec.name
     how_to = usage(spec, role, action)
     if "example" in how_to:
-        fix = "Call again with every required field in one call; see usage.example."
+        fix = (
+            "Call again with every required field in one call; usage.example shows the shape, "
+            "with real values in place of each <...>."
+        )
     elif "actions" in how_to:
         fix = "Call again with one of the actions in usage.actions and the fields it requires."
     else:
