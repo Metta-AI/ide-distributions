@@ -104,10 +104,58 @@ OPENROUTER_API_KEY=... docker run --rm --user 10000:10000 -e OPENROUTER_API_KEY 
 
 `IDE_TOOL_CALL_CONTEXT` is optional and writes the real system prompt and Hermes tool list to that
 path. Give the same variable to the direct calls, pointing at `$out/context.json`, to send
-them in place of the short stand-in prompt. That is also the only way to measure a refusal inside
-one turn: the runs API can only continue a stored history with a new user message, and a model
-recovers far more often after one (40/40 after three refusals, against 22/60 inside a turn,
-November 4, 2026).
+them in place of the short stand-in prompt.
+
+**Refused calls inside one turn** (`test_mid_turn_recovery.py`). The runs API can only continue a
+stored history with a new user message, and a model recovers far more often after one, so
+`test_real_session.py` does not measure this. Here a local proxy (`forcing_proxy.py`) answers a
+conversation's first requests with a broken call, so the refusals, hooks and loop guard are real
+and the model's next call is judged. It runs like the command above, with this file in place of
+`test_real_session.py` and `--add-host proxy.openrouter.ai:127.0.0.1` added to `docker run`: Hermes
+shapes a request by its base URL, and that name makes the proxy count as OpenRouter (about $1).
+
+Each request keeps only the latest of identical refused calls (`plugin/repeats.py`,
+`without_repeated_refusals`). A batch of calls stays, and so does a result carrying more than loop
+guard notes, such as a user's mid-turn message. Rates of the next call on Kimi K3.1 Pro. The first
+row is this test, 40 runs per cell (November 5, 2026); the others are direct calls with the real
+context, 60 per cell (November 4):
+
+| Refused calls in the history | Sent in full | Latest of each only |
+|---|---|---|
+| 3 identical, real Hermes | 21/40, 52% [37-67] | 40/40, 100% [91-100] |
+| 3 identical | 30/60, 50% [38-62] | 59/60, 98% [91-100] |
+| 4 identical | 20/60, 33% [23-46] | 56/60, 93% [84-97] |
+| 1 of one, 2 of another | 37/60, 62% [49-73] | 55/60, 92% [82-96] |
+| 3 identical, other calls between | 17/60, 28% [19-41] | 59/60, 98% [91-100] |
+| Refused, a reply, a new request, refused again | 25/60, 42% [30-54] | 51/60, 85% [74-92] |
+
+The last two rows are why copies are dropped across the whole request, not only next to each other
+or within a turn.
+
+What this does to the prompt cache, measured on November 4 (Moonshot charges $2 per million input
+tokens, $0.20 when cached; cost excludes the first, uncached request). Scripted sessions on real
+usage, with Hermes's cache markers, about 57,000 prompt tokens and 5 to 8 runs per row:
+
+| Session | Sent in full | Latest only |
+|---|---|---|
+| 3 refusals, then 5 later turns | 98.6%, $0.201 | 98.6%, $0.199 |
+| Same, and the call is refused again 3 turns later | 98.6%, $0.217 | 98.2%, $0.221 |
+| Refused early, refused again 35,000 tokens later | 98.4%, $0.115 | 91.2%, $0.177 |
+| Refused 3 times in one turn, 6,000 tokens apart | 98.3%, $0.290 | 97.3%, $0.309 |
+
+So repeats next to each other cost nothing, and a refusal that comes back costs one cache miss on
+what was sent since the earlier copy (35,600 tokens against 500 in the third row, about $0.06).
+Requests after it hit the cache again. Six real Hermes sessions per arm agree: 97.7% cached
+without a refusal coming back (97.6% with the middleware unregistered), 97.8% with one (97.9%).
+
+Hermes's loop warnings stay on. On three different refused calls, where its "Do not switch to
+text-only replies; keep using tools" line fires, the next call was valid 59/60 with its warnings and
+58/62 with `warnings_enabled: false`, so nothing showed the text prolonging a loop.
+
+Rewording the repeat refusal did not help: a full refusal, a filled-in example from the model's own
+arguments, naming the field, the field first, and no way out all fell between 46% and 60%, with
+overlapping intervals. A schema that lacks the required field stays at 0/60 whatever the text says,
+and the loop guard ends nearly all of those turns (52 to 58 of 60).
 
 **The other two.** `test_undeclared_fields.py` checks that a model on a closed schema sends a field
 only if it is declared, so a provider change is noticed. `test_tool_call_format.py` sends one

@@ -15,6 +15,7 @@ import pytest
 from research_core.watcher.hermes_api import RunStatus, RunsUnavailable
 from tests.hermes.test_spike_s1 import Host
 from tests.model import harness, write_actions
+from tests.model.forcing_proxy import ForcedCall, ForcingProxy
 from tests.model.real_session import MAX_DETOURS, RealGateway
 from tests.model.write_actions import Case, run_case
 
@@ -169,8 +170,7 @@ def test_a_deeper_recovery_history_repeats_the_call_with_the_short_refusal(scrip
     fake = script(reply(("claim", GOOD_CLAIM)))
     case = next(c for c in write_actions.RECOVERY if c.refusals == 3 and c.tool == "claim")
     assert case.label.endswith("(after 3 refused)")
-    assert run(case).outcome == "valid"
-    history = fake.requests[0][2:]
+    history = write_actions.refused_history(case, harness.ShippedSchemas())
     assert [m["role"] for m in history] == ["assistant", "tool"] * 3
     results = [json.loads(m["content"]) for m in history if m["role"] == "tool"]
     assert "usage" in results[0]
@@ -178,6 +178,20 @@ def test_a_deeper_recovery_history_repeats_the_call_with_the_short_refusal(scrip
         "This exact call was refused" in r["error"] and r["ok"] is False for r in results[1:]
     )
     assert "refused 3 times" in results[2]["error"]
+
+    assert run(case).outcome == "valid"
+    assert fake.requests[0][2:] == history[-2:], "sent as the plugin's request middleware sends it"
+
+
+def test_the_forcing_proxy_forces_each_call_once_whatever_the_request_holds():
+    """The middleware drops repeated refused calls from the request, so it cannot be the count."""
+    calls = [ForcedCall("task", {"action": "message"})] * 2
+    proxy = ForcingProxy(key="unused", scripts={"(request 1)": calls})
+    messages = [{"role": "user", "content": "Do it (request 1)"}]
+    assert proxy.next_forced(messages) == (calls[0], 0)
+    assert proxy.next_forced(messages) == (calls[1], 1)
+    assert proxy.next_forced(messages) is None
+    assert proxy.next_forced([{"role": "user", "content": "another (request 2)"}]) is None
 
 
 def test_every_recovery_case_starts_from_a_call_the_tool_refuses():
