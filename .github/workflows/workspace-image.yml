@@ -7,6 +7,9 @@ permissions:
 jobs:
   startup-sleep-restart:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        application_protocol: [legacy, aide.1.0.0]
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v4
@@ -18,10 +21,10 @@ jobs:
         env:
           STARTUP_CYCLES: "4"
           STARTUP_ARTIFACTS: ${{ runner.temp }}/startup-proof
-        run: bash image/system_tests/start-stop.sh distribution-smoke
+        run: bash image/system_tests/start-stop.sh distribution-smoke "${{ matrix.application_protocol }}"
       - name: Retain startup evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: workspace-startup
+          name: workspace-startup-${{ matrix.application_protocol }}
           path: ${{ runner.temp }}/startup-proof

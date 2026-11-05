@@ -2,6 +2,8 @@
 # Protect startup and retained-volume recovery under the hosting filesystem restrictions.
 set -euo pipefail
 image=${1:?immutable or locally built image reference required}
+application_protocol=${2:-legacy}
+[[ "$application_protocol" == legacy || "$application_protocol" == aide.1.0.0 ]]
 name="distribution-smoke-${GITHUB_RUN_ID:-local}-$$"
 volume="$name"
 cycles=${STARTUP_CYCLES:-2}
@@ -22,7 +24,9 @@ cleanup() {
   if [[ -z "${STARTUP_ARTIFACTS:-}" ]]; then rm -rf "$scratch"; fi
 }
 trap cleanup EXIT
-printf '%s\n' '{"workspace_id":"00000000-0000-4000-8000-000000000149","platform_url":"http://127.0.0.1:1","credential":"fixture-no-platform-access"}' > "$scratch/bootstrap.json"
+protocol_field=""
+if [[ "$application_protocol" == aide.1.0.0 ]]; then protocol_field=',"application_protocol":"aide.1.0.0"'; fi
+printf '{"workspace_id":"00000000-0000-4000-8000-000000000149","platform_url":"http://127.0.0.1:1","credential":"fixture-no-platform-access"%s}\n' "$protocol_field" > "$scratch/bootstrap.json"
 chmod 644 "$scratch/bootstrap.json"
 docker volume create "$volume" >/dev/null
 # Kubernetes supplies this volume group ownership through fsGroup.
@@ -48,7 +52,14 @@ for cycle in $(seq 1 "$cycles"); do
   docker exec "$name" /opt/hermes/.venv/bin/python /opt/distribution/image/system_tests/check-contract.py
   docker exec "$name" /opt/hermes/.venv/bin/python /opt/distribution/image/system_tests/check-terminal.py
   docker exec "$name" /opt/hermes/.venv/bin/python /opt/distribution/image/system_tests/check-session-coworld.py
-  docker exec "$name" /opt/hermes/.venv/bin/python /opt/distribution/image/system_tests/check-aide.py
+  docker exec -e EXPECTED_APPLICATION_PROTOCOL="$application_protocol" "$name" /opt/hermes/.venv/bin/python -c '
+import json, os, urllib.request
+health=json.load(urllib.request.urlopen("http://127.0.0.1:8650/health"))
+assert health["application_protocol"] == os.environ["EXPECTED_APPLICATION_PROTOCOL"], health
+'
+  if [[ "$application_protocol" == aide.1.0.0 ]]; then
+    docker exec "$name" /opt/hermes/.venv/bin/python /opt/distribution/image/system_tests/check-aide.py
+  fi
   if [[ "$cycle" == 1 ]]; then
     docker exec "$name" sh -c 'printf %s "$1" > /workspace/.state-proof' sh "$sentinel"
   else
@@ -79,6 +90,9 @@ for cycle in $(seq 1 "$cycles"); do cat "$scratch/boot-$cycle.log"; done | docke
 # Fault-path component proof uses the packaged bridge and real HTTP/websocket peers in its own container.
 docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,size=64m \
   --entrypoint /opt/hermes/.venv/bin/python "$image" /opt/distribution/image/system_tests/check-transport.py
+
+docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,size=64m \
+  --entrypoint /opt/hermes/.venv/bin/python "$image" /opt/distribution/image/system_tests/check-legacy-transport.py
 
 # Lease acquisition follows the platform retry contract before declaring inference ready.
 docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --tmpfs /tmp:rw,size=64m \

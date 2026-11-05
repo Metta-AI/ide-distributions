@@ -10,6 +10,8 @@ from typing import Literal
 from uuid import UUID
 
 import httpx
+from application import Operation
+from application import response as application_response
 from inference import Availability
 from pydantic import BaseModel, ConfigDict
 from websockets.asyncio.client import ClientConnection, connect
@@ -42,6 +44,11 @@ class Lifecycle:
         activity = response.json()
         if activity["restart_required"]:
             return {
+                **(
+                    {"application_protocol": "aide.1.0.0"}
+                    if self.env.get("IDE_APPLICATION_PROTOCOL", "legacy") == "aide.1.0.0"
+                    else {}
+                ),
                 "ready": True,
                 "ready_for_sleep": False,
                 "detail": "Recovering native execution",
@@ -56,6 +63,11 @@ class Lifecycle:
         sleeping = self.sleep_task is not None
         complete = sleeping and self.sleep_task.done()
         return {
+            **(
+                {"application_protocol": "aide.1.0.0"}
+                if self.env.get("IDE_APPLICATION_PROTOCOL", "legacy") == "aide.1.0.0"
+                else {}
+            ),
             "ready": True,
             "ready_for_sleep": complete and self.sleep_task.result() == 0,
             "detail": "Preparing for sleep" if sleeping and not complete else "",
@@ -78,6 +90,11 @@ async def reply(
         if "control" in envelope:
             body = await lifecycle.status(ControlRequest.model_validate(envelope), seam)
             yield httpx.Response(200, json=body)
+        elif lifecycle.env.get("IDE_APPLICATION_PROTOCOL", "legacy") == "legacy":
+            async with application_response(
+                Operation.model_validate(envelope), seam, gateway, inference
+            ) as result:
+                yield result
         else:
             yield httpx.Response(410, json={"kind": "unsupported", "detail": "Use AIDE 1.0.0"})
 

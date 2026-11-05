@@ -38,6 +38,7 @@ class Bootstrap(BaseModel):
     workspace_id: str
     platform_url: str
     credential: SecretStr
+    application_protocol: Literal["legacy", "aide.1.0.0"] = "legacy"
 
 
 HERMES = "/opt/hermes/.venv/bin/hermes"
@@ -86,6 +87,14 @@ async def run(stack: AsyncExitStack) -> None:
 
     report("startup_total", started, outcome="started")
     HOME.mkdir(parents=True, exist_ok=True, mode=0o700)
+    protocol_marker = HOME / ".application-protocol"
+    if (
+        protocol_marker.exists()
+        and bootstrap.application_protocol != protocol_marker.read_text().strip()
+    ):
+        raise RuntimeError("An AIDE-adopted workspace cannot downgrade its application protocol")
+    if bootstrap.application_protocol == "aide.1.0.0":
+        protocol_marker.write_text(bootstrap.application_protocol + "\n")
     lease_file = HOME / ".inference-lease"
     lease_file.unlink(missing_ok=True)
     # The inference state beside it survives restarts: a budget block names the spent key and
@@ -100,6 +109,7 @@ async def run(stack: AsyncExitStack) -> None:
     common = {
         **os.environ,
         "IDE_RUNTIME_ID": boot_id,
+        "IDE_APPLICATION_PROTOCOL": bootstrap.application_protocol,
         "API_SERVER_ENABLED": "true",
         "API_SERVER_HOST": "127.0.0.1",
         "API_SERVER_PORT": "8642",
@@ -203,6 +213,15 @@ async def run(stack: AsyncExitStack) -> None:
             )
         )
         profile_env = {**common, "HERMES_HOME": str(HOME / "profiles/orchestrator")}
+        if bootstrap.application_protocol == "aide.1.0.0":
+            from research_core import layout
+            from research_core.store import migrate
+            from research_core.store.actors import Actor
+            from research_core.store.db import Store
+
+            with Store.open(layout.from_env(profile_env).store_path, kind="workspace") as store:
+                with store.tx(Actor.harness()):
+                    migrate.backfill_aide_receipts(store.conn)
         phase_started = time.monotonic()
         report("gateway_ready", phase_started, outcome="started")
         gateway = await stack.enter_async_context(
@@ -271,16 +290,17 @@ async def run(stack: AsyncExitStack) -> None:
             report("startup_total", started)
 
             group.create_task(observe_ready("relay_connected", relay_connected))
-            group.create_task(
-                serve_aide(
-                    platform_url=bootstrap.platform_url,
-                    workspace_id=bootstrap.workspace_id,
-                    credential=bootstrap.credential.get_secret_value(),
-                    env=profile_env,
-                    connected=relay_connected,
-                    inference=inference,
+            if bootstrap.application_protocol == "aide.1.0.0":
+                group.create_task(
+                    serve_aide(
+                        platform_url=bootstrap.platform_url,
+                        workspace_id=bootstrap.workspace_id,
+                        credential=bootstrap.credential.get_secret_value(),
+                        env=profile_env,
+                        connected=relay_connected,
+                        inference=inference,
+                    )
                 )
-            )
             control = group.create_task(
                 serve(
                     platform_url=bootstrap.platform_url,

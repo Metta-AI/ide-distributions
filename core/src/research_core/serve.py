@@ -334,7 +334,12 @@ class SeamServer:
                 "profile": self.profile,
                 "coworld": stores.coworld_id,
                 "contract_version": contract.CONTRACT_VERSION,
-                "aide_protocol_version": "1.0.0",
+                "application_protocol": self.env.get("IDE_APPLICATION_PROTOCOL", "legacy"),
+                **(
+                    {"aide_protocol_version": "1.0.0"}
+                    if self.env.get("IDE_APPLICATION_PROTOCOL", "legacy") == "aide.1.0.0"
+                    else {}
+                ),
             }
 
     def status(self) -> dict:

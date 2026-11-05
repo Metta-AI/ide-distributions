@@ -120,17 +120,45 @@ def _aide_receipt_messages(request_json: str) -> str:
 
     request = json.loads(request_json)
     messages = [request["message"]]
-    if "context" in request:
+    if "context" in request and request["context"] is not None:
         messages.insert(0, context_message(request["context"]))
     return json.dumps(messages, separators=(",", ":"), ensure_ascii=False)
 
 
+def backfill_aide_receipts(conn: sqlite3.Connection) -> None:
+    """Preserve legacy receipts on schema upgrade and explicit retained-volume AIDE enrollment.
+
+    The caller owns the transaction. Enrollment/restarts never overwrite an accepted identity.
+    """
+    conn.create_function("aide_receipt_messages", 1, _aide_receipt_messages, deterministic=True)
+    for statement in split_statements("""
+INSERT OR IGNORE INTO aide_receipts(request_id, session_id, scope, messages)
+SELECT a.op_id, a.session_id,
+       json_object('scope', CASE WHEN s.coworld_id IS NULL THEN 'workspace' ELSE 'coworld' END,
+                   'coworld', s.coworld_id, 'league', json_extract(s.session_context, '$.league')),
+       CASE WHEN json_type(a.request, '$.messages') = 'array'
+            THEN json_extract(a.request, '$.messages')
+            ELSE aide_receipt_messages(a.request) END
+FROM client_admissions a JOIN sessions s ON s.id = a.session_id
+WHERE a.kind = 'message' AND a.origin = 'client'
+  AND json_type(a.request, '$.message') = 'object';
+INSERT OR IGNORE INTO aide_receipts(request_id, session_id, scope, messages)
+SELECT a.op_id, a.session_id,
+       json_object('scope', CASE WHEN s.coworld_id IS NULL THEN 'workspace' ELSE 'coworld' END,
+                   'coworld', s.coworld_id, 'league', json_extract(s.session_context, '$.league')),
+       '[]'
+FROM client_admissions a JOIN sessions s ON s.id = a.session_id
+WHERE a.kind = 'open';
+"""):
+        conn.execute(statement)
+
+
 def _run_migration(conn: sqlite3.Connection, number: int, path: Path) -> None:
     """The statements of one migration and its version stamp; the caller owns the transaction."""
-    if number == 10 and path.parent.name == "workspace":
-        conn.create_function("aide_receipt_messages", 1, _aide_receipt_messages, deterministic=True)
     for statement in split_statements(path.read_text()):
         conn.execute(statement)
+    if number == 10 and path.parent.name == "workspace":
+        backfill_aide_receipts(conn)
     conn.execute(f"PRAGMA user_version = {number}")
 
 

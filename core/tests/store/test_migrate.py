@@ -478,7 +478,10 @@ def test_attempt_pointer_migration_preserves_live_authority_or_first_queued_succ
 
 
 @pytest.mark.parametrize("context", [None, {"label": "café 雪", "nested": {"z": 3, "a": None}}])
-def test_canonical_receipts_preserve_accepted_open_and_message_identity(tmp_path, context):
+@pytest.mark.parametrize("enrollment", [False, True])
+def test_canonical_receipts_preserve_accepted_open_and_message_identity(
+    tmp_path, context, enrollment
+):
     import json
     from uuid import NAMESPACE_URL, uuid4, uuid5
 
@@ -493,6 +496,8 @@ def test_canonical_receipts_preserve_accepted_open_and_message_identity(tmp_path
     conn.row_factory = sqlite3.Row
     for number, migration in migrate.migration_files("workspace")[:9]:
         migrate._run_migration(conn, number, migration)
+    if enrollment:
+        migrate.apply_migrations(conn, "workspace")
     scope = {"scope": "coworld", "coworld": "cow_game", "league": "league_game"}
     conn.execute(
         "INSERT INTO sessions(id,profile,kind,coworld_id,started,session_context)"
@@ -518,6 +523,10 @@ def test_canonical_receipts_preserve_accepted_open_and_message_identity(tmp_path
         )
     conn.close()
     with Store.open(path, kind="workspace") as store:
+        if enrollment:
+            with store.tx(Actor.harness()):
+                migrate.backfill_aide_receipts(store.conn)
+                migrate.backfill_aide_receipts(store.conn)
         messages = ([context_message(context)] if context is not None else []) + [message]
         for kind, request_id in ids.items():
             canonical = {

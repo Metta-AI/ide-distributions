@@ -47,3 +47,13 @@ jobs:
         run: >-
           gh workflow run deploy-hermes-agent.yml --repo softmax-universe/softmax --ref main
           -f "source_revision=$SOURCE_REVISION" -f "release_started_at=$RELEASE_STARTED_AT"
+      - name: Trigger the opt-in canonical image lane
+        if: vars.HERMES_AIDE_RELEASE_ENABLED == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.METTA_RELEASE_DISPATCH_TOKEN }}
+          SOURCE_REVISION: ${{ github.sha }}
+          RELEASE_STARTED_AT: ${{ steps.origin.outputs.started_at }}
+        run: >-
+          gh workflow run deploy-hermes-agent.yml --repo softmax-universe/softmax --ref main
+          -f "source_revision=$SOURCE_REVISION" -f "release_started_at=$RELEASE_STARTED_AT"
+          -f runtime_id=autoresearch-aide -f application_protocol=aide.1.0.0
