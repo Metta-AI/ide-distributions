@@ -7,7 +7,7 @@ environment as the Player: it writes ``credentials.yaml`` under ``<workspace>/.s
 from ``SOFTMAX_PLAYER_CREDENTIAL`` (``identity.write_credentials_dir``) and starts the command
 with ``SOFTMAX_CONFIG_DIR`` pointing there, ``COGAMES_API_URL`` set and
 ``COWORLD_AGENT_GUIDANCE=0``. It refuses only the subcommands that would change that identity
-(``softmax login|logout|set-token|get-token|exchange-code`` and ``softmax player use|unset``);
+(``softmax login|logout|set-token|get-token|exchange-code`` and ``player use|unset`` on either CLI);
 everything else passes through, a raw ``coworld submit`` included (the advisory hook notes it;
 the ``upload`` and ``submit`` tools are the recorded path). The command's exit code is returned.
 """
@@ -33,6 +33,8 @@ IDENTITY_CHANGING: tuple[tuple[str, ...], ...] = (
     ("softmax", "exchange-code"),
     ("softmax", "player", "use"),
     ("softmax", "player", "unset"),
+    ("coworld", "player", "use"),
+    ("coworld", "player", "unset"),
 )
 CREDENTIALS_DIR = "softmax"  # under <workspace>/.state
 
