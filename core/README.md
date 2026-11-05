@@ -119,14 +119,17 @@ nowhere.
   required, which a multi-action schema cannot. It runs the same handler, as the same grouped call.
   The grouped tool stops offering the action and still runs a call that names it, because stored
   chats show that shape; refusing such a call, it shows the flat tool. Prompts and skills name the
-  flat tool (`test_tool_signatures.py` checks), and telemetry reports the grouped tool and action. Thirteen actions have one: the ones
-  weak models got wrong and `claim_write`. It costs prompt size and counts against
-  `catalog.TOOL_BUDGET`, so add one only for a measured failure. Measured on 2026-11-05 against the
-  grouped form, 6 to 10 repeats per case: Kimi K3 first try 81/216 against 185/216, Kimi K3.1
-  Pro no difference (160/162 against 161/162, findability 91/100 against 94/100), about 1,200 more
-  prompt tokens per request. Two of 16 Kimi K3 `experiment_create` calls repeated text inside
-  `hypothesis` until they stopped at 131,075 tokens, with no output limit set; production limits a
-  reply to `MAX_RESPONSE_TOKENS`.
+  flat tool (`test_tool_signatures.py` checks), and telemetry reports the grouped tool and action.
+  Thirteen actions have one: the ones weak models got wrong and `claim_write`. It costs prompt size
+  and counts against `catalog.TOOL_BUDGET`, so add one only for a measured failure. Measured on
+  2026-11-05 against the grouped form, 6 to 10 repeats per case: Kimi K3 first try 81/216 against
+  185/216, Kimi K3.1 Pro no difference (160/162 against 161/162, findability 91/100 against 94/100),
+  about 1,200 more prompt tokens per request.
+  Some Kimi K3 `experiment_create` calls repeat text inside `hypothesis.statement` until the output
+  limit (`MAX_RESPONSE_TOKENS`). Measured at that limit on Moonshot on 2026-11-05: Kimi K3 2/14,
+  and 2/8 with a description asking for one short sentence per key, so the description was not
+  kept; Kimi K3.1 Pro 0/12. Each costs about $0.27. Hermes v0.22.6 sends a cut-off call again up to
+  4 times, then ends the turn with nothing run, so one call costs at most about $1.35.
 - **Record:** a migration (`store/migrations/<kind>/NNNN_*.sql`), a module under `store/`, a
   `RecordSpec` in `store/registry.py`, its event kinds in `store/events.py`, and a tool action.
 - **Skill:** `skills/<root>/<category>/<name>/SKILL.md` with `name` equal to the directory and a
