@@ -43,15 +43,15 @@ Admission locking precedes the Coworld writer when both boundaries are needed.
 Mutating native tools take no identity from the model. A call with the same fields, role, session
 and lease epoch as a command whose finished result has not yet been returned to that session is a
 retry: it joins that command, and if the work was already done it says so in
-`repeat_of_earlier_call`; a refusal comes back as it was. Once the result has been returned (by the call or by `task.command`),
-an identical call is a new intent, so a deliberate second message and a call after a refusal both
-run. This is `transitions.request_generated`. A retry whose fields differ is a new intent, which
-the domain rules bound: a second assignment or completion is refused, a reworded message is sent.
-A call interrupted while it waited (the user's stop, for one) is not marked as returned, so its
-retry joins too; if Hermes delivered that reply after all, a deliberate repeat gets the note once
-and runs on the next call. Two gaps remain: a gateway that stops in the moment between marking a
-result returned and Hermes saving it would see its retry applied as new, and so would an interrupted
-`workspace.change_complete`, whose subprocess cannot see the interrupt.
+`repeat_of_earlier_call`; a refusal comes back as it was. Once the result has been returned (by the
+call or by `task.command`), an identical call is a new intent, so a deliberate second message and a
+call after a refusal both run. This is `transitions.request_generated`. A retry whose fields differ
+is a new intent, which the domain rules bound: a second assignment or completion is refused, a
+reworded message is sent. An interrupt (the user's stop, for one) ends a call's wait with its
+pending receipt, which marks nothing, so its retry joins too. Two gaps remain: a gateway that stops
+in the moment between marking a result returned and Hermes saving it would see its retry applied as
+new, and so would an interrupted `workspace.change_complete`, whose subprocess cannot see the
+interrupt.
 
 An explicit `operation_id` is still accepted, without being offered in any schema, because a chat
 keeps the tool schema it started with. Internal callers (capability reports, platform waits,

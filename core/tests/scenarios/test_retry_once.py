@@ -139,17 +139,19 @@ def test_a_refusal_found_by_a_retry_is_not_called_done_and_the_next_call_runs(ct
     assert call_applied(ctx, args)["record"]["id"] == "T-1"
 
 
-def test_a_retry_after_hermes_cancelled_the_call_joins_the_command(ctx, monkeypatch):
+def test_an_interrupt_ends_the_wait_and_the_retry_joins_the_command(ctx, monkeypatch):
     interrupt = ModuleType("tools.interrupt")
     interrupt.is_interrupted = lambda: True
     with monkeypatch.context() as patch:
         patch.setitem(sys.modules, "tools", ModuleType("tools"))
         patch.setitem(sys.modules, "tools.interrupt", interrupt)
-        cancelled = call_applied(
-            ctx, CREATE
-        )  # this reply goes nowhere: the model is told "cancelled"
-    retried = call(ctx, CREATE)
-    assert retried["command_id"] == cancelled["command_id"]
+        started = time.monotonic()
+        interrupted = call(ctx, CREATE)
+        assert time.monotonic() - started < 2
+    assert interrupted["kind"] == "transition_pending"
+    apply(ctx)
+    retried = call(ctx, CREATE)  # Hermes has cleared the interrupt by now
+    assert retried["command_id"] == interrupted["command_id"]
     assert "did nothing" in retried["repeat_of_earlier_call"]
     assert count(ctx, "tasks") == 1
 

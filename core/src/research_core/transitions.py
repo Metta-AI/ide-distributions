@@ -214,18 +214,6 @@ def read_command(ctx: ToolContext, command_id: str) -> dict:
     return result
 
 
-def _hermes_was_interrupted() -> bool:
-    """After an interrupt Hermes may tell the model the call was cancelled while this thread runs
-    on, or may still deliver this reply if it comes within its grace period; the code cannot tell
-    which. Treating it as lost keeps a retry safe: at worst a deliberate repeat gets REPEAT_NOTE.
-    """
-    try:
-        from tools.interrupt import is_interrupted
-    except ImportError:  # outside Hermes: tests, the CLI and workspace-executor subprocesses
-        return False
-    return is_interrupted()
-
-
 def note_delivery(ctx: ToolContext, result: dict) -> None:
     """Record that the session that issued this finished command is being given its result: an
     identical call is a new intent from now on, and the Task revisions it shows count as seen.
@@ -236,7 +224,7 @@ def note_delivery(ctx: ToolContext, result: dict) -> None:
         "SELECT tool,reply_seen_at FROM transition_commands WHERE id=? AND actor=?",
         (command_id, str(ctx.actor)),
     )
-    if command is None or command["reply_seen_at"] is not None or _hermes_was_interrupted():
+    if command is None or command["reply_seen_at"] is not None:
         return
     from research_core.tools import task
 
@@ -297,10 +285,24 @@ def _accept(tx, ctx: ToolContext, tool: str, args: dict, command_id: str, payloa
     tx.event("transition.requested", command_id, {"tool": tool})
 
 
+def _hermes_interrupted() -> bool:
+    try:
+        from tools.interrupt import is_interrupted
+    except ImportError:  # outside Hermes: tests, the CLI and workspace-executor subprocesses
+        return False
+    return is_interrupted()
+
+
 def _await_result(ctx: ToolContext, command_id: str) -> dict:
+    """The command's result, or its pending receipt after a short wait.
+
+    An interrupt ends the wait at once: Hermes abandons a thread still running after a short grace
+    period and tells the model the call was cancelled, and it clears the interrupt later, so this
+    thread must not stay to record a finished result nobody will get. A pending reply marks nothing.
+    """
     deadline = time.monotonic() + REQUEST_WAIT_SECONDS
     wait = threading.Event()
-    while time.monotonic() < deadline:
+    while time.monotonic() < deadline and not _hermes_interrupted():
         result = receipt(ctx.store, command_id)
         if CommandReceipt.parse(result).state != "pending":
             return result
