@@ -92,7 +92,7 @@ def test_environment_guide_names_the_workspace_and_player_but_no_secret(workspac
     assert ".state" not in text and "store.db" not in text
     assert "`coworld`" in text and "`softmax`" in text and "`research`" in text
     assert (
-        "task.ask" in text
+        "task_ask" in text
         and "ui.notify" not in text.split("## Reaching the user")[1].split("##")[0]
     )
     assert "every 60 seconds" in text and "/scratch/tmp" in text

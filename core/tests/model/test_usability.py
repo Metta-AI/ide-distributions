@@ -286,12 +286,18 @@ def build_results(
     tools = usability_results.by_tool(
         acts,
         runs,
-        {spec.name for role in catalog.ROLES for spec in catalog.tools_for(role)},
+        {
+            spec.name
+            for role in catalog.ROLES
+            for spec in catalog.tools_for(role)
+            if spec.split_from is None
+        },
     )
     labels = {
         (f"{spec.name}.{action.name}" if spec.actions else spec.name)
         for role in catalog.ROLES
         for spec in catalog.tools_for(role)
+        if spec.split_from is None
         for action in (spec.actions_for(role) if spec.actions else [spec])
     }
     every_skill = {skill.name for skill in usability_context.all_skills()}
@@ -360,7 +366,12 @@ def test_offline_every_skill_and_tool_has_a_situation():
     wanted_skills = {s for situation in SITUATIONS for s in situation.skills}
     assert {skill.name for skill in usability_context.all_skills()} <= wanted_skills
     wanted_tools = {act.split(".")[0] for situation in SITUATIONS for act in situation.acts}
-    shipped = {spec.name for role in catalog.ROLES for spec in catalog.tools_for(role)}
+    shipped = {
+        spec.name
+        for role in catalog.ROLES
+        for spec in catalog.tools_for(role)
+        if spec.split_from is None
+    }
     assert shipped <= wanted_tools
 
 

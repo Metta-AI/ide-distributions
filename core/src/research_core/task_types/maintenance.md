@@ -41,7 +41,7 @@ so the watcher reruns the check next tick; the capability turns `ok` when it pas
 small change with a message saying what broke and why this fixes it. Game-specific build or
 evaluate details: see the mixin's docs.
 
-Ask (`task.ask`) when two fixes differ in what the user would want (upgrade or pin a runtime);
+Ask (`task_ask`) when two fixes differ in what the user would want (upgrade or pin a runtime);
 decide everything else.
 
 End: `task.complete {task, commit, summary, capability, merge: "yes", result}`. `commit` is on

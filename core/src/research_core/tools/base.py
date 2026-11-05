@@ -22,7 +22,7 @@ import os
 import re
 import traceback
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -68,6 +68,10 @@ class ActionSpec:
     # Fields a call may still carry but no schema or refusal offers: code fills them in now, and
     # a chat keeps the tool schema it started with, so an open one may send them for a while.
     hidden_params: dict[str, dict] = field(default_factory=dict)
+    # Offered as a tool of its own, ``<tool>_<action>`` (:func:`own_tool`), whose schema can mark
+    # the required fields as required, which the grouped tool's schema cannot. The grouped tool no
+    # longer offers the action but still runs a call that names it.
+    own_tool: bool = False
 
 
 @dataclass(frozen=True)
@@ -83,9 +87,18 @@ class ToolSpec:
     # Wall-clock budget of a workspace-executor call; None means the executor default (400 s,
     # under Hermes's 420 s tool deadline). Long mixin commands run detached instead (A3.2).
     timeout_s: int | None = None
+    # Fields the handler needs in some form beyond ``required``; see ActionSpec.example_fields.
+    example_fields: tuple[str, ...] = ()
+    # For a tool made by :func:`own_tool`: the grouped tool and the action it stands for.
+    split_from: tuple[str, str] | None = None
 
     def actions_for(self, role: Role) -> list[ActionSpec]:
+        """Every action a call may name for this role, offered here or as a tool of its own."""
         return [action for action in self.actions or () if role in action.roles]
+
+    def grouped_actions(self, role: Role) -> list[ActionSpec]:
+        """The actions this tool's schema offers."""
+        return [action for action in self.actions_for(role) if not action.own_tool]
 
     def action(self, name: str) -> ActionSpec | None:
         for action in self.actions or ():
@@ -102,7 +115,7 @@ class ToolSpec:
         """
         properties: dict[str, dict] = {}
         if self.actions is not None:
-            actions = self.actions_for(role)
+            actions = self.grouped_actions(role)
             properties["action"] = {
                 "type": "string",
                 "enum": [action.name for action in actions],
@@ -129,13 +142,17 @@ class ToolSpec:
         return {**self.offered(action), **(action.hidden_params if action else {})}
 
     def checked_fields(self, role: Role) -> dict[str, dict]:
-        """The shapes arguments are checked against: the offered fields, then the hidden ones."""
-        hidden = {
+        """The shapes arguments are checked against: the offered fields, then the others a call may
+        still carry (hidden ones, and the fields of actions that have their own tool)."""
+        others = {
             name: schema
             for action in self.actions or ()
-            for name, schema in action.hidden_params.items()
+            for name, schema in (
+                *action.hidden_params.items(),
+                *(action.params.items() if action.own_tool else ()),
+            )
         }
-        return {**hidden, **self.properties(role)}
+        return {**others, **self.properties(role)}
 
     def schema(self, role: Role) -> dict:
         """The OpenAI function body Hermes registers: name, description, parameters."""
@@ -149,7 +166,41 @@ class ToolSpec:
         }
         if required:
             parameters["required"] = required
-        return {"name": self.name, "description": self.description, "parameters": parameters}
+        own = [f"{self.name}_{a.name}" for a in self.actions_for(role) if a.own_tool]
+        note = f" Other changes have their own tools: {', '.join(own)}." if own else ""
+        return {
+            "name": self.name,
+            "description": self.description + note,
+            "parameters": parameters,
+        }
+
+
+def first_sentence(text: str) -> str:
+    head, dot, _ = text.partition(". ")
+    return head + "." if dot else text
+
+
+def own_tool(grouped: ToolSpec, action: ActionSpec) -> ToolSpec:
+    """One action of ``grouped`` as a flat tool: its fields, its required ones really required,
+    the same handler."""
+
+    def run_action(call: ToolCall) -> dict:
+        # The handler and what it records (a transition's stored arguments) see a grouped call.
+        args = {"action": action.name, **call.args}
+        return grouped.handler(replace(call, spec=grouped, action=action.name, args=args))
+
+    return ToolSpec(
+        name=f"{grouped.name}_{action.name}",
+        description=f"{first_sentence(grouped.description)} {action.description}",
+        handler=run_action,
+        roles=action.roles & grouped.roles,
+        executor=grouped.executor,
+        params={**action.params, **grouped.params},
+        required=(*action.required, *grouped.required),
+        timeout_s=grouped.timeout_s,
+        example_fields=action.example_fields,
+        split_from=(grouped.name, action.name),
+    )
 
 
 def action_line(action: ActionSpec) -> str:
@@ -200,7 +251,11 @@ def field_description(name: str, taking: list[ActionSpec], action_count: int) ->
 
 
 def tool(spec: ToolSpec) -> ToolSpec:
-    """Register a tool in the catalog (used as ``SPEC = tool(ToolSpec(...))``)."""
+    """Register a tool in the catalog (used as ``SPEC = tool(ToolSpec(...))``), and the tools of
+    its actions marked ``own_tool``."""
+    for action in spec.actions or ():
+        if action.own_tool:
+            register(own_tool(spec, action))
     return register(spec)
 
 
@@ -294,11 +349,11 @@ def validate_args(
     action_name: str | None = None
     required = list(spec.required)
     if spec.actions is not None:
-        allowed = [action.name for action in spec.actions_for(role)]
+        allowed = [action.name for action in spec.grouped_actions(role)]
         raw = args.get("action")
         if raw is None:
             problems.append(f"action is required; one of {', '.join(allowed)}")
-        elif raw not in allowed:
+        elif raw not in [action.name for action in spec.actions_for(role)]:
             known = spec.action(str(raw))
             if known is not None:
                 problems.append(
@@ -432,14 +487,14 @@ def usage(spec: ToolSpec, role: Role, action: str | None) -> dict:
         return {
             "actions": {
                 a.name: {"does": a.description, "requires": list(a.required)}
-                for a in spec.actions_for(role)
+                for a in spec.grouped_actions(role)
             }
         }
     selected = spec.action(action) if action else None
     schemas = spec.offered(selected)
     required = [*(selected.required if selected else ()), *spec.required]
     optional = [name for name in schemas if name not in required]
-    names = [*required, *(selected.example_fields if selected else ())]
+    names = [*required, *(selected.example_fields if selected else spec.example_fields)]
     out = {
         **({"does": selected.description} if selected else {}),
         "required": _fields(schemas, required),

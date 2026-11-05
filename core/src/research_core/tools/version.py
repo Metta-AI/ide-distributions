@@ -317,7 +317,7 @@ def run_build(
 def background_result(role: str, result: mixin.CommandResult) -> dict:
     if role == "researcher":
         next_step = (
-            f"the build is still running: task.wait {{task, kind: process, ref: {result.pid},"
+            f"the build is still running: task_wait {{task, kind: process, ref: {result.pid},"
             " detail: 'the build'}} and end this run. Only after the watcher resumes you, call"
             " version.create with the same arguments plus resume: <background.resume>"
         )

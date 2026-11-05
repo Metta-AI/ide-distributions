@@ -33,7 +33,7 @@ It writes UI state and never waits on a client.
 
 - `ui.show {ref}` or `{view}`: bring a record (G-3, X-5, V-7) or a client view into view when
   the user would otherwise have to find it.
-- `ui.panel_set {panel, kind, content}`: a named panel with a declared kind (`markdown`,
+- `ui_panel_set {panel, kind, content}`: a named panel with a declared kind (`markdown`,
   `record`, `table`, `checklist`, `file`, `link`, `replay`, `html`, `agent-context`). Never assume Markdown. A
   `file` panel names a file under the Coworld's `documents/` folder; a `replay` panel a replay
   or a moment in it; `html` only when the client can show it.
@@ -50,7 +50,7 @@ It writes UI state and never waits on a client.
 
 The watcher computes the `agent-context` panel: Coworld, Player, Goals, champion, Versions,
 running Tasks, capabilities, what the client sent. You write only its "I need from you" items:
-`ui.panel_set {panel: "agent-context", kind: "agent-context", content: {needs: [...]}}`, each
+`ui_panel_set {panel: "agent-context", kind: "agent-context", content: {needs: [...]}}`, each
 item one sentence saying what and why, with a record id when there is one. List only what the
 user alone can supply (a User credential, a decision on a parked Goal, a repository grant).
 Clear an item as soon as it arrives; a stale need is worse than none.

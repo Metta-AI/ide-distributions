@@ -197,7 +197,7 @@ def policy_file(call: ToolCall, platform: Platform) -> dict:
         if call.ctx.role == "researcher":
             problems.append(
                 "the Player was refused; the User identity could read it and belongs to the"
-                " Orchestrator (ask through task.ask)"
+                " Orchestrator (ask through task_ask)"
             )
         else:
             problems.append(f"refused as {' and as '.join(tried)}")

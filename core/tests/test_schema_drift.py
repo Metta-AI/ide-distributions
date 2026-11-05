@@ -36,7 +36,7 @@ def test_a_frozen_enum_value_the_validator_refuses_is_reported(drift_tool):
 
 def test_a_required_nested_key_missing_from_the_frozen_schema_is_reported(drift_tool):
     tools = copy.deepcopy(current_tools())
-    claim = next(t for t in tools if t["function"]["name"] == "claim")
+    claim = next(t for t in tools if t["function"]["name"] == "claim_write")
     del claim["function"]["parameters"]["properties"]["evidence"]["items"]["properties"]["stance"]
     assert any("evidence.stance" in str(d) for d in drift_tool.compare(ROLE, tools))
 
@@ -46,7 +46,7 @@ def test_a_required_nested_key_missing_from_the_frozen_schema_is_reported(drift_
 )
 def test_frozen_items_that_cannot_hold_the_required_keys_are_reported(drift_tool, frozen_items):
     tools = copy.deepcopy(current_tools())
-    claim = next(t for t in tools if t["function"]["name"] == "claim")
+    claim = next(t for t in tools if t["function"]["name"] == "claim_write")
     claim["function"]["parameters"]["properties"]["evidence"]["items"] = frozen_items
     assert any("evidence.stance" in str(d) for d in drift_tool.compare(ROLE, tools))
 

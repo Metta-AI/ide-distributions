@@ -114,6 +114,7 @@ SPEC = tool(
                 },
                 ("key", "cites"),
                 ORCHESTRATOR,
+                own_tool=True,
             ),
         ),
     )

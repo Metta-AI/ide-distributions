@@ -111,7 +111,10 @@ class Item:
 
 def items() -> list[Item]:
     found = [Item(f"skill:{s.name}", "skill", s.text) for s in usability_context.all_skills()]
+    # A tool split from a grouped one is asked about under the grouped one's questions.
     for spec in catalog.tools_for("orchestrator"):
+        if spec.split_from is not None:
+            continue
         schema = spec.schema("orchestrator")
         found.append(
             Item(f"tool:{spec.name}", "tool definition", json.dumps(schema, indent=1), schema)

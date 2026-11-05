@@ -162,8 +162,9 @@ def test_a_recovery_history_holds_the_refused_call_and_the_tools_refusal(script)
     assert run(case).outcome == "valid"
     assistant, tool_result = fake.requests[0][-2:]
     sent = json.loads(assistant["tool_calls"][0]["function"]["arguments"])
-    assert sent == write_actions.INCIDENT_CLAIM_ARGS
-    assert "summary is required for write" in json.loads(tool_result["content"])["error"]
+    assert assistant["tool_calls"][0]["function"]["name"] == "claim_write"
+    assert sent == {k: v for k, v in write_actions.INCIDENT_CLAIM_ARGS.items() if k != "action"}
+    assert "summary is required" in json.loads(tool_result["content"])["error"]
 
 
 def test_a_deeper_recovery_history_repeats_the_call_with_the_short_refusal(script):

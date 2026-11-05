@@ -406,6 +406,7 @@ SPEC = durable_tool(
                 CREATE_PARAMS,
                 ("type", "title", "description"),
                 example_fields=("goal",),
+                own_tool=True,
             ),
             ActionSpec(
                 "approve",
@@ -446,6 +447,7 @@ SPEC = durable_tool(
                 {"task": TASK, "failure": {**FAILURE, "description": "Why it is dropped."}},
                 ("task", "failure"),
                 ORCHESTRATOR,
+                own_tool=True,
             ),
             ActionSpec(
                 "review",
@@ -493,6 +495,7 @@ SPEC = durable_tool(
                 },
                 ("task", "kind", "detail"),
                 RESEARCHER,
+                own_tool=True,
             ),
             ActionSpec(
                 "ask",
@@ -500,6 +503,7 @@ SPEC = durable_tool(
                 {"task": TASK, "question": a.string("The question.")},
                 ("task", "question"),
                 RESEARCHER,
+                own_tool=True,
             ),
             ActionSpec(
                 "complete",
@@ -533,6 +537,7 @@ SPEC = durable_tool(
                 {"task": TASK, "reason": a.string("Why you must not continue.")},
                 ("task", "reason"),
                 RESEARCHER,
+                own_tool=True,
             ),
             ActionSpec(
                 "propose_submission",
@@ -544,6 +549,7 @@ SPEC = durable_tool(
                 },
                 ("task", "version", "reason"),
                 RESEARCHER,
+                own_tool=True,
             ),
             ActionSpec(
                 "read",

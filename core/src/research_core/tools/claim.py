@@ -200,6 +200,7 @@ SPEC = tool(
                     "see_also": a.strings("Claims worth reading alongside, such as C-3."),
                 },
                 ("summary", "body", "tags", "evidence"),
+                own_tool=True,
             ),
             ActionSpec(
                 "add_evidence",
@@ -212,6 +213,7 @@ SPEC = tool(
                     "note": NOTE,
                 },
                 ("claim", "type", "ref", "stance"),
+                own_tool=True,
             ),
             ActionSpec(
                 "retire",

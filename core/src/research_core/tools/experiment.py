@@ -518,6 +518,7 @@ SPEC = tool(
                     "task": a.string("The Task that runs it, such as T-12."),
                 },
                 ("summary", "hypothesis", "methods"),
+                own_tool=True,
             ),
             ActionSpec(
                 "read",
@@ -565,6 +566,7 @@ SPEC = tool(
                     "episodes_total": a.integer("Episodes the request will play."),
                 },
                 ("experiment", "kind", "platform_request_id", "arm"),
+                own_tool=True,
             ),
             ActionSpec(
                 "update_run",

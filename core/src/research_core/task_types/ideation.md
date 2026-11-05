@@ -27,14 +27,14 @@ now: `platform.standings`, `platform.active_policies {league, exclude_player: tr
 Game-specific levers and failure vocabulary: see the mixin's `<coworld>-diagnosis` and
 `<coworld>-ab` skills or docs.
 
-Work: for each idea, `task.propose {goal, type, title, description, reasoning, for_human,
+Work: for each idea, `task_propose {goal, type, title, description, reasoning, for_human,
 end_condition, end_detail, priority, ideation_round}` with `ideation_round` from your Task.
 `reasoning` cites claims (C-n) and Experiments (X-n) by id; `description` is concrete enough
 that a Researcher starts cold. Types are `improvement`, `research` or `maintenance`, never
 another `ideation`. Rank them: the first is what you would run. Two strong proposals beat five
 weak ones; five is the ceiling, not the target.
 
-Ask (`task.ask`) only when the Goal's end state cannot be read; the choice of ideas is yours.
+Ask (`task_ask`) only when the Goal's end state cannot be read; the choice of ideas is yours.
 
 End: `task.complete {task, proposed_tasks: ["T-7", "T-8"], result, merge: "no", merge_reason:
 "ideation changes no code"}`. `result` says in two sentences what the Goal should try first and

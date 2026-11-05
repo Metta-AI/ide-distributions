@@ -55,7 +55,7 @@ comes from the source with a citation, never from memory.
 7. Commit on `main` with a message naming the source commit, then `workspace.capabilities
    {check: true}`: the watcher runs build, check, upload and evaluate next tick. Setup ends only
    when build and upload pass; a failure creates a maintenance Task on its own.
-8. Import the repository's lesson notes as claims with `claim.write` and `doc` evidence when the
+8. Import the repository's lesson notes as claims with `claim_write` and `doc` evidence when the
    deterministic import skipped them (the setup status lists what was imported).
 
 ## Gaps

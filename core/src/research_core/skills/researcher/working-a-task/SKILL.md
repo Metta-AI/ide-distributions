@@ -32,22 +32,22 @@ end your run without writing anything.
 Edit only inside your worktree and commit on your branch with messages that say what and why;
 never touch `main` or another worktree. `version.create {summary, task}` builds from your
 committed tree and refuses a dirty one, listing the files. Record findings as you go:
-`claim.write` with evidence, `experiment.create`, `experiment.add_run`. The record is the
+`claim_write` with evidence, `experiment_create`, `experiment_add_run`. The record is the
 report; there is no second write-up. Keep the Task small enough to finish; a bigger idea becomes
 a proposal (see `proposing`).
 
 ## 4. Ask or decide
 
-`task.ask {task, question}` when the decision is not yours: the Goal is ambiguous, two readings
+`task_ask {task, question}` when the decision is not yours: the Goal is ambiguous, two readings
 of a directive conflict, the Experiment would cost far more credits than the Task implied, or
 the result changes what the Goal should be. The question sets a wait: end your run, and the
 answer resumes you. Decide yourself everything inside the Task: the method, the seeds, which
 claim to write, how to fix a broken build. A question you can answer with a tool is not a
-`task.ask`.
+`task_ask`.
 
 ## 5. Wait, then END YOUR RUN
 
-Anything outside your control is a wait: `task.wait {task, kind, detail, ref}` with kind `xp`
+Anything outside your control is a wait: `task_wait {task, kind, detail, ref}` with kind `xp`
 (`ref`: the request ids from `xp.request`), `credits` (after a 402), `process` (`ref`: the pid of
 a background build or evaluate), `question`, `permit` (`ref`: the route to read), `submission`
 (`ref`: the policy version id), `platform` (set for you when a route keeps failing), `user` or
@@ -70,7 +70,7 @@ undefined symbol X"`, `next_step: "pin nim 2.0 in MIXIN.md toolchains or patch t
 line 12"`. Bad: `what_failed: "it broke"`, `next_step: "try again"`. Fill `tried` so nobody
 repeats it.
 
-`task.release {task, reason}` when you must not continue, as when a directive forbids the only
+`task_release {task, reason}` when you must not continue, as when a directive forbids the only
 path; tried and it did not work is `outcome: "failed"`. End your run afterward. The workspace stops your recorded run, then returns the Task to scheduling.
 
 ## 7. What happens next

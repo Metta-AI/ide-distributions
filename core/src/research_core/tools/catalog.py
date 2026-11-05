@@ -14,7 +14,7 @@ if TYPE_CHECKING:  # pragma: no cover
 
 Role = Literal["orchestrator", "researcher"]
 ROLES: tuple[Role, ...] = ("orchestrator", "researcher")
-TOOL_BUDGET = 25
+TOOL_BUDGET = 26
 
 TOOLS: dict[str, ToolSpec] = {}
 

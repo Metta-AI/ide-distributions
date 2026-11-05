@@ -859,7 +859,7 @@ def xp_status(situation: Situation, args: dict) -> dict:
     elif complete:
         report["next"] = "experiment.close {experiment: X-5} applies the decision rule"
     elif pending:
-        report["next"] = f"{len(pending)} requests still run; task.wait {{kind: xp}} or try later"
+        report["next"] = f"{len(pending)} requests still run; task_wait {{kind: xp}} or try later"
     return report
 
 

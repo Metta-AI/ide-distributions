@@ -82,7 +82,7 @@ def test_researcher_refusal_points_at_the_orchestrator():
     text = json.loads(hook(tool_name="goal", args={"y": 1}, result=refusal, session_id="s-r"))
     assert text["error"] == (
         "This exact call was refused 2 times. Fix what the refusal names (unknown field 'y'), "
-        "or report the problem to the Orchestrator with task.ask and end the run."
+        "or report the problem to the Orchestrator with task_ask and end the run."
     )
 
 

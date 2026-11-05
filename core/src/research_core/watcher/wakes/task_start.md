@@ -23,7 +23,7 @@ $reasoning
 - Record what you learn as you go (claims, Experiment runs, Versions); tools return the updated
   record, so you never need to read the store yourself.
 - When you must wait for something outside your control (XP requests, credits, a background
-  process, an answer from the Orchestrator), call `task.wait` with its kind and reference and
+  process, an answer from the Orchestrator), call `task_wait` with its kind and reference and
   then end your run. The watcher resumes this Session when the wait resolves.
-- Ask the Orchestrator with `task.ask` when a decision is not yours to make.
+- Ask the Orchestrator with `task_ask` when a decision is not yours to make.
 - Finish with `task.complete`; a review reopens the Task with a reason if something is missing.

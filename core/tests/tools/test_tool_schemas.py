@@ -96,7 +96,8 @@ def test_a_field_shared_by_actions_has_one_shape():
 
 
 def test_claim_evidence_items_carry_the_handler_rules():
-    write = catalog.TOOLS["claim"].schema("researcher")["parameters"]["properties"]["evidence"]
+    schema = catalog.TOOLS["claim_write"].schema("researcher")
+    write = schema["parameters"]["properties"]["evidence"]
     assert write["minItems"] == 1
     item = write["items"]
     assert set(item["properties"]) == {"type", "ref", "stance", "note"}
@@ -112,14 +113,6 @@ def test_task_failure_matches_the_store():
     assert failure["required"] == list(tasks.FAILURE_REQUIRED)
     assert set(failure["properties"]) == set(tasks.FAILURE_REQUIRED + tasks.FAILURE_OPTIONAL)
     assert failure["additionalProperties"] is False  # unknown keys are refused
-
-
-def test_a_field_description_names_its_actions_write_side_first():
-    tags = catalog.TOOLS["claim"].schema("orchestrator")["parameters"]["properties"]["tags"]
-    text = tags["description"]
-    assert text.startswith("write: Keywords")
-    assert text.index("write:") < text.index("search:")
-    assert text.endswith("Required for write; optional for search.")
 
 
 def test_field_description_forms():
@@ -169,10 +162,10 @@ def test_a_frozen_schema_may_still_send_them_on_the_actions_that_took_them():
 
 
 def role_actions():
-    """(role, spec, action) for every action a role can call."""
+    """(role, spec, action) for every action a role's grouped tools offer."""
     for role in ROLES:
         for spec in catalog.tools_for(role):
-            for action in spec.actions_for(role):
+            for action in spec.grouped_actions(role):
                 yield role, spec, action
 
 

@@ -2,7 +2,8 @@
 
 Each case offers the role's whole tool list as a Hermes session does (``harness.full_toolset``,
 ``tool_choice: "auto"``) with a one-line instruction, and judges the model's first call to the
-expected tool: a call to that tool with no ``action``, or with any action that is not a read.
+expected tool: a call to that tool with no ``action``, or with any action that is not a read. A
+call to an action's own tool counts as the grouped tool and action (``ShippedSchemas.canonical``).
 That call must pass the checks production runs before anything changes: ``validate_args`` (the
 tools' argument check) and, for the actions whose store checks need no records, those checks
 too (``RECORD_CHECKS``). Calls before it get the answer production would give: the tool's own

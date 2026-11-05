@@ -63,7 +63,7 @@ _ONLY_GUARD_NOTES = re.compile(
 # How each role reports a problem it cannot fix itself.
 WAY_OUT: dict[str, str] = {
     "orchestrator": "report the problem with ui.notify",
-    "researcher": "report the problem to the Orchestrator with task.ask",
+    "researcher": "report the problem to the Orchestrator with task_ask",
 }
 
 _lock = threading.Lock()

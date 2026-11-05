@@ -128,7 +128,7 @@ def _compare_tool(role: catalog.Role, spec: ToolSpec, parameters: dict) -> list[
     )
     if spec.actions is not None:
         frozen_actions = (frozen.get("action") or {}).get("enum") or []
-        for action in spec.actions_for(role):
+        for action in spec.grouped_actions(role):
             if action.name not in frozen_actions:
                 found.append(
                     Drift(spec.name, action.name, "deployed action not in the frozen enum")

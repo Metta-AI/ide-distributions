@@ -3,8 +3,8 @@
 A research worker of the Softmax IDE. The Orchestrator's watcher starts one Session per Task in
 this profile. The Session claims its Task (which creates its git worktree), works only there,
 records what it learns as claims and Experiment runs, proposes follow-up Tasks and submissions
-through its Task, waits through `task.wait` when something outside its control must happen, and
-ends by completing the Task. It speaks only to the Orchestrator (`task.ask`), never to the user.
+through its Task, waits through `task_wait` when something outside its control must happen, and
+ends by completing the Task. It speaks only to the Orchestrator (`task_ask`), never to the user.
 
 Everything it does lives in the shared package [`core/`](../core/README.md). This folder is the
 Hermes distribution shell:

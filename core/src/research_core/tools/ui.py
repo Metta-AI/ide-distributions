@@ -184,6 +184,7 @@ SPEC = tool(
                     ),
                 },
                 ("panel", "kind", "content"),
+                own_tool=True,
             ),
             ActionSpec(
                 "notify",
