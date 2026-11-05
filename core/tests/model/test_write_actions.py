@@ -7,7 +7,7 @@ a table of results per model and host (``harness.summary``), printed by this fol
 ``conftest.py``.
 
 Environment, all optional but the first:
-  IDE_HERMES_SRC         a Hermes v0.21.6 source tree, for its schema sanitizers (required)
+  IDE_HERMES_SRC         the pinned Hermes's source tree, for its schema sanitizers (required)
   IDE_TOOL_CALL_MODELS   comma-separated models (default: MEASUREMENT's models)
   IDE_TOOL_CALL_HOSTS    comma-separated host labels for every model (default: MEASUREMENT's,
                          else ``shipped``); see ``harness.provider_for``

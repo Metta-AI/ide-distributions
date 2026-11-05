@@ -17,7 +17,7 @@ STDLIB = set(sys.stdlib_module_names) | {"research_core", "hermes_constants"}
 def test_distribution_manifest(role):
     manifest = yaml.safe_load((PROFILES[role] / "distribution.yaml").read_text())
     assert manifest["name"] == role
-    assert manifest["hermes_requires"] == ">=0.21.6"
+    assert manifest["hermes_requires"] == ">=0.22.6"
     names = {entry["name"] for entry in manifest["env_requires"]}
     assert {"SOFTMAX_PLAYER_ID", "SOFTMAX_PLAYER_CREDENTIAL", "IDE_WORKSPACE"} <= names
     assert ("SOFTMAX_USER_CREDENTIAL" in names) == (role == "orchestrator")

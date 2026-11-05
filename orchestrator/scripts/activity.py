@@ -6,7 +6,7 @@ workspace has running work and must stay awake: a live Researcher run, a backgro
 Task waits on, an autonomous-submission candidate, or a queued wake. A Task waiting on the
 platform (XP, credits, a submission) does not keep it awake. An empty list permits sleep, and
 so does an explicitly paused workspace; the host then starts the sleep with ``research
-workspace sleep`` (``docs/hosting.md``, "The sleep cycle"). The reasons are the
+workspace sleep`` (``docs/hosting.md``, "Coordinator and pause"). The reasons are the
 ones the watcher recorded at its last tick (``research watcher status``); nothing here polls
 the platform or writes a record. A workspace without a store yet is empty.
 

@@ -43,6 +43,7 @@ decisions is `docs/plans/ide-profile-refactor/`.
 | `skills/` | The shipped skills: `common/<category>/<skill>/`, `orchestrator/<skill>/`, `researcher/<skill>/`; `prepare.py` points `skills.external_dirs` at them. |
 | `task_types/` | The four Task types with their completion checklists and Researcher instructions. |
 | `prepare.py` | Profile preparation after install or update: core path marker, protected and retired config keys, the active Coworld's skill directories for every profile, shipped values over earlier defaults (not the model settings, but for one Orchestrator migration off `kimi-k3`), stores, the watcher job, the workspace environment, the default Coworld. |
+| `frozen_sessions.py` | Called by `prepare.py`: when a release changes the tool schemas or the instructions, open chats drop their stored copies and take the new ones on their next turn (`docs/hosting.md`, "Open chats after a release"). |
 | `cli.py` | The `research` command; each subcommand module registers itself. |
 
 ## Run the tests
@@ -56,7 +57,7 @@ uv run python tools/build_prompts.py --check && uv run python tools/check_prompt
 
 The fake platform (`IDE_PLATFORM=fake`) needs no network; the `hermes`-marked tests install the
 profiles into a temporary Hermes home; the dispatch spike and the real acceptance run also need
-an OpenRouter key. Hermes v0.21.6 needs Python 3.14 for its own dependencies, so a local
+an OpenRouter key. The pinned Hermes (v0.22.6) runs on Python 3.14 in the image, so a local
 `HERMES_BIN` is easiest to get from an isolated environment of the Hermes checkout
 (`UV_PROJECT_ENVIRONMENT=<somewhere> uv sync --frozen --no-dev --extra messaging`, then
 `<somewhere>/bin/hermes`); the `messaging` extra brings `aiohttp`, without which the gateway
@@ -64,6 +65,8 @@ starts but its API server does not, and the gateway enables that server from the
 `.env`, not from the process environment. `docs/local-end-to-end.md` turns the real acceptance
 run into a local end-to-end setup: the one-command run, an interactive session that stays up
 (`IDE_E2E_KEEP=1`, optionally on the real platform), and the same inside the hosted image.
+`core/tests/hermes/test_frozen_sessions_real.py` needs no key: its docstring has the command that
+runs it inside the pinned Hermes image, so it tests the Hermes version that ships.
 
 ## Upload recovery
 
@@ -85,7 +88,7 @@ it is not used for recovery. Fake faults: `lookup=503|403|unavailable|not_found`
 
 - **Tool:** a module under `tools/` with `SPEC = tool(ToolSpec(...))`, listed in
   `catalog.TOOL_MODULES`; in-process tools stay stdlib only; `core/tests/test_tool_budget.py`
-  pins the role sets (18 Orchestrator, 14 Researcher) and the executor table; run
+  pins the role sets (17 Orchestrator, 14 Researcher) and the executor table; run
   `uv run python tools/build_prompts.py --write --manifests`. Describe the tool, every field
   and every key, shortly: every request carries the whole list. Build field schemas with
   `tools/_args.py`: an object field lists its keys (`obj`, `objects`; `free_object` only for

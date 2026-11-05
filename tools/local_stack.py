@@ -15,8 +15,8 @@ the state on a Docker volume, a multiplexing gateway and ``research serve`` as t
 (``bootstrap.sh`` and ``as-profile.sh``, below) and runs the bootstrap inside the container:
 install ``uv``, install and prepare both profiles, write the ``.env`` files, start the gateway
 and the seam server. On a fresh volume it then runs the acceptance scenario unless
-``--no-scenario`` is given. ``up`` on an existing container restarts the services without
-reinstalling; ``--reset`` removes the container and the volume first.
+``--no-scenario`` is given. ``up`` on an existing container updates the profiles and restarts the
+services; ``--reset`` removes the container and the volume first.
 
 Secrets come from the caller's environment and go into the container only: ``OPENROUTER_API_KEY``
 (required on a fresh volume; later ``up`` runs keep the key already in the ``.env`` files) and,
@@ -50,7 +50,7 @@ except ModuleNotFoundError:  # a plain `python3`, outside the workspace environm
 # The hosted Hermes runtime: the digest CI runs the hermes-marked tests in (ci.yml).
 IMAGE = (
     "nousresearch/hermes-agent"
-    "@sha256:9774f4f39a9bb8c2f68ce728ed5e99ddbad282163be56764afacf88ed952b784"
+    "@sha256:d27689bc6e8581ec884a7227c9101fdaebf6c853cff8859020dac14f21452b4d"
 )
 SOURCE = "/src"
 DATA = "/opt/data"
@@ -66,6 +66,9 @@ AS_PROFILE = f"{STACK_DIR}/as-profile.sh"
 FAKE_PLATFORM_STATE = f"{WORKSPACE}/.state/fake_platform.json"
 LABEL = "ide-local-stack"
 FAKE_PLAYER_ID = "ply_canary"
+FAKE_COWORLD_ID = "cow_fake"
+# What the seam answers for a Coworld it does not have yet: 400 by name, 404 for no Coworld at all.
+NOT_REGISTERED_STATUSES = (400, 404)
 REQUEST = "Submit the starter as my champion."
 SUBMITTED = "version.submitted"
 REAL_REQUIRED = ("SOFTMAX_PLAYER_ID", "SOFTMAX_PLAYER_CREDENTIAL")
@@ -383,23 +386,35 @@ def print_summary(settings: Settings) -> None:
 # --- the scenario -----------------------------------------------------------------------------
 
 
-def coworld_snapshot(client: ScriptedClient) -> dict | None:
-    """The active Coworld's snapshot, or None while no Coworld is active (the seam answers 404)."""
+def scenario_coworld(settings: Settings) -> str:
+    """The Coworld the scenario's Session opens on: every Coworld Session names its Coworld."""
+    if settings.platform == "fake":
+        return FAKE_COWORLD_ID
+    coworld = os.environ.get("IDE_DEFAULT_COWORLD")
+    if not coworld:
+        raise StackError("set IDE_DEFAULT_COWORLD: the scenario's Session needs a Coworld")
+    return coworld
+
+
+def coworld_snapshot(client: ScriptedClient, coworld: str) -> dict | None:
+    """The Coworld's snapshot, or None while it is not registered yet."""
     try:
-        return client.snapshot("coworld")
+        return client.snapshot("coworld", coworld=coworld)
     except SeamError as error:
-        if error.status == 404:
+        if error.status in NOT_REGISTERED_STATUSES:
             return None
         raise
 
 
-def submitted_event(client: ScriptedClient, after: int) -> tuple[dict | None, int]:
+def submitted_event(client: ScriptedClient, coworld: str, after: int) -> tuple[dict | None, int]:
     """Read the Coworld store's events after ``after``; the ``version.submitted`` event if one
     arrived, and the last seq seen."""
     try:
-        events = client.events("coworld", after, idle=2.0, until=lambda e: e["kind"] == SUBMITTED)
+        events = client.events(
+            "coworld", after, idle=2.0, until=lambda e: e["kind"] == SUBMITTED, coworld=coworld
+        )
     except SeamError as error:
-        if error.status == 404:
+        if error.status in NOT_REGISTERED_STATUSES:
             return None, after
         raise
     if events:
@@ -416,14 +431,14 @@ def watcher_status(settings: Settings) -> dict:
         return {"ok": False, "error": output.strip()[-200:] or "no output"}
 
 
-def progress_line(client: ScriptedClient, settings: Settings, elapsed: int) -> str:
-    snapshot = coworld_snapshot(client)
+def progress_line(client: ScriptedClient, settings: Settings, coworld_id: str, elapsed: int) -> str:
+    snapshot = coworld_snapshot(client, coworld_id)
     if snapshot is None:
-        coworld = "no active Coworld yet"
+        coworld = f"Coworld {coworld_id} not registered yet"
     else:
         records = snapshot["records"]
         coworld = (
-            f"Coworld {snapshot['coworld_id']}: {len(records.get('tasks', []))} tasks,"
+            f"Coworld {coworld_id}: {len(records.get('tasks', []))} tasks,"
             f" {len(records.get('versions', []))} versions, seq {snapshot['seq']}"
         )
     status = watcher_status(settings)
@@ -451,10 +466,15 @@ def fake_submissions(settings: Settings) -> dict[str, int]:
 def run_scenario(settings: Settings, timeout_s: int) -> int:
     """Send the acceptance request through the seam and wait for ``version.submitted``."""
     client = ScriptedClient(settings.seam_url, timeout_s=60)
-    before = coworld_snapshot(client)
+    coworld = scenario_coworld(settings)
+    before = coworld_snapshot(client, coworld)
     after = before["seq"] if before else 0
     print(f"scenario on {settings.seam_url} (platform {settings.platform}): {REQUEST!r}")
-    session_id = client.open("local-stack", "web-ide")
+    session_id = client.open(
+        "local-stack",
+        "web-ide",
+        session_context={"contract_version": 1, "scope": "coworld", "coworld": coworld},
+    )
     reply = client.say(REQUEST, {"contract_version": 1, "on_screen": []}, wait=True)
     print(f"session {session_id}; chat run {reply['run_id']} ({reply['delivered']})", flush=True)
 
@@ -462,21 +482,22 @@ def run_scenario(settings: Settings, timeout_s: int) -> int:
     last_report = started - 60
     found = None
     while time.monotonic() - started < timeout_s:
-        found, after = submitted_event(client, after)
+        found, after = submitted_event(client, coworld, after)
         if found:
             break
         if time.monotonic() - last_report >= 30:
-            print(progress_line(client, settings, round(time.monotonic() - started)), flush=True)
+            elapsed = round(time.monotonic() - started)
+            print(progress_line(client, settings, coworld, elapsed), flush=True)
             last_report = time.monotonic()
         time.sleep(5)
     elapsed = round(time.monotonic() - started)
 
     if found is None:
         print(f"no {SUBMITTED} after {elapsed} s; read {GATEWAY_LOG} (tools/local_stack.py logs)")
-        print(progress_line(client, settings, elapsed))
+        print(progress_line(client, settings, coworld, elapsed))
         return 1
     print(f"{SUBMITTED} after {elapsed} s (seq {found['seq']}): {json.dumps(found)[:400]}")
-    print(progress_line(client, settings, elapsed))
+    print(progress_line(client, settings, coworld, elapsed))
     if settings.platform == "fake":
         counts = fake_submissions(settings)
         print(f"submissions by Player: {counts}")
@@ -526,6 +547,13 @@ def cmd_up(args: argparse.Namespace) -> int:
                 " so setup and runtime both use Hermes UID 10000"
             )
         check_secrets(settings.platform, fresh, args.player)
+        # The volume holds the sessions and the container only the image, so an old pin of Hermes
+        # moves to the current one by replacing the container alone.
+        if docker("inspect", "--format", "{{.Config.Image}}", name).strip() != IMAGE:
+            print(f"replacing container {name} with one from {IMAGE}; the volume stays")
+            docker("rm", "--force", name)
+            create_container(settings)
+            state = "running"
         requested = (args.seam_port, args.gateway_port, args.platform)
         if requested != (settings.seam_port, settings.gateway_port, settings.platform):
             print(
@@ -825,7 +853,11 @@ write_env_files() {{
 }}
 
 install_profile() {{ # install_profile <role>
-    if [ -d "$HOST_HOME/profiles/$1" ]; then say "profile $1 is installed"; return; fi
+    if [ -d "$HOST_HOME/profiles/$1" ]; then
+        say "updating profile $1 from {SOURCE}/$1"
+        HERMES_HOME=$HOST_HOME "$HERMES" profile update "$1" --yes
+        return
+    fi
     say "installing profile $1 from {SOURCE}/$1"
     HERMES_HOME=$HOST_HOME "$HERMES" profile install "{SOURCE}/$1" --name "$1" --yes
 }}
@@ -928,6 +960,8 @@ up() {{
         fi
         if [ -z "$PLAYER_ID" ]; then fail "SOFTMAX_PLAYER_ID is not set"; fi
     fi
+    # An earlier `up`'s services would start turns on the old release during preparation.
+    stop
     install_profile orchestrator
     install_profile researcher
     write_env_files

@@ -18,10 +18,12 @@ In order, ``prepare``:
    (``PROVIDER_ROUTING_MODELS``) the owner's routing does not already decide, so the two
    shipped Kimi models go only to Moonshot's own endpoint;
 4. (Orchestrator) removes the retired observation cron; research serve owns scheduling;
-5. builds or checks the workspace environment under a file lock;
-6. writes ``<profile>/.softmax-prepared`` and prints one JSON summary line.
+5. moves open sessions onto this release's tools and instructions when those changed
+   (``frozen_sessions``);
+6. builds or checks the workspace environment under a file lock;
+7. writes ``<profile>/.softmax-prepared`` and prints one JSON summary line.
 
-``check=True`` (the script's ``--check``) plans steps 3 and 4 against the live config and
+``check=True`` (the script's ``--check``) plans steps 3 to 5 against the live config and
 writes nothing. ``apply_skill_dirs`` is the same profile-pointing step for every profile of
 the sandbox, which a Coworld switch calls after preparation.
 
@@ -42,6 +44,7 @@ from pathlib import Path
 from typing import Any
 
 from research_core import layout
+from research_core.frozen_sessions import refresh_frozen_sessions
 from research_core.layout import Workspace
 from research_core.locks import file_lock
 from research_core.store import coworlds
@@ -54,6 +57,8 @@ WATCHER_JOB_ID = "watcher"
 PREPARED_MARKER = ".softmax-prepared"
 CORE_PATH_FILE = Path("local") / "core-path.txt"
 LOCK_STAMP = ".lock-sha"
+# Nothing else in a boot waits on this command's success: a stuck one must not hold up the start.
+PROMPT_REFRESH_TIMEOUT_S = 120
 
 # Config keys the profile machinery relies on, re-applied at every preparation so that an edit
 # by the owner or an agent never switches a gate back on. ``<role>`` is substituted.
@@ -74,7 +79,7 @@ PROTECTED_KEYS: dict[str, Any] = {
     "platform_toolsets.api_server": ["hermes-api-server", "ide-<role>"],
     "known_plugin_toolsets.cron": ["ide-<role>"],
     # Hermes's loop guard only warns on api_server; a wake that repeated one refused call 185
-    # times (2026-11-02). The hard stop (Hermes v0.21.6) halts after 5 failures of one tool,
+    # times (2026-11-02). The hard stop (Hermes v0.22.6) halts after 5 failures of one tool,
     # blocks after 5 identical failing calls (Hermes's default) and halts after 10 identical
     # calls with identical results or 10 laps of an identical cycle, any tool but pollers;
     # that last limit is raised from Hermes's 5 so polling a job with `terminal` is not stopped.
@@ -220,7 +225,7 @@ class HermesCli:
     """``hermes config`` and ``hermes cron`` against one profile home.
 
     Every call runs with ``HERMES_HOME`` set to the profile so Hermes edits that profile's
-    ``config.yaml`` and cron store. Verified against Hermes v0.21.6: ``config get <key> --json``
+    ``config.yaml`` and cron store. Verified against Hermes v0.22.6: ``config get <key> --json``
     prints the resolved value as JSON; ``config set <key> <value>`` keeps a string-typed setting's
     text verbatim and parses a JSON list or mapping literal; ``config unset <key>`` exits 1 with
     "Config key not set" when the user's file has no such key.
@@ -235,10 +240,12 @@ class HermesCli:
         self.env = {**env, "HERMES_HOME": str(profile)}
         self.run = run
 
-    def _call(self, *args: str) -> subprocess.CompletedProcess:
+    def _call(self, *args: str, **run_options: Any) -> subprocess.CompletedProcess:
         argv = [self.hermes, *args]
         try:
-            return self.run(argv, env=self.env, capture_output=True, text=True, check=False)
+            return self.run(
+                argv, env=self.env, capture_output=True, text=True, check=False, **run_options
+            )
         except FileNotFoundError as exc:
             raise PrepareError(f"hermes executable not found: {self.hermes}") from exc
 
@@ -271,6 +278,14 @@ class HermesCli:
         if _key_not_set(result):
             return False
         raise _failed(result)
+
+    def request_prompt_refresh(self) -> None:
+        """Ask every session in this profile to rebuild its system prompt on its next turn."""
+        result = self._call(
+            "sessions", "refresh-prompts", "--json", timeout=PROMPT_REFRESH_TIMEOUT_S
+        )
+        if result.returncode != 0:
+            raise _failed(result)
 
 
 class HermesConfig(HermesCli):
@@ -676,6 +691,9 @@ def prepare(
         actions.extend(migrate_orchestrator_model(cli, ws, profile.name))
         if not check:
             actions.append(retire_watcher_job(profile))
+    actions.extend(
+        refresh_frozen_sessions(profile, source, cli.request_prompt_refresh, check=check)
+    )
 
     if check:
         actions.extend(cli.planned)

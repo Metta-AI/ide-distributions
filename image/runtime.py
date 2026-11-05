@@ -144,7 +144,7 @@ async def run(stack: AsyncExitStack) -> None:
             )
         report("profile_install", phase_started, role=role)
         profile_env = {**common, "HERMES_HOME": str(home)}
-        # The watcher reads the gateway key from its profile dotenv, not its cron environment.
+        # The watcher reads the gateway key from its profile dotenv.
         dotenv = home / ".env"
         dotenv.write_text(
             "".join(

@@ -16,8 +16,10 @@ metta changes); the build decisions are in `docs/plans/ide-profile-refactor/00-o
   folder it was given with `--source`. A writable checkout would let an agent change the store
   library or the watcher (design Q24); `workspace.doctor` reports whether the core path is
   writable.
-- Hermes v0.21.6 or later with its interpreter at a fixed path. The plugin, `prepare.py` and the
-  watcher launcher are stdlib-only Python and run under that interpreter.
+- Hermes v0.22.6 or later, the version `image/Dockerfile` and CI pin, with its interpreter at a
+  fixed path. Older versions have no `hermes sessions refresh-prompts`, so a release would not reach
+  open chats ("Open chats after a release"). The plugin, `prepare.py` and the watcher launcher are
+  stdlib-only Python and run under that interpreter.
 - `uv`, `git`, and the toolchains Coworld mixins declare (today: none shipped; a mixin may ask
   for another Python or Nim, which `prepare.py`/setup install under `$IDE_WORKSPACE/tools/`).
 
@@ -49,15 +51,52 @@ when you call the script). With `IDE_WORKSPACE` unset the workspace defaults to
    (Hermes applies a per-model entry over the rules for every model, so route a Kimi model
    differently with an entry under `provider_routing.models`);
 4. retires the Orchestrator's obsolete `watcher` cron job; `research serve` owns scheduling;
-5. builds the workspace environment with `uv sync --frozen --no-dev --project <checkout>` into
+5. moves open chats onto this release's tools and instructions when those changed (see "Open
+   chats after a release");
+6. builds the workspace environment with `uv sync --frozen --no-dev --project <checkout>` into
    `$IDE_WORKSPACE/tools/venv`, or verifies a prebuilt one named by `IDE_WORKSPACE_ENV` against
    the lock's sha256;
-6. on a fresh Orchestrator workspace with `IDE_DEFAULT_COWORLD` set, registers and activates that
-   Coworld so its setup wake runs before the first chat.
 
-`--check` prints what it would change and writes nothing. The 300-second budget hosting gives
-the script holds when the workspace environment is prebuilt; a first `uv sync` takes a few
-minutes and should happen at image build (then set `IDE_WORKSPACE_ENV`).
+`--check` prints what it would change and writes nothing. A first `uv sync` takes minutes, so
+it belongs at image build: `image/Dockerfile` does that and sets `IDE_WORKSPACE_ENV`.
+
+### Open chats after a release
+
+Hermes resends what a session first sent, so the provider's prompt cache stays valid: the tool
+definitions (`sessions.tool_names`) and the system prompt (`sessions.system_prompt_hash`). It
+replaces stored tool definitions only when its own build changes, so a release of this
+repository does not reach an open chat by itself, and compaction does not fix that: a real
+compaction by the gateway left both stale. A chat could then keep a schema the deployed validators
+refuse.
+
+`prepare.py` closes this (`core/src/research_core/frozen_sessions.py`). It hashes what the release
+freezes into a session: the role's tool schemas, the profile's installed `SOUL.md`, the plugin code behind the two prompt
+sections and, for each shipped `SKILL.md`, its path and frontmatter (the prompt's skill index reads nothing
+else, so editing a skill's body does not count). The hash is kept in the profile's `state.db` (`state_meta`, key
+`ide_distribution.agent_surface`). When the hash differs, it runs `hermes sessions refresh-prompts`
+and sets `tool_names` to NULL on every session; each session's next turn sends and stores the
+current tools and a rebuilt prompt, and keeps its conversation. Each chat pays one prompt-cache
+miss, on that turn. When the hash is the same, including after a commit that changes nothing
+frozen, no session is touched and the cache stays valid.
+
+- It needs no manual step and no release coordination. Every boot runs `prepare.py` for each
+  profile before the gateway starts, so each profile's own `state.db` is covered, nothing from
+  the old release is still in memory, and a workspace that slept through several releases catches up
+  at its next wake.
+- The first boot that sees sessions without a recorded hash refreshes them once. That heals
+  chats opened before this existed, and also happens on the second boot of a new workspace, because
+  a new profile has no `state.db` when `prepare.py` first runs.
+- A failed refresh does not stop the boot. `prepare.py`'s summary line says what failed, and the
+  next boot tries again. Conversations and stored tools stay as they were; a prompt rebuild may
+  already be requested, because the Hermes command commits on its own.
+- Run `prepare.py` with the gateway stopped, as the image and `tools/local_stack.py` do. On a
+  gateway still running the old release, a chat it holds in memory keeps the old tools until the
+  gateway restarts. A chat it has not loaded stores the old tools as its new pin on its next
+  turn, and since the hash is already recorded, it stays on them until a later release changes
+  the hash. Both were measured with the pinned Hermes.
+
+The Hermes behaviour this depends on is listed in the module's docstring and exercised by
+`core/tests/hermes/test_frozen_sessions_real.py`, which CI runs against the pinned image.
 
 ## Environment per profile (`.env`)
 
@@ -65,12 +104,11 @@ minutes and should happen at image build (then set `IDE_WORKSPACE_ENV`).
 |---|---|---|
 | `IDE_WORKSPACE` | hosting | The one workspace root of the sandbox, identical for every profile. It holds the workspace environment, the stores and one folder per Coworld; it must live on the durable, backed-up volume. |
 | `IDE_WORKSPACE_ENV` | hosting (optional) | A prebuilt workspace environment. |
-| `IDE_DEFAULT_COWORLD` | hosting (optional) | The Coworld a new workspace starts with. |
 | `IDE_RESEARCHER_PROFILES` | hosting | Comma-separated Researcher profile names (`researcher`, or `researcher-1,researcher-2`). |
 | `SOFTMAX_PLAYER_ID`, `SOFTMAX_PLAYER_CREDENTIAL` | hosting | The Player the workspace acts as, selected at workspace creation, and its credential. Both profiles read them. |
 | `SOFTMAX_USER_CREDENTIAL` | hosting, Orchestrator only | The user's User identity token (design B.16). Optional until provisioned; without it User-identity reads and writes are reported unavailable. It is deliberately not passed to terminal commands. |
 | `COGAMES_API_URL` | hosting | Softmax API server. |
-| `API_SERVER_KEY`, `API_SERVER_HOST`, `API_SERVER_PORT` | hosting | The Hermes API server. The watcher reads them from the Orchestrator profile's `.env` (Hermes strips the key from cron environments). **Every profile must carry the same `API_SERVER_KEY`**: Hermes authenticates `/p/<profile>/v1/runs` with that profile's key. |
+| `API_SERVER_KEY`, `API_SERVER_HOST`, `API_SERVER_PORT` | hosting | The Hermes API server. The watcher reads them from the Orchestrator profile's `.env`. **Every profile must carry the same `API_SERVER_KEY`**: Hermes authenticates `/p/<profile>/v1/runs` with that profile's key. |
 | `OPENROUTER_API_KEY` | the image (`image/inference.py`) | The OpenRouter key both profiles use. The image leases a spend-capped key from the platform (`PUT /v2/workspaces/{id}/inference`) and writes it into each profile's `.env`; outside the image, whoever runs the profiles supplies it. The model itself is not the host's concern: each profile's `config.yaml` names it, and the user changes it through `research serve` (`contract/CONTRACT.md`, "Profile models"). |
 | `IDE_INFERENCE_LEASE_FILE` | the image (`image/runtime.py`) | The lease file: the installed key's expiry, fingerprint and when it changed. Beside it, `.inference-state` records why model work is blocked and until when (`budget_exhausted` until the lease file names a new key after the daily refill, or `provider_unavailable` for a few minutes after repeated outages), plus the last failed model call. Every run start (chat, wakes, Researchers) waits while the lease is missing or the state blocks; see `core/src/research_core/inference.py`. A chat message whose run fails mid-way on the budget, a rate limit or a provider outage waits (admission status `waiting`) and resumes with a continuation prompt when the gate opens (`core/src/research_core/run_failures.py`, `contract/CONTRACT.md` "Message admissions"). Unset outside the image: always available. |
 | `IDE_PLATFORM`, `IDE_FAKE_FAULTS` | tests only | `fake` selects the platform test double. |
@@ -81,16 +119,16 @@ minutes and should happen at image build (then set `IDE_WORKSPACE_ENV`).
   wake Sessions through `POST /p/<profile>/v1/runs` and reads `GET /v1/runs/{id}`.
 - Turns must be serialised per Session, not per profile (Appendix G). The watcher never starts a
   second run on a Session that is live: it steers instead.
-- `sleep_through_jobs` must list `{"orchestrator": ["watcher"]}` so the one-minute tick never
-  blocks automatic sleep by itself. Whether the workspace *wants* to stay awake is the activity
-  probe below; *how* it goes to sleep and wakes is the cycle that follows.
+- Automatic sleep belongs to the image: its lifecycle adapter (`image/control.py`) reads
+  `has_work` from `research serve`'s `/status` and starts `research workspace sleep` after fifteen
+  minutes without work. *How* it goes to sleep and wakes is the cycle that follows.
 - Container health stays as it is: the watcher reports through its heartbeat and
   `workspace.doctor`, never through container liveness, so a broken tool cannot crash-loop.
 
 ### Coordinator and pause
 
 `research serve` is the sole native admission owner. Its periodic loop runs watcher observations;
-the cron command only persists observation requests. `task.workers` and `task.assign` let the
+no cron job is involved. `task.workers` and `task.assign` let the
 Orchestrator choose a worker and commit context, rationale, and task revision before execution.
 The workspace admission ledger records every chat, worker, continuation, and event-wake start.
 UI answers and their delivery inputs commit together; retrying the same answer returns its receipt.
@@ -98,7 +136,10 @@ UI answers and their delivery inputs commit together; retrying the same answer r
 `research workspace sleep` preserves lifecycle v1: pause admission, drain recorded workers and
 tracked processes, settle chat/wake runs, then checkpoint and flush the retained volume.
 Exit 0 authorizes the host to stop compute. Explicit Stop and fifteen-minute automatic sleep
-remain enabled. Wake clears a sleep-owned pause and the coordinator resumes drained work.
+remain enabled. Every start after a sleep is a full boot (`image/runtime.py`): `hermes profile
+update`, `prepare.py` for each profile, the gateway, then `research workspace wake`, which clears a
+sleep-owned pause so the coordinator resumes drained work. A new image therefore takes effect at
+the next wake.
 
 Steering records its target run before transport. Explicit rejection can retry safely; an ambiguous
 reply closes delivery without replay while that known run remains tracked. It does not recycle
