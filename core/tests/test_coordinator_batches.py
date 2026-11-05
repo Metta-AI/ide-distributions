@@ -109,3 +109,15 @@ def test_batch_render_preserves_small_payload_after_large_ones(tmp_path):
     assert text.count("payload cut here") == 2
     assert '"policy_version_id": "pv_c"' in text
     assert "league_a, league_b, league_c" in text
+
+
+def test_failed_tasks_share_one_wake(tmp_path):
+    """An outage can fail many Tasks at once; that must not start a management run for each."""
+    ctx = make_ctx(tmp_path)
+    with ctx.store.tx(HARNESS) as tx:
+        for task in ("T-1", "T-2", "T-3"):
+            tx.event("task.failure_review", task, {"task": task, "what_failed": f"{task} broke"})
+    coordinator(ctx).advance_events(ctx)
+    dispatch_inputs(ctx)
+    [run] = ctx.hermes.runs.values()
+    assert all(f"{task} broke" in run.input for task in ("T-1", "T-2", "T-3"))
