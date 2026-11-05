@@ -21,7 +21,8 @@ metta changes); the build decisions are in `docs/plans/ide-profile-refactor/00-o
   open chats ("Open chats after a release"). The plugin, `prepare.py` and the watcher launcher are
   stdlib-only Python and run under that interpreter.
 - `uv`, `git`, and the toolchains Coworld mixins declare (today: none shipped; a mixin may ask
-  for another Python or Nim, which `prepare.py`/setup install under `$IDE_WORKSPACE/tools/`).
+  for another Python, which setup and the watcher install under `$IDE_WORKSPACE/tools/`; any
+  other kind, such as Nim, is installed there by hand).
 
 ## Install and prepare
 

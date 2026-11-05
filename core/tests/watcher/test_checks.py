@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from research_core import gitops
+from research_core import coworld_setup, gitops
 from research_core.platform.fake import FakePlatform
 from research_core.store import capabilities, coworlds, notices, sessions, tasks
 from research_core.store.actors import Actor
@@ -290,3 +290,19 @@ def test_real_platform_skips_the_upload_once_verified(tmp_path):
     assert capabilities.read(ctx.store, "upload")["status"] == "ok"
     assert len(ctx.platform.snapshot()["policies"]) == 1
     sessions.read(ctx.wstore, "nobody")  # the workspace store is untouched by the checks
+
+
+def test_a_full_check_installs_the_mixin_toolchains(tmp_path, monkeypatch):
+    ctx = make_ctx(tmp_path)
+    setup_code_repo(ctx)
+    declared = []
+
+    def install(workspace, toolchains):
+        declared.append(toolchains)
+        return {"toolchains": [], "problems": []}
+
+    monkeypatch.setattr(coworld_setup, "install_toolchains", install)
+
+    checks.mixin_checks(ctx)
+
+    assert len(declared) == 1

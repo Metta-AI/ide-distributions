@@ -1674,8 +1674,7 @@ HARD = [
         "hard-repair-complete",
         "Repair: evaluate is broken",
         "The evaluate capability was broken. You fixed the mixin's command, committed it as "
-        "3f2a9c1, reran it until it passed, asked for a check, and workspace.capabilities now "
-        "shows evaluate ok. All that remains is to finish.",
+        "3f2a9c1 and reran it until it passed. All that remains is to finish.",
         ("task.complete",),
         (
             "repair",

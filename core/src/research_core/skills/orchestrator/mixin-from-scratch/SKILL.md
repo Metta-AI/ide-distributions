@@ -16,7 +16,7 @@ comes from the source with a citation, never from memory.
   the workspace's), `coworld_version`, `commands {build, check, upload, evaluate}`, `metrics`
   (name, direction `up` or `down`, role `primary` or `guardrail`, `min_effect`,
   `minimum_episodes`), `artifact {kind: file, path}`, `evidence_types`, `toolchains` (another
-  runtime, such as a Nim or Python version, with a URL and sha256) and `cost_per_episode`. The
+  Python, `{kind: python, version}`; `environment` skill) and `cost_per_episode`. The
   prose after it: identity, provenance (source URL, commit, date), the skill manifest, what else
   the mixin provides.
 - Five binding skills under `skills/`, each named `<coworld>-<binding>`: `survey` (what a batch

@@ -1,11 +1,12 @@
 """Step 9: tool checks and repair Tasks (design B.15, B.14; amendments A3.2, A3.4, A4.1, A7.8).
 
 When a check runs. A *full* check is due when none ran yet, when the last one is a day old,
-when a tool marked them due (``workspace.capabilities {check: true}`` writes the Coworld store's
-meta ``checks_due``) or when the release changed (meta ``checks_version`` differs from
-``research_core.__version__``). A *quick* check (logins and CLIs, no builds) is due an hour
-after the last one or when a Session started since it (A3.4: the briefing never runs checks, it
-reads what this step stored). A full run also counts as a quick one.
+when something marked them due (``workspace.capabilities {check: true}``, or a merge while a
+capability is broken, writes the Coworld store's meta ``checks_due``) or when the release
+changed (meta ``checks_version`` differs from ``research_core.__version__``). A *quick* check
+(logins and CLIs, no builds) is due an hour after the last one or when a Session started since
+it (A3.4: the briefing never runs checks, it reads what this step stored). A full run also
+counts as a quick one.
 
 What is checked, each a capability row (``capabilities.mark``):
 
@@ -20,7 +21,8 @@ What is checked, each a capability row (``capabilities.mark``):
   never a broken capability);
 * credits: ``platform.credits`` into the Coworld store's meta ``credits`` for the briefing (a
   fact, not a capability);
-* full runs only: the mixin's ``build``, ``check`` and ``evaluate`` commands in a temporary
+* full runs only: the mixin's toolchains are installed, then its ``build``, ``check`` and
+  ``evaluate`` commands run in a temporary
   worktree of ``main`` (``evaluate`` on downloaded results under ``documents/xp`` when there are
   any, else skipped with "no results to evaluate"), and ``upload``: the mixin's own ``upload``
   command if it has one, then the starter artifact is sent through ``upload_file_policy`` as the
@@ -66,7 +68,7 @@ from research_core.store._common import now_iso, parse_display_id, parse_iso
 from research_core.store.db import Store
 from research_core.store.errors import StoreError
 from research_core.tools.base import PLAYER_ID_META
-from research_core.watcher.merge import temporary_worktree
+from research_core.watcher.merge import CHECKS_DUE, install_toolchains, temporary_worktree
 from research_core.watcher.resume import emit_event
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -78,7 +80,6 @@ QUICK_INTERVAL = timedelta(hours=1)
 CHECKS_AT = "checks_at"
 CHECKS_QUICK_AT = "checks_quick_at"
 CHECKS_VERSION = "checks_version"
-CHECKS_DUE = "checks_due"
 CREDITS_KEY = "credits"
 CLI_VERSIONS_KEY = "cli_versions"
 REPAIR_FAILURES = "repair_failures:"
@@ -271,6 +272,7 @@ def mixin_checks(ctx: TickContext) -> tuple[list[dict[str, Any]], mixin_module.M
         output = "MIXIN.md is not usable: " + "; ".join(error.problems)
         return [_result("build", "command", False, output, capability="build")], None
     results: list[dict[str, Any]] = []
+    install_toolchains(ctx, loaded)
     main_sha = _main_sha(code)
     with temporary_worktree(code, coworld.worktrees / CHECK_WORKTREE, main_sha) as tree:
         for name in ("build", "check"):
