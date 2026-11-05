@@ -41,6 +41,7 @@ OPENING = re.compile(r"`([A-Za-z_0-9]+)(?:\.([A-Za-z_0-9]+))?\s*\{")
 # Names (one field, or alternatives joined by ``|``), then a ``: value`` or a ``{keys}``.
 ITEM = re.compile(r"([a-z_]+\??(?:\s*\|\s*[a-z_]+\??)*)\s*(?::\s*(.*)|(\{.*\}))?", re.DOTALL)
 NAME = re.compile(r"[a-z_]+")
+QUOTED_VALUE = re.compile(r'"[^"]*"')
 FRAGMENT = "..."
 # The role that reads each folder or file; anything not listed here is read by both, or is shared
 # text that may show one role's call.
@@ -195,6 +196,8 @@ def _field_problems(label: str, body: str, properties: dict, required) -> tuple[
             unknown.append(f"{label}: cannot read {item!r}")
             continue
         names = NAME.findall(match[1])
+        if (match[2] or "").startswith('"') and not QUOTED_VALUE.fullmatch(match[2].strip()):
+            unknown.append(f"{label}: text after the quoted value in {item!r}")
         for name in names:
             # ``c?`` and ``d | e`` both let a reader leave the name out, so neither supplies it.
             if len(names) == 1 and "?" not in match[1]:
@@ -347,6 +350,12 @@ def test_unusual_spelling_does_not_escape_the_scan(text):
 
 def test_keys_on_a_field_that_is_not_an_object_are_found():
     assert "not an object" in problems_with(only("`claim.search {query {typo}}`"))[0][0]
+
+
+def test_a_missing_comma_after_a_quoted_value_is_found():
+    assert (
+        "text after the quoted" in problems_with(only('`claim.search {query: "a" typo: 3}`'))[0][0]
+    )
 
 
 def test_a_required_key_left_out_is_found():

@@ -353,16 +353,14 @@ def test_a_goal_with_null_tags_is_valid_as_production_takes_it():
     assert judged(args, case) == ("valid", "")
 
 
-def test_a_failed_poll_still_stops_the_run_and_counts_as_a_host_error(monkeypatch):
+def test_a_gateway_that_stops_answering_leaves_a_host_error_result(monkeypatch):
     runs = FinishedRun("completed", GOOD_CLAIM)
     monkeypatch.setattr(runs, "session_messages", raise_unavailable)
+    monkeypatch.setattr(runs, "status", raise_unavailable)  # the stop finds it gone too
     gateway = RealGateway(Path("/"), Path("h"), "k", "m", runs=runs)
-    stopped = []
     monkeypatch.setattr(gateway, "open_session", lambda role: "s")
-    monkeypatch.setattr(gateway, "_stop_and_wait", lambda role, run_id: stopped.append(run_id))
     monkeypatch.setattr(gateway, "_billed_replies", lambda *_: [])
     assert gateway.run_case("m", CLAIM_WRITE).outcome == "host_error"
-    assert stopped == ["r"]
 
 
 def test_the_detour_limit_applies_before_a_later_judged_call():

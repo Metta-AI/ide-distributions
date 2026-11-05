@@ -22,7 +22,7 @@ No ``research serve`` runs: its coordinator would start Researchers for the Task
 create, and a chat turn reaches the gateway the same way. Each case gets its own Coworld with
 freshly seeded records (``seed_records``). Sharing one lets runs answer each other: with a shared
 store a repeat of the claim case rightly finds the earlier run's claim and writes nothing, which
-measured 0/5 on correct behaviour. Workspace records are still shared, so a case that writes one
+measured 0/5 on correct behaviour. Workspace records and settings are still shared, so a case that writes one
 (``<run>`` in its instruction) is made different for each run.
 """
 
@@ -105,7 +105,8 @@ ORCHESTRATOR_CASES = [
         "add",
         "From now on, never submit to league L-<run> without asking me first.",
     ),
-    Case("orchestrator", "settings", "update", "Set max_researchers to 2, please."),
+    # A number of its own per run: asking for the value already set leaves nothing to change.
+    Case("orchestrator", "settings", "update", "Set max_researchers to <run>, please."),
     Case("orchestrator", "ui", "notify", write_actions.UI_NOTIFY),
 ]
 RESEARCHER_CASES = [
@@ -358,14 +359,18 @@ class RealGateway:
         return result
 
     def _stop_and_wait(self, role: str, run_id: str) -> None:
-        """Stop the run and let it end, so its usage is stored before it is read."""
-        if not self.runs.status(run_id, profile=role).terminal:
-            self.runs.stop(run_id, profile=role)
-        deadline = time.monotonic() + STOP_TIMEOUT_S
-        while not self.runs.status(run_id, profile=role).terminal:
-            if time.monotonic() > deadline:
-                return
-            time.sleep(POLL_S)
+        """Stop the run and let it end, so its usage is stored before it is read. A gateway that
+        no longer answers has nothing left to stop."""
+        try:
+            if not self.runs.status(run_id, profile=role).terminal:
+                self.runs.stop(run_id, profile=role)
+            deadline = time.monotonic() + STOP_TIMEOUT_S
+            while not self.runs.status(run_id, profile=role).terminal:
+                if time.monotonic() > deadline:
+                    return
+                time.sleep(POLL_S)
+        except RunsUnavailable:
+            return
 
     def _judge_new_calls(self, case: Case, stored: list[dict], result: harness.Result) -> bool:
         """True when the judged call was found or there were too many other calls first."""
