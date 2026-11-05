@@ -3,7 +3,8 @@
 The container's bootstrap names this script's port as the platform, and the orchestrator's
 model points at its scripted OpenRouter mirror, so the round trip needs no credentials: lease,
 legacy status, then session.open -> chat.send -> chunks -> chat.finished -> chat.history over
-the AIDE backend socket.
+the AIDE backend socket, then the same request's record and events read again over the socket the
+backend opens after the platform drops the first one.
 """
 
 import asyncio
@@ -135,6 +136,7 @@ async def main() -> None:
         sent = {"session_id": session["id"], "scope": WORKSPACE}
         sent["messages"] = [{"role": "user", "content": "Say something."}]
         accepted = await request("chat.send", sent)
+        request_id = accepted["request_id"]
         assert accepted["accepted"] is True, accepted
         while not any(note["method"] == "chat.finished" for note in notes):
             frame = json.loads((await relay.receive()).data)
@@ -147,7 +149,25 @@ async def main() -> None:
         history = await request("chat.history", {"session_id": session["id"], "scope": WORKSPACE})
         roles = [(i["message"]["role"], i["message"]["content"]) for i in history["items"]]
         assert ("user", "Say something.") in roles and ("assistant", "".join(REPLY)) in roles, roles
-    print("PASS AIDE session.open, chat.send, chunks, chat.finished and chat.history", flush=True)
+        print(
+            "PASS AIDE session.open, chat.send, chunks, chat.finished and chat.history", flush=True
+        )
+
+        # Reads are authoritative: a new backend socket reads what the first one pushed.
+        await relay.close()
+        relay = await backend.get()
+        target = {"session_id": session["id"], "request_id": request_id, "scope": WORKSPACE}
+        read = await request("chat.events", target | {"after": {"attempt": 0, "seq": 0}})
+        pushed = [n["params"]["event"] for n in notes if n["method"] == "chat.event"]
+        assert read["events"] == pushed and read["done"] is True, (read, pushed)
+        assert read["next"] == finished["cursor"], (read, finished)
+        got = {"resource": "requests", "id": request_id, "scope": WORKSPACE}
+        item = (await request("state.get", got))["item"]
+        assert (item["status"], item["revision"]) == ("completed", finished["revision"]), item
+    print(
+        "PASS AIDE request record and chat.events read again after the socket is replaced",
+        flush=True,
+    )
     done.set()
     for runner in runners:
         await runner.cleanup()
