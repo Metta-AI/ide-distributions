@@ -119,7 +119,7 @@ def test_a_repeat_after_the_gateway_died_returns_the_earlier_result(ctx, monkeyp
     apply(ctx)  # the coordinator finishes the accepted command while the gateway restarts
     retried = call(ctx, CREATE)
     assert retried["ok"] and retried["record"]["id"] == "T-1"
-    assert "not done again" in retried["repeat_of_earlier_call"]
+    assert "did nothing" in retried["repeat_of_earlier_call"]
     assert count(ctx, "tasks") == 1
 
 

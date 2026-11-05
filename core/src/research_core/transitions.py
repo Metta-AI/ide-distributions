@@ -28,8 +28,8 @@ PENDING_NEXT_STEP = (
     "with the same fields: that will not do it twice."
 )
 REPEAT_NOTE = (
-    "An earlier identical call already did this; it was not done again. Do not call again unless "
-    "you want it done a second time."
+    "This call did nothing: an earlier identical call already did it, once. If you are retrying, "
+    "you are done. If you want it done a second time, make this same call again and it will run."
 )
 
 CommandState = Literal["pending", "applied", "refused"]

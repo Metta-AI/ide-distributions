@@ -155,4 +155,3 @@ def test_a_frozen_schema_may_still_send_them_on_the_actions_that_took_them():
     assert validate_args(task, "orchestrator", args)[1] == []
     _, problems = validate_args(task, "orchestrator", {"action": "list", "operation_id": "value"})
     assert problems == ["operation_id is not a field of list"]
-
