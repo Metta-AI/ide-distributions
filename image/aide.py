@@ -243,11 +243,20 @@ class Resolution(BaseModel):
     status: str
 
 
-class Pending(Closed):
+class ApprovalInput(Closed):
     request_id: str
     prompt: str
-    kind: Literal["approval", "clarification"]
-    choices: list[Literal["once", "deny"]] | None = None
+    kind: Literal["approval"] = "approval"
+    choices: list[Literal["once", "deny"]]
+
+
+class ClarificationInput(Closed):
+    request_id: str
+    prompt: str
+    kind: Literal["clarification"] = "clarification"
+
+
+Pending = ApprovalInput | ClarificationInput
 
 
 class Session(Closed):
@@ -425,13 +434,16 @@ class Backend:
                 raise Refusal("unavailable", response.text)
             for control in RunState.model_validate_json(response.content).pending_controls:
                 identity = f"aide-input:{session_id}:{run_id}:{control.execution_generation}"
-                pending = Pending(
-                    request_id=str(uuid5(NAMESPACE_URL, f"{identity}:{control.prompt_id}")),
-                    kind="approval" if control.kind == "approval" else "clarification",
-                    prompt=control.description or control.command or control.question,
-                    choices=[c for c in control.choices if c in {"once", "deny"}]
+                request_id = str(uuid5(NAMESPACE_URL, f"{identity}:{control.prompt_id}"))
+                prompt = control.description or control.command or control.question
+                pending = (
+                    ApprovalInput(
+                        request_id=request_id,
+                        prompt=prompt,
+                        choices=[c for c in control.choices if c in {"once", "deny"}],
+                    )
                     if control.kind == "approval"
-                    else None,
+                    else ClarificationInput(request_id=request_id, prompt=prompt)
                 )
                 found.append((pending, run_id, control))
         return found
