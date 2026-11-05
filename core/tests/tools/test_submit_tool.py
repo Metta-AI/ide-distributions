@@ -37,7 +37,7 @@ def merged_version(lab: Lab, summary="Merged", patience=7) -> dict:
     return lab.upload(record["id"])["record"]
 
 
-def confirm_experiment(lab: Lab, candidate: str, baseline: str, effect: float) -> dict:
+def started_experiment(lab: Lab, candidate: str | None, baseline: str) -> dict:
     created = experiments.create(
         lab.store,
         HARNESS,
@@ -57,13 +57,17 @@ def confirm_experiment(lab: Lab, candidate: str, baseline: str, effect: float) -
         },
     )
     experiments.start(lab.store, HARNESS, created["id"])
+    return created
+
+
+def close_confirmed(lab: Lab, experiment: str, effect: float) -> dict:
     experiments.add_run(
-        lab.store, HARNESS, created["id"], kind="xp", platform_request_id="xreq_1", arm="pair"
+        lab.store, HARNESS, experiment, kind="xp", platform_request_id="xreq_1", arm="pair"
     )
     return experiments.close(
         lab.store,
         HARNESS,
-        created["id"],
+        experiment,
         verdict="confirmed",
         measurements=[
             {
@@ -77,6 +81,10 @@ def confirm_experiment(lab: Lab, candidate: str, baseline: str, effect: float) -
         interpretation="the candidate is better",
         reason_codes=["primary_significant"],
     )
+
+
+def confirm_experiment(lab: Lab, candidate: str, baseline: str, effect: float) -> dict:
+    return close_confirmed(lab, started_experiment(lab, candidate, baseline)["id"], effect)
 
 
 # --- basics --------------------------------------------------------------------------------
@@ -173,6 +181,21 @@ def test_submit_autonomous_quality_bar(lab):
         "Submitted V-3 to Fake League" in n["text"]
         for n in notices.unread(lab.wstore, coworld_id="cow_fake")
     )
+
+
+def test_the_quality_bar_passes_on_the_version_built_for_the_experiment(lab):
+    """The prescribed path: the candidate stays empty at start and the build fills it."""
+    starter = merged_version(lab, "Starter", patience=6)
+    assert lab.submit(starter["id"], user_requested=True, cites="msg-1")["status"] == "champion"
+    experiment = started_experiment(lab, None, starter["id"])["id"]
+    commit_policy(lab.code, 3, 8, "On main")
+    candidate = lab.upload(lab.create("Candidate", experiment=experiment)["id"])["record"]
+    close_confirmed(lab, experiment, effect=1.0)
+    assert lab.submit(candidate["id"])["ok"] is True
+
+    # A Version not built for it gets nothing from it.
+    other = merged_version(lab, "Unrelated", patience=9)
+    assert any("no confirmed Experiment" in r for r in lab.submit(other["id"])["problems"])
 
 
 def test_submit_autonomous_without_champion_runs_the_check(lab):
