@@ -33,11 +33,11 @@ does.
 `task.create {goal, type, title, description, reasoning, for_human, end_condition, end_detail,
 priority, depends_on, experiment}`. `description` says what to do and deliver; `reasoning` why,
 with claim and Experiment ids; `for_human` is one plain sentence clients show. Order Tasks with
-`depends_on` or `task.link`. A Task can be edited only before it is claimed, and an edit clears
-its approval.
+`depends_on` or `task.link`. You have no edit action; the user can edit a Task before it is claimed.
 
 Inspect profiles with `task.workers`. Assign with `task.assign`: profile, context, rationale.
-Retry unchanged after uncertainty. Release stops the worker before rescheduling. Review failed recovery before reopening.
+Retry unchanged after uncertainty. Release stops the worker before rescheduling. Review failed
+recovery before reopening.
 
 ## Proposals
 
