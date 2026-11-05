@@ -9,7 +9,7 @@ description: Use when unsure about paths, environments, CLIs or limits.
 
 ## What the guide covers
 
-Where you are (the workspace root and the session's Coworld's folder), the image and source commits, the two Python environments, writable and read-only paths, credentials and identities, the CLIs and their versions, how to reach the user, sleep and wake, resource limits, and the last capability check with its age. `workspace.doctor` adds health facts and problems: the watcher heartbeat, store checks, CLI staleness against the lock, stale skill overrides.
+Where you are, the image and source commits, the two Python environments, writable and read-only paths, identities, the CLIs, how to reach the user, sleep and wake, limits, and the last capability check. `workspace.doctor` adds the watcher heartbeat, store checks, CLI staleness and stale skill overrides.
 
 ## Two Python environments
 
@@ -19,8 +19,9 @@ Where you are (the workspace root and the session's Coworld's folder), the image
 
 ## Writable and read-only
 
-- Writable: everything in the session's Coworld's folder except its bookkeeping: `code/` (commit on a branch in a worktree, never on `main` directly), `documents/` (your files; command logs under `documents/logs/`, artifacts, replays and measurements), `worktrees/`, and `source/` as a clone you read but do not edit.
+- Writable: everything in the session's Coworld's folder except its bookkeeping: `code/` (commit on a branch in a worktree, never on `main` directly), `documents/` (your files; command logs under `documents/logs/`, artifacts, replays and measurements; in no git repository, so never committed; kept through sleep and restarts), `worktrees/`, and `source/` as a clone you read but do not edit.
 - Read-only: the profile source checkout (plugin, store library and schema, tools, prompts, cron definitions). Report a bug there; do not patch it. `config.yaml` is writable, but `prepare.py` re-applies the protected keys.
+- Shipped skills are in that checkout, so `skill_manage` `patch` on one fails with a file system error and changes nothing, whatever the skill index says. Keep a fix as a claim tagged `lesson` and report the fault. `create` with a new name makes a skill only this profile sees, kept through sleep, restarts and releases.
 - Records live in the store and change only through the record tools; direct edits are detected and reported, and every tool returns the updated record, so nothing needs reading back.
 
 ## CLIs and identities

@@ -18,8 +18,8 @@ end your run without writing anything.
 
 ## 2. Read before working
 
-- The briefing in your system prompt: the Player, the champion, the directives, the broken
-  capabilities, your Task.
+- The briefing: your Player's id, the champion, the directives, the broken capabilities, your
+  Task.
 - `task.read {task}` for the full record, `goal.read {goal}` for the end state the work is judged
   by, `directive.list` for standing instructions on the workspace and the Goal.
 - The type's instructions (returned by the claim) and the skills they name; the mixin's

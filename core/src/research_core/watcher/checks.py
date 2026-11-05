@@ -9,8 +9,9 @@ reads what this step stored). A full run also counts as a quick one.
 
 What is checked, each a capability row (``capabilities.mark``):
 
-* ``login:player`` through ``platform.whoami("player")``; ``login:user`` only when
-  ``SOFTMAX_USER_CREDENTIAL`` is set (an absent User identity is a fact, not a failure);
+* ``login:player`` through ``platform.whoami("player")``, which also stores the Player's id as
+  the workspace store's meta ``player_id`` for the briefing and the guide; ``login:user`` only
+  when ``SOFTMAX_USER_CREDENTIAL`` is set (an absent User identity is a fact, not a failure);
 * ``cli:coworld`` and ``cli:softmax``: ``<venv>/bin/<cli> --help`` when the workspace
   environment has the binary, else the distribution installed in this interpreter (the watcher
   runs in that environment); the installed versions are compared with ``uv.lock`` of the core
@@ -59,11 +60,12 @@ from research_core import environment_guide, gitops
 from research_core import mixin as mixin_module
 from research_core.platform import credits as credits_module
 from research_core.platform.errors import PlatformError
-from research_core.platform.protocol import with_retries
+from research_core.platform.protocol import WhoAmI, with_retries
 from research_core.store import capabilities, coworlds, notices, tasks
 from research_core.store._common import now_iso, parse_display_id, parse_iso
 from research_core.store.db import Store
 from research_core.store.errors import StoreError
+from research_core.tools.base import PLAYER_ID_META
 from research_core.watcher.merge import temporary_worktree
 from research_core.watcher.resume import emit_event
 
@@ -185,7 +187,7 @@ def login_checks(ctx: TickContext) -> list[dict[str, Any]]:
         _platform_check(
             "login:player",
             "GET /whoami (player)",
-            lambda: ctx.platform.whoami("player"),
+            lambda: _read_player(ctx),
             lambda who: f"{who.kind} {who.subject_id}",
         )
     ]
@@ -199,6 +201,14 @@ def login_checks(ctx: TickContext) -> list[dict[str, Any]]:
             )
         )
     return results
+
+
+def _read_player(ctx: TickContext) -> WhoAmI:
+    """``whoami``, keeping the Player's id for the briefing and the guide, which cannot ask."""
+    who = ctx.platform.whoami("player")
+    if who.kind == "player" and who.subject_id:
+        ctx.wstore.set_meta(PLAYER_ID_META, who.subject_id)
+    return who
 
 
 def cli_checks(ctx: TickContext) -> tuple[list[dict[str, Any]], dict[str, Any]]:

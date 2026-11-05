@@ -9,8 +9,8 @@ env_requires:
     required: true
     description: OpenRouter API key for the model.
   - name: SOFTMAX_PLAYER_ID
-    required: true
-    description: The Player this workspace acts as (selected when the workspace was created).
+    required: false
+    description: The id of the Player this workspace acts as. Without it, the platform's whoami answers.
   - name: SOFTMAX_PLAYER_CREDENTIAL
     required: true
     description: >-

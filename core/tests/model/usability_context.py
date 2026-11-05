@@ -146,6 +146,7 @@ BRIEFING = (
     BRIEFING_HEADING
     + """
 Workspace: Coworld cow_cogs; paused: no; watcher heartbeat just now; credits: 840.0
+Your Player: id ply_cogs
 Capability check: 4 minutes ago; 7 of 7 ok
 User identity: available
 Directives (2 active, the user's standing instructions):
@@ -167,6 +168,7 @@ NO_COWORLD_BRIEFING = (
     BRIEFING_HEADING
     + """
 Workspace: Coworld none; the frontend must open a session for a Coworld; paused: no; watcher heartbeat just now; credits: unknown
+Your Player: id ply_cogs
 User identity: available
 Directives: none active
 No session Coworld: open a Coworld session to access game work."""

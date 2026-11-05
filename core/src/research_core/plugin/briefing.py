@@ -1,10 +1,10 @@
 """The briefing prompt section (design §9, Appendix H; amendments A3.3, A3.4, A7.3, A7.8).
 
-A computed status summary in every Session's system prompt: the workspace status, the last
-capability check and what is broken, the active directives, the champion and recent Versions, this
-Session's Task, the active Goals, any older preference claims (A3.10) and recent claims tagged
-with active Goals. Every item is one line with references, so the agent reads the record it needs
-with the record tools.
+A computed status summary in every Session's system prompt: the workspace status, the Player's
+id, the last capability check and what is broken, the active directives, the champion and recent
+Versions, this Session's Task, the active Goals, any older preference claims (A3.10) and recent
+claims tagged with active Goals. Every item is one line with references, so the agent reads the
+record it needs with the record tools.
 
 It is a snapshot. Hermes renders it when it builds a Session's prompt, then stores and replays that
 prompt. Only two things render it again: a compaction inside a live agent's turn, and a refresh
@@ -24,8 +24,8 @@ and the rest still renders. No store path appears (B.10). Stdlib only: it render
 Watcher bookkeeping read from ``meta`` (the watcher and the doctor write these keys):
 
 - workspace store: ``heartbeat`` (ISO time of the last tick), ``has_work`` (``true`` or
-  ``false``), ``cli_versions`` (JSON ``{"<cli>": {"installed", "lock"}, "lock_refreshed":
-  "<date>"}``, A7.8);
+  ``false``), ``player_id`` (from the login check; ``SOFTMAX_PLAYER_ID`` wins), ``cli_versions``
+  (JSON ``{"<cli>": {"installed", "lock"}, "lock_refreshed": "<date>"}``, A7.8);
 - Coworld store: ``checks_at`` (ISO time of the last capability check), ``credits`` (JSON
   ``{"balance", "held"?, "next_refill"?}`` from that check), ``stale_overrides`` (JSON list of
   skill names whose upstream changed, A7.3), ``league_versions`` (one line from champion sync
@@ -228,8 +228,12 @@ def _workspace_status(inputs: Inputs) -> Section:
             watcher += ", work pending"
     else:
         watcher = "no heartbeat yet: background work is not running"
+    player = inputs.ctx.player_id()
     lines = [
-        f"Workspace: Coworld {coworld}; paused: {paused}; {watcher}; credits: {_credits(inputs)}"
+        f"Workspace: Coworld {coworld}; paused: {paused}; {watcher}; credits: {_credits(inputs)}",
+        f"Your Player: id {player}"
+        if player
+        else "Your Player: id not known yet; platform.results gives it",
     ]
     stale = _cli_staleness(inputs.wstore)
     if stale:

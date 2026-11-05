@@ -237,6 +237,12 @@ def test_task_failed_for_an_ordinary_task_is_not_counted(tmp_path):
     assert result["skipped"].endswith("is not a repair Task")
 
 
+def test_the_login_check_keeps_the_player_id_for_the_briefing(tmp_path):
+    ctx = fake_ctx(tmp_path)
+    checks.login_checks(ctx)
+    assert ctx.wstore.get_meta("player_id") == "ply_fake"
+
+
 def test_platform_down_breaks_the_login_and_leaves_the_coworld_unset(tmp_path):
     ctx = fake_ctx(tmp_path)
     setup_code_repo(ctx)
@@ -251,6 +257,7 @@ def test_platform_down_breaks_the_login_and_leaves_the_coworld_unset(tmp_path):
     assert repairs == {"login:player", "upload"}
     assert coworlds.read(ctx.wstore, "cow_fake")["set_up_at"] is None
     assert ctx.store.get_meta("credits") is None
+    assert ctx.wstore.get_meta("player_id") is None
     login = capabilities.read(ctx.store, "login:player")
     assert "status 503" in login["output"] and "GET /whoami" in login["command"]
 
