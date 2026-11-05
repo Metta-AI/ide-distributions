@@ -197,3 +197,15 @@ def test_output_middleware_caps_reservations_and_preserves_smaller_requests(key)
         result = bound_output_request(request=request, provider="openrouter")
         assert result["request"][key] == expected
         assert request[key] == requested
+
+
+@pytest.mark.parametrize(
+    "body, key", [({"messages": []}, "max_tokens"), ({"input": []}, "max_output_tokens")]
+)
+def test_output_middleware_sets_limit_when_native_request_omits_it(body, key):
+    from research_core.plugin.inference_hook import bound_output_request
+
+    request = {"model": "moonshotai/kimi-k3.1-pro", **body}
+    result = bound_output_request(request=request, provider="openrouter")
+    assert result["request"] == {**request, key: 16384}
+    assert key not in request
