@@ -4,3 +4,6 @@
 **/.pytest_cache
 **/.ruff_cache
 **/local
+
+# Generated from the canonical publication; never a maintained second specification.
+/contract/aide/1.0.0/asyncapi.json

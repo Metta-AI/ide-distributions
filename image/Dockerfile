@@ -29,6 +29,7 @@ RUN bash /opt/distribution/image/install-native-attachments.sh \
     && rm -rf /tmp/uv-cache
 COPY image/workspace-path.sh /etc/profile.d/workspace-path.sh
 COPY contract /opt/distribution/contract
+RUN /opt/hermes/.venv/bin/python /opt/distribution/image/fetch-aide-contract.py
 # Hosted workspaces use the built-in API transport. Keep other bundled plugins,
 # without discovering messaging adapters in the host or either profile.
 RUN mkdir /opt/workspace-plugins \

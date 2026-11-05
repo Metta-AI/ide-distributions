@@ -6,3 +6,6 @@ __pycache__/
 .ruff_cache/
 local/
 .DS_Store
+
+# Generated from the canonical publication; never a maintained second specification.
+/contract/aide/1.0.0/asyncapi.json

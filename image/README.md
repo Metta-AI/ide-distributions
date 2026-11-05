@@ -208,15 +208,18 @@ workspace explicitly declares `application_protocol: "aide.1.0.0"`; it opens
 That selected mode accepts only lifecycle controls on the old connection; application envelopes
 return 410. Errors never select another protocol. `research serve /health` reports the actual
 `application_protocol`, and reports `aide_protocol_version` only when canonical is selected.
-The bundled contract under `contract/aide/1.0.0` validates canonical requests and results.
+The image build downloads the canonical schema from its public Softmax publication and checks the
+SHA-256 and version in `contract/aide/1.0.0/contract-source.json` before bundling it. A changed or
+unavailable publication fails the build. Runtime validation uses only the bundled file; it never fetches
+a schema. The source commit, OpenAI provenance and license remain beside the generated schema.
 
 The hosting server owns enrollment. AIDE adoption backfills missing durable legacy receipts
 idempotently, preserving existing records and identities. Its retained-volume protocol marker
 refuses a later legacy bootstrap; disabling enrollment is not a storage downgrade.
 
-Normal main pushes still dispatch the existing legacy image release. Only the additional
-`autoresearch-aide` release lane is guarded by `HERMES_AIDE_RELEASE_ENABLED`, unset/OFF by default.
-The canonical lane must use its own qualified pointer; it never replaces `autoresearch`.
+Normal main pushes still dispatch the existing legacy image release, unchanged. Canonical
+qualification is an explicit manual selection through the existing release machinery and uses
+an isolated qualified pointer; it never replaces `autoresearch` or enrolls another workspace.
 
 Before cutting over a retained volume containing pre-league Coworld chat sessions, preview
 those exact records with `/opt/hermes/.venv/bin/python /opt/distribution/image/cleanup-unbound-chats.py`.

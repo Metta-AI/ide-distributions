@@ -15,7 +15,10 @@ def test_context_is_bound_to_one_session_and_survives_tool_loops(tmp_path, monke
     ctx = make_ctx(tmp_path)
     monkeypatch.setattr("research_core.plugin.executor.profile_env", lambda: ctx.env)
     sessions.register(ctx.wstore, HARNESS, session_id="s", profile="orchestrator", kind="chat")
-    prefix = context_message({"label": "café 雪"})
+    prefixes = [
+        {"role": "developer", "content": "Trusted static site instructions"},
+        context_message({"label": "café 雪"}),
+    ]
     user = {"role": "user", "content": [{"type": "text", "text": "question"}]}
     key = admissions.enqueue(
         ctx.wstore,
@@ -26,7 +29,7 @@ def test_context_is_bound_to_one_session_and_survives_tool_loops(tmp_path, monke
         text="question",
         origin="client",
     )
-    request = {"canonical_request": {"messages": [prefix, user]}}
+    request = {"canonical_request": {"messages": [*prefixes, user]}}
     with ctx.wstore.tx(HARNESS) as tx:
         tx.execute(
             "UPDATE client_admissions SET request=?,dispatch_started=1 WHERE op_id=?",
@@ -35,7 +38,7 @@ def test_context_is_bound_to_one_session_and_survives_tool_loops(tmp_path, monke
     prior = [{"role": "user", "content": "old"}, {"role": "assistant", "content": "reply"}]
     native = {"messages": [*prior, user], "model": "model"}
     projected = inject_context(request=native, session_id="s")["request"]
-    assert projected == {"messages": [*prior, prefix, user], "model": "model"}
+    assert projected == {"messages": [*prior, *prefixes, user], "model": "model"}
     assert (
         inject_context(request=native, session_id="compressed", task_id="s")["request"] == projected
     )
@@ -45,7 +48,7 @@ def test_context_is_bound_to_one_session_and_survives_tool_loops(tmp_path, monke
     tool = {"role": "tool", "tool_call_id": "call", "content": "result"}
     assert inject_context(request={"messages": [*prior, user, tool]}, session_id="s")["request"][
         "messages"
-    ] == [*prior, prefix, user, tool]
+    ] == [*prior, *prefixes, user, tool]
     record_native_message(
         session_id="compressed", task_id="s", conversation_history=[{**user, "_row_id": 73}]
     )

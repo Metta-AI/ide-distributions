@@ -119,9 +119,12 @@ def _aide_receipt_messages(request_json: str) -> str:
     from research_core.aide_messages import context_message
 
     request = json.loads(request_json)
-    messages = [request["message"]]
+    messages = []
+    if "instructions" in request and request["instructions"]:
+        messages.append({"role": "developer", "content": request["instructions"]})
     if "context" in request and request["context"] is not None:
-        messages.insert(0, context_message(request["context"]))
+        messages.append(context_message(request["context"]))
+    messages.append(request["message"])
     return json.dumps(messages, separators=(",", ":"), ensure_ascii=False)
 
 

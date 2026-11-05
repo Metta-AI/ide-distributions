@@ -120,7 +120,8 @@ async def main():
         history = await call("chat.history", {"session_id": session["id"], "scope": scope})
         assert history["items"][-1]["message"] == params["messages"][0], history
         batch = [
-            {"role": "system", "content": "Retained context"},
+            {"role": "developer", "content": "Trusted static site instructions"},
+            {"role": "user", "name": "softmax_page_context", "content": "Untrusted page data"},
             {"role": "user", "content": "Ordered batch"},
         ]
         batch_id = str(uuid4())
@@ -128,7 +129,7 @@ async def main():
             "chat.send", {"session_id": session["id"], "scope": scope, "messages": batch}, batch_id
         )
         history = await call("chat.history", {"session_id": session["id"], "scope": scope})
-        assert [item["message"] for item in history["items"][-2:]] == batch, history
+        assert [item["message"] for item in history["items"][-len(batch) :]] == batch, history
         long_batch = [
             {"role": "developer" if i < 54 else "user", "content": f"history-{i}"}
             for i in range(55)

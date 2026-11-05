@@ -480,8 +480,9 @@ def test_attempt_pointer_migration_preserves_live_authority_or_first_queued_succ
 
 @pytest.mark.parametrize("context", [None, {"label": "café 雪", "nested": {"z": 3, "a": None}}])
 @pytest.mark.parametrize("enrollment", [False, True])
+@pytest.mark.parametrize("instructions", [None, "", "   ", "Trusted static site program"])
 def test_canonical_receipts_preserve_accepted_open_and_message_identity(
-    tmp_path, context, enrollment
+    tmp_path, context, enrollment, instructions
 ):
     import json
     from uuid import NAMESPACE_URL, uuid4, uuid5
@@ -514,6 +515,7 @@ def test_canonical_receipts_preserve_accepted_open_and_message_identity(
             "session_id": "s",
             "message": message,
             "actor": "user:ide-next",
+            "instructions": instructions,
             **({"context": context} if context is not None else {}),
         }
         conn.execute(
@@ -528,7 +530,11 @@ def test_canonical_receipts_preserve_accepted_open_and_message_identity(
             with store.tx(Actor.harness()):
                 migrate.backfill_aide_receipts(store.conn)
                 migrate.backfill_aide_receipts(store.conn)
-        messages = ([context_message(context)] if context is not None else []) + [message]
+        messages = (
+            ([{"role": "developer", "content": instructions}] if instructions else [])
+            + ([context_message(context)] if context is not None else [])
+            + [message]
+        )
         for kind, request_id in ids.items():
             canonical = {
                 "scope": scope,

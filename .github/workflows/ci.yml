@@ -88,6 +88,9 @@ jobs:
       - name: Tests against the installed Hermes
         if: env.RUN_TESTS == 'true'
         run: uv run pytest -q -m hermes core/tests/hermes
+      - name: Materialize the integrity-pinned canonical contract
+        if: env.RUN_TESTS == 'true'
+        run: uv run python image/fetch-aide-contract.py
       - name: Unit and scenario tests
         if: env.RUN_TESTS == 'true'
         run: uv run pytest -q

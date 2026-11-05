@@ -55,6 +55,7 @@ re-applies the keys the machinery relies on and removes retired ones).
 ```bash
 uv sync                 # the workspace environment plus pytest and ruff (Python 3.12)
 uv run ruff check .
+uv run python image/fetch-aide-contract.py  # integrity-pinned schema for local validation
 uv run pytest -q        # unit and scenario tests; the fake platform needs no network
 HERMES_BIN=/path/to/hermes uv run pytest -q -m hermes core/tests/hermes   # against a real Hermes
 ```

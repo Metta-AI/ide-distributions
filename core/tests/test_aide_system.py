@@ -360,7 +360,8 @@ def test_canonical_ordered_content_arrays_are_json_serialized_at_durable_intake(
     scope = {"scope": "workspace", "coworld": None, "league": None}
     request_id = str(uuid4())
     messages = [
-        {"role": "developer", "content": "Context"},
+        {"role": "developer", "content": "Trusted static site instructions"},
+        {"role": "user", "name": "softmax_page_context", "content": "Untrusted page data"},
         {"role": "user", "content": [{"type": "text", "text": "Visible input"}]},
     ]
 

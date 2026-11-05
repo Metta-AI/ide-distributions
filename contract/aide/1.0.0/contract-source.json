@@ -3,5 +3,6 @@
   "commit": "16a0121f85aafcf7ae02079bd8eadee5270f6098",
   "path": "workspaces/web/docs/public/static/aide/1.0.0/asyncapi.json",
   "sha256": "617919598107f004e0821b7f427e0371ecde0772cf261e6fb77aa9c67a102875",
-  "version": "1.0.0"
+  "version": "1.0.0",
+  "url": "https://softmax.com/docs/static/aide/1.0.0/asyncapi.json"
 }
