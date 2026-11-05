@@ -15,7 +15,12 @@ import pytest
 from research_core.plugin.repeats import drop_repeated_refusals
 from tests.model import harness
 from tests.model.forcing_proxy import FORCED_ID_PREFIX, ForcingProxy
-from tests.model.real_session import MID_TURN_LABEL, RECOVERY_CASES, RealGateway, hermes_bin_from_env
+from tests.model.real_session import (
+    MID_TURN_LABEL,
+    RECOVERY_CASES,
+    RealGateway,
+    hermes_bin_from_env,
+)
 from tests.model.test_real_session import AGREED_RATE, DEFAULT_REPEATS, MIN_SAMPLE, MODEL
 from tests.model.write_actions import RECOVERY_DEPTHS, Case
 
@@ -96,6 +101,10 @@ def test_the_agreed_rate(refusals: int):
     if total < MIN_SAMPLE and harness.env_list("IDE_TOOL_CALL_CASES"):
         pytest.skip(f"narrowed run: {total} judged calls, a decision needs {MIN_SAMPLE}")
     assert total >= MIN_SAMPLE, f"after {refusals} refusals: only {total} judged calls"
+    assert total / len(results) >= AGREED_RATE, (
+        f"after {refusals} refusals: {len(results) - total} of {len(results)} runs ended without a "
+        "verdict, too many to trust the rate"
+    )
     assert valid / total >= AGREED_RATE, (
         f"after {refusals} refusals: {valid}/{total}, agreed rate {AGREED_RATE}"
     )

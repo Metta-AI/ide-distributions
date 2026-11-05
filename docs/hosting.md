@@ -274,6 +274,6 @@ not prove exhausted credit: it records `output_limit` and fails that run without
 model work or scheduling budget-refill continuations. A zero affordable count and other billing
 failures retain the budget gate. The platform owns daily allowance and owner team membership.
 
-The same middleware point sends only the latest of identical refused calls in each request
-(`plugin/repeats.py`). The stored history keeps them all, so a Session's transcript shows more calls
-than the model was last sent.
+The same middleware point sends only the latest of identical refused calls in each Chat Completions
+request; `plugin/repeats.py` lists what stays regardless. The stored history keeps them all, so a
+Session's transcript shows more calls than the model was last sent.

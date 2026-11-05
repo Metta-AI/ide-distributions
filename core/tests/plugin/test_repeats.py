@@ -184,6 +184,13 @@ def test_a_result_holding_more_than_loop_guard_notes_is_kept():
     assert rewritten["request"]["messages"] == [user, *steered, *guarded]
 
 
+def test_a_result_holding_an_image_is_kept():
+    first, second = refused_pair("a"), refused_pair("b")
+    image = {"type": "image_url", "image_url": {"url": "data:image/png;base64,AA"}}
+    first[1] = {**first[1], "content": [{"type": "text", "text": first[1]["content"]}, image]}
+    assert repeats.without_repeated_refusals(request={"messages": [*first, *second]}) is None
+
+
 def test_a_drop_never_leaves_two_user_messages_in_a_row():
     first_user, second_user = {"role": "user", "content": "a"}, {"role": "user", "content": "b"}
     first, second = refused_pair("a"), refused_pair("b")
