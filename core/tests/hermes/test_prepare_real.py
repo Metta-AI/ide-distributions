@@ -298,7 +298,7 @@ finally:
     models = [e for e in events if e["name"] == "chat"]
     turns = [e for e in events if e["name"] == "invoke_agent"]
     assert len(turns) == 2 and len(models) == 3, events
-    admitted = [e for e in events if e["name"] == "fixture.client_request"]
+    admitted = [e for e in events if e["name"] == "intake.transaction"]
     assert len(admitted) == 2
     assert [e["links"][0]["context"]["trace_id"] for e in turns] == [
         e["context"]["trace_id"] for e in admitted
