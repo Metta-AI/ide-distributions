@@ -15,7 +15,7 @@ import pytest
 from research_core.watcher.hermes_api import RunStatus
 from tests.hermes.test_spike_s1 import Host
 from tests.model import harness, write_actions
-from tests.model.real_session import RealGateway
+from tests.model.real_session import MAX_DETOURS, RealGateway
 from tests.model.write_actions import Case, run_case
 
 CLAIM_WRITE = Case("orchestrator", "claim", "write", "Record a claim.")
@@ -317,6 +317,24 @@ def test_a_settings_update_the_store_refuses_is_invalid(args, problem):
     case = Case("orchestrator", "settings", "update", "Set it.")
     outcome, detail = judged({"action": "update", **args}, case)
     assert outcome == "invalid" and problem in detail
+
+
+def test_a_task_without_a_goal_is_invalid_unless_it_is_maintenance():
+    case = Case("orchestrator", "task", "create", "Create a Task.")
+    args = {"action": "create", "title": "T", "description": "D", "operation_id": "o"}
+    outcome, detail = judged({**args, "type": "research"}, case)
+    assert outcome == "invalid" and "goal is required" in detail
+    assert judged({**args, "type": "maintenance"}, case)[0] == "valid"
+
+
+def test_the_detour_limit_applies_before_a_later_judged_call():
+    gateway = RealGateway(Path("/"), Path("h"), "k", "m")
+    other = {"id": "c", "function": {"name": "todo_list", "arguments": "{}"}}
+    good = {"id": "g", "function": {"name": "claim", "arguments": json.dumps(GOOD_CLAIM)}}
+    stored = [{"tool_calls": [other] * (MAX_DETOURS + 1) + [good]}]
+    result = harness.Result("m", "h", "c", "wrong_tool")
+    assert gateway._judge_new_calls(CLAIM_WRITE, stored, result) is True
+    assert result.outcome == "wrong_tool"
 
 
 def test_a_real_run_refused_by_the_host_counts_and_an_outage_does_not():

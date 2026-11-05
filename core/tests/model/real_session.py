@@ -377,10 +377,11 @@ class RealGateway:
                     result.detours = detours
                     return True
                 detours.append(f"{call.name} {call.raw[:120]}")
+                if len(detours) > MAX_DETOURS:
+                    result.detours = detours
+                    result.detail = f"never called {case.tool}.{case.action}; called {detours}"
+                    return True
         result.detours = detours
-        if len(detours) > MAX_DETOURS:
-            result.detail = f"never called {case.tool}.{case.action}; called {detours}"
-            return True
         return False
 
     def _judge_end(self, status, stored: list[dict], result: harness.Result) -> None:

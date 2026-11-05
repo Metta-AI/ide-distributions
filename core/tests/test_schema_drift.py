@@ -28,10 +28,17 @@ def drift_tool():
 
 
 def test_a_frozen_enum_value_the_validator_refuses_is_reported(drift_tool):
-    tools = current_tools()
+    tools = copy.deepcopy(current_tools())
     goal = next(t for t in tools if t["function"]["name"] == "goal")
     goal["function"]["parameters"]["properties"]["status"]["enum"] = ["retired_value"]
     assert any("retired_value" in str(d) for d in drift_tool.compare(ROLE, tools))
+
+
+def test_a_required_nested_key_missing_from_the_frozen_schema_is_reported(drift_tool):
+    tools = copy.deepcopy(current_tools())
+    claim = next(t for t in tools if t["function"]["name"] == "claim")
+    del claim["function"]["parameters"]["properties"]["evidence"]["items"]["properties"]["stance"]
+    assert any("evidence.stance" in str(d) for d in drift_tool.compare(ROLE, tools))
 
 
 def current_tools() -> list[dict]:

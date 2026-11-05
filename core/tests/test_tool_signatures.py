@@ -37,11 +37,10 @@ CORE = Path(research_core.__file__).parent
 SOURCES = ("prompts", "skills", "task_types", "watcher/wakes")
 
 catalog._load_tool_modules()
-OPENING = re.compile(r"`([a-z_]+)(?:\.([a-z_]+))? ?\{")
+OPENING = re.compile(r"`([a-z_0-9]+)(?:\.([a-z_0-9]+))?\s*\{")
 # Names (one field, or alternatives joined by ``|``), then a ``: value`` or a ``{keys}``.
 ITEM = re.compile(r"([a-z_]+\??(?:\s*\|\s*[a-z_]+\??)*)\s*(?::\s*(.*)|(\{.*\}))?", re.DOTALL)
 NAME = re.compile(r"[a-z_]+")
-OBJECT_VALUE = re.compile(r"\[?\s*\{(.*)\}\s*\]?", re.DOTALL)
 FRAGMENT = "..."
 # The role that reads each folder; a folder not listed here is read by both.
 FOLDER_ROLES = {
@@ -167,6 +166,13 @@ def is_generated(schema: dict) -> bool:
     return "intent ID" in schema.get("description", "")
 
 
+def listed_objects(value: str) -> list[str]:
+    """The text inside each object of a value written ``{...}`` or ``[{...}, {...}]``."""
+    value = value.strip()
+    elements = top_level_items(value[1:-1]) if value[:1] == "[" and value[-1:] == "]" else [value]
+    return [e[1:-1] for e in elements if e[:1] == "{" and e[-1:] == "}"]
+
+
 def _field_problems(label: str, body: str, properties: dict, required) -> tuple[list, list]:
     """(names ``body`` has that ``properties`` lacks, required names it leaves out), going into the
     keys listed for any field. A closing ``...`` allows leaving names out at its own level only."""
@@ -189,11 +195,12 @@ def _field_problems(label: str, body: str, properties: dict, required) -> tuple[
             if name not in properties:
                 unknown.append(f"{label}: no field {name!r}")
                 continue
-            value = OBJECT_VALUE.fullmatch((match[2] or match[3] or "").strip())
             schema = properties[name].get("items") or properties[name]
-            if value and schema.get("properties"):
+            if not schema.get("properties"):
+                continue
+            for keys in listed_objects(match[2] or match[3] or ""):
                 inner = _field_problems(
-                    f"{label}: {name}", value[1], schema["properties"], schema.get("required", ())
+                    f"{label}: {name}", keys, schema["properties"], schema.get("required", ())
                 )
                 unknown += inner[0]
                 inner_omitted += [f"{name}.{key}" for key in inner[1]]
@@ -313,6 +320,17 @@ def test_the_keys_of_a_list_of_objects_are_checked():
     assert problems_with(only(good)) == ([], [])
     bad = "`claim.write {summary, body, tags, evidence: [{typo, ref, stance}]}`"
     assert "no field 'typo'" in problems_with(only(bad))[0][0]
+
+
+def test_every_object_of_a_list_is_checked():
+    text = "`claim.write {summary, body, tags, evidence: [{type, ref, stance}, {typo}]}`"
+    unknown, omitted = problems_with(only(text))
+    assert "no field 'typo'" in unknown[0] and "evidence.type" in omitted
+
+
+@pytest.mark.parametrize("text", ["`claim.write2 {summary}`", "`claim.write  {summary}`"])
+def test_unusual_spelling_does_not_escape_the_scan(text):
+    assert problems_with(only(text)) != ([], [])
 
 
 def test_a_required_key_left_out_is_found():

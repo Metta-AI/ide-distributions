@@ -316,6 +316,11 @@ def _task_abandon(args: dict, problems: list[str]) -> None:
     problems.extend(tasks._failure_problems(args.get("failure")))
 
 
+def _task_create(args: dict, problems: list[str]) -> None:
+    if args.get("goal") is None and args.get("type") != "maintenance":
+        problems.append("goal is required unless type is maintenance")
+
+
 def _settings_update(args: dict, problems: list[str]) -> None:
     found = settings.SETTINGS.get(args.get("key"))
     if found is None:
@@ -324,13 +329,14 @@ def _settings_update(args: dict, problems: list[str]) -> None:
         problems.extend(settings.validate_value(found, args.get("value")))
 
 
-# The store's own checks for actions whose arguments carry structure (lists of objects, objects,
-# word limits), run with records assumed to exist. Production runs them after validate_args.
+# The checks past validate_args that depend only on the arguments (lists of objects, objects, word
+# limits, a field required in some cases), run with records assumed to exist.
 RECORD_CHECKS = {
     ("claim", "write"): _claim_write,
     ("claim", "add_evidence"): _claim_add_evidence,
     ("experiment", "create"): _experiment_create,
     ("task", "abandon"): _task_abandon,
+    ("task", "create"): _task_create,
     ("settings", "update"): _settings_update,
 }
 

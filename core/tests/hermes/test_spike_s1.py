@@ -69,13 +69,6 @@ class SecretEnv(dict):
         return f"<environment of {len(self)} variables>"
 
 
-def _write_secret_file(path: Path, *lines: str) -> None:
-    """Write through the file object: ``Path.write_text`` is a Python frame whose argument, the
-    text, pytest would print if the write failed."""
-    with path.open("w") as file:
-        file.writelines(f"{line}\n" for line in lines)
-
-
 def run(argv, env, timeout=120):
     return subprocess.run(
         [str(part) for part in argv], env=env, capture_output=True, text=True, timeout=timeout
@@ -141,7 +134,10 @@ class Host:
             "IDE_PLATFORM": "fake",
             **self.dotenv_extra,
         }
-        _write_secret_file(self.home / ".env", "\n".join(f"{k}={v}" for k, v in lines.items()))
+        # Through the file object, not ``write_text``: pytest prints a failing frame's arguments,
+        # and here that would be the key.
+        with (self.home / ".env").open("w") as file:
+            file.writelines(f"{k}={v}\n" for k, v in lines.items())
 
     def write_dotenv(self, role: str) -> None:
         """The same API key into every profile's ``.env`` (A5.8), plus the model key."""
@@ -162,7 +158,9 @@ class Host:
             for line in existing.splitlines()
             if line.strip() and line.split("=", 1)[0].strip() not in lines
         ]
-        _write_secret_file(path, "\n".join([*kept, *(f"{k}={v}" for k, v in lines.items())]))
+        with path.open("w") as file:  # not ``write_text``: see ``write_host_dotenv``
+            file.writelines(f"{line}\n" for line in kept)
+            file.writelines(f"{k}={v}\n" for k, v in lines.items())
 
     @property
     def base_url(self) -> str:

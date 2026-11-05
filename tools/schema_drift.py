@@ -9,7 +9,8 @@ disagreement that makes a correct call impossible or a shown option useless:
 
 - a deployed tool or action missing from the frozen list (the model cannot choose it);
 - a frozen tool or action the role's validator refuses;
-- a field the validator requires that the frozen schema does not declare (every call is refused);
+- a field or nested key the validator requires that the frozen schema does not declare (every
+  call is refused);
 - a frozen field the validator does not know;
 - a field whose top-level type changed, or a frozen enum value the validator refuses.
 
@@ -38,6 +39,8 @@ sys.path.insert(0, str(REPO / "core" / "src"))
 
 from research_core.tools import catalog  # noqa: E402
 from research_core.tools.base import ToolSpec  # noqa: E402
+
+MISSING = "the validator requires it and the frozen schema does not declare it"
 
 
 @dataclass(frozen=True)
@@ -101,12 +104,25 @@ def compare(role: catalog.Role, frozen_tools: list[dict]) -> list[Drift]:
     return found
 
 
+def _missing_keys(frozen: dict, deployed: dict) -> list[str]:
+    """Dotted keys the deployed object or list-of-objects schema requires and the frozen lacks."""
+    frozen = frozen.get("items") or frozen
+    deployed = deployed.get("items") or deployed
+    known = frozen.get("properties")
+    if known is None:
+        return []
+    missing = [key for key in deployed.get("required", ()) if key not in known]
+    for key, schema in deployed.get("properties", {}).items():
+        if key in known:
+            missing += [f"{key}.{inner}" for inner in _missing_keys(known[key], schema)]
+    return missing
+
+
 def _compare_tool(role: catalog.Role, spec: ToolSpec, parameters: dict) -> list[Drift]:
     frozen = parameters.get("properties") or {}
     found: list[Drift] = []
-    missing = "the validator requires it and the frozen schema does not declare it"
     found.extend(
-        Drift(spec.name, None, f"{f}: {missing}") for f in spec.required if f not in frozen
+        Drift(spec.name, None, f"{f}: {MISSING}") for f in spec.required if f not in frozen
     )
     if spec.actions is not None:
         frozen_actions = (frozen.get("action") or {}).get("enum") or []
@@ -117,7 +133,7 @@ def _compare_tool(role: catalog.Role, spec: ToolSpec, parameters: dict) -> list[
                 )
                 continue
             found.extend(
-                Drift(spec.name, action.name, f"{f}: {missing}")
+                Drift(spec.name, action.name, f"{f}: {MISSING}")
                 for f in action.required
                 if f not in frozen
             )
@@ -135,6 +151,10 @@ def _compare_tool(role: catalog.Role, spec: ToolSpec, parameters: dict) -> list[
                 Drift(spec.name, None, f"{name}: frozen field the validator does not know")
             )
             continue
+        found.extend(
+            Drift(spec.name, None, f"{name}.{key}: {MISSING}")
+            for key in _missing_keys(schema, deployed.get(name, {}))
+        )
         old_type, new_type = schema.get("type"), deployed.get(name, {}).get("type")
         if old_type and new_type and old_type != new_type:
             found.append(Drift(spec.name, None, f"{name}: frozen as {old_type}, now {new_type}"))
