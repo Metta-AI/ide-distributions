@@ -968,7 +968,7 @@ RESEARCHER = [
         ("task.propose_submission",),
         ("proposing", "submission"),
         task_type="improvement",
-        before=("claim.write",),
+        before=("upload", "claim.write"),
         x5="confirmed",
     ),
     task(
@@ -1205,7 +1205,7 @@ HARD = [
         "Never run more than two researchers at the same time. This is message m-81.",
         ("settings.update",),
         ("goals-and-tasks",),
-        args={"key": "max_researchers", "value": '^"?2"?$', "cites": "m-81"},
+        args={"key": "max_researchers", "value": '^"?2"?$', "cites": r"\bm-81\b"},
     ),
     chat(
         "hard-directive-reaches-running-task",
@@ -1248,7 +1248,7 @@ HARD = [
         "Create a new page on the cogs wiki: page scouting, title 'Scouting', body 'Scout early.' "
         "I asked for this in m-64.",
         ("wiki_edit",),
-        args={"base_revision_id": None, "cites": "m-64"},
+        args={"base_revision_id": None, "cites": r"\bm-64\b"},
     ),
     chat(
         "hard-upload-lost",
@@ -1264,7 +1264,7 @@ HARD = [
         "This is message m-99.",
         ("submit",),
         ("submission",),
-        args={"user_requested": "true", "cites": "m-99"},
+        args={"user_requested": "true", "cites": r"\bm-99\b"},
     ),
     chat(
         "hard-goal-complete",
@@ -1463,7 +1463,7 @@ HARD = [
         ),
         task_type="improvement",
         prior=(Prior("xp", {"action": "request", "experiment": "X-5"}, XP_ACCEPTED),),
-        args={"kind": "xp", "ref": "(?=.*xreq_1)(?=.*xreq_2)", "task": "T-21"},
+        args={"kind": "xp", "ref": r"(?=.*\bxreq_1\b)(?=.*\bxreq_2\b)", "task": r"\bT-21\b"},
         x5="pending",
     ),
     task(
@@ -1496,7 +1496,7 @@ HARD = [
                 BUILD_BACKGROUND,
             ),
         ),
-        args={"kind": "process", "ref": "4242"},
+        args={"kind": "process", "ref": r"\b4242\b"},
         x5="designed",
     ),
     task(
@@ -1552,7 +1552,7 @@ HARD = [
                 BUILD_BACKGROUND,
             ),
         ),
-        args={"resume": "res_8c1"},
+        args={"resume": r"\bres_8c1\b"},
         x5="designed",
     ),
     task(
@@ -1563,7 +1563,7 @@ HARD = [
         ("xp.request",),
         ("run-eval", "experiment"),
         task_type="improvement",
-        args={"opponents": "(?=.*pv-1)(?=.*pv-2)", "league": None},
+        args={"opponents": r"(?=.*\bpv-1\b)(?=.*\bpv-2\b)", "league": None},
         before=("upload",),
     ),
     task(
@@ -1614,9 +1614,9 @@ HARD = [
         ("working-a-task",),
         task_type="improvement",
         args={
-            "experiment": "X-5",
-            "versions": "V-12",
-            "claims": "C-30",
+            "experiment": r"\bX-5\b",
+            "versions": r"\bV-12\b",
+            "claims": r"\bC-30\b",
             "submission_candidate": "no",
             "merge": "no",
             "merge_reason": ".",
@@ -1651,7 +1651,7 @@ HARD = [
         "out of date, and claim C-41 is the new snapshot you just wrote. Put the record right.",
         ("claim.retire",),
         ("writing-claims", "scouting"),
-        args={"claim": "C-40", "status": "superseded", "superseded_by": "C-41"},
+        args={"claim": r"\bC-40\b", "status": "superseded", "superseded_by": r"\bC-41\b"},
     ),
     task(
         "hard-user-wants-submit",
@@ -1661,7 +1661,7 @@ HARD = [
         ("task.propose_submission",),
         ("proposing", "submission"),
         task_type="improvement",
-        args={"version": "V-12", "reason": "."},
+        args={"version": r"\bV-12\b", "reason": "."},
         before=("upload", "claim.write"),
         x5="confirmed",
     ),
@@ -1695,6 +1695,7 @@ HARD = [
         ("proposing",),
         task_type="ideation",
         args={"type": "maintenance|research", "reasoning": ".", "for_human": "."},
+        goal="G-2",
     ),
 ]
 
