@@ -47,7 +47,7 @@ the profile-local Softmax home before each CLI call, and every mutating call che
 | `league_status` | Read-only, free: the live league's last finished round, each division's top scores, the user's own rank and score, what changed since the last look (a small `league_snapshot.json` in the workspace) and their latest league game. |
 | `program_versions` | Every uploaded version (what changed, practice summaries, whether this workspace recorded releasing it) and the diff of the program now against the last version or any version. |
 | `program_upload` | `coworld upload-policy --file program.bas --name <name> --title <change>`; returns "towerless v2". An unchanged file returns its existing version. |
-| `practice_request` | One private `POST /v2/experience-requests` of 5 games by default (at most 20), titled "Practice: towerless v2". |
+| `practice_request` | One private `POST /v2/experience-requests` of 5 games by default (at most 20), titled "Practice: towerless v2". The same program and attempt return the first request and its counts, with `already: true`. |
 | `practice_status` | The request's progress (optionally waiting up to 60 s); once over, each game's result from its `results.json` in plain words, a summary against the previous version's practice, what the results can and cannot measure, and a watch link per game. |
 | `program_release` | `coworld submit <name>:v<N> --league L --player P` for a version the user names, once, and only with `user_said_yes: true`. Retires the player's other programs in that league. |
 | `task_update` | Keeps one private task card per user request in the workspace journal: six steps from understanding the request to the release question, then an outcome. |
