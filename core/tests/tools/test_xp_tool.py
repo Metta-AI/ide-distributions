@@ -23,6 +23,7 @@ from research_core.store import (
 )
 from research_core.store.actors import Actor
 from research_core.tools.base import ToolContext, run_tool
+from research_core.watcher import waits
 from tests.fixtures.fakegame_repo import fixture_files
 
 N_MIN = 2
@@ -297,6 +298,23 @@ def researcher_task(ctx):
     return task
 
 
+def test_credits_refusal_names_a_need_the_wait_can_read(
+    run, ctx, uploaded, researcher_task, monkeypatch
+):
+    monkeypatch.setattr(xp_tool.credits_module, "estimate", lambda *_, **__: 2.5)
+    make_experiment(ctx, task_id=1)
+    result = run(
+        "xp",
+        {"action": "request", "experiment": "X-1"},
+        role="researcher",
+        session_id="r1",
+        faults="credits_refuse=1",
+    )
+    detail = result["next"].split("detail: '")[1].split("'")[0]
+    assert waits.NEED.search(detail)[1] == "2.50"
+    assert "resumes you when the balance covers it" in result["next"]
+
+
 def test_credits_refusal_reports_the_balance_and_sets_no_wait(run, ctx, uploaded, researcher_task):
     make_experiment(ctx, task_id=1)
     result = run(
@@ -311,6 +329,7 @@ def test_credits_refusal_reports_the_balance_and_sets_no_wait(run, ctx, uploaded
     assert result["credits_refused"]["held"] == 0.0
     assert result["credits_refused"]["next_refill_at"]
     assert "task.wait {task, kind: credits" in result["next"]
+    assert "resumes you when the balance is above zero" in result["next"]  # no estimate here
     assert result["created"] == [] and result["runs"] == []
     assert tasks.read(ctx.store, 1)["waiting_on"] is None
     intent = intents.read(ctx.store, 1)

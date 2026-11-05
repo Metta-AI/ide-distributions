@@ -362,10 +362,14 @@ def _credits_refused(
     n = parse_display_id(record["id"])[1]
     refused = {"balance": error.balance, "held": error.held, "next_refill_at": error.next_refill_at}
     if ctx.role == "researcher":
+        # waits._credits reads "need <n>" from the detail. One request, not the whole batch: a batch
+        # above the account's maximum would never resolve, and a retry makes only the missing ones.
+        cost = _estimate(ctx, _read_credits(ctx.platform()), plan["episodes"])["credits"]
+        need = f": need {cost:.2f} credits" if cost else ""
+        when = "the balance covers it" if cost else "the balance is above zero"
         next_step = (
-            "task.wait {task, kind: credits, detail: 'XP requests for "
-            f"{record['id']}', ref: {plan['episodes']}}} and end your run; the watcher resumes you"
-            " when the balance covers it"
+            f"task.wait {{task, kind: credits, detail: 'XP requests for {record['id']}{need}'}} and"
+            f" end your run; the watcher resumes you when {when}"
         )
     else:
         next_step = (

@@ -240,7 +240,7 @@ def test_an_action_that_does_not_exist_is_found():
 
 
 def test_commas_in_quoted_examples_do_not_split_fields():
-    signature = only('`task.wait {task, kind: credits, detail: "XP: 3 requests, about 2 credits"}`')
+    signature = only('`task.wait {task, kind: credits, detail: "XP: need 2 credits"}`')
     assert problems_with(signature)[0] == []
 
 
