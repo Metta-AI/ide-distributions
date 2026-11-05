@@ -128,7 +128,6 @@ def test_a_commit_that_changes_nothing_frozen_keeps_every_pin(release, profile):
         "researcher/SOUL.md",
         "core/src/research_core/plugin/briefing.py",
         "core/src/research_core/plugin/session_context.py",
-        "core/src/research_core/skills/common/repair/SKILL.md",
     ],
 )
 def test_a_change_to_a_frozen_file_refreshes(release, profile, frozen_file):
@@ -142,6 +141,22 @@ def test_a_change_to_a_frozen_file_refreshes(release, profile, frozen_file):
     assert refresh_frozen_sessions(profile, release, refresh)
     assert pin(profile) is None
     assert refresh.calls == 2
+
+
+def test_only_a_skills_frontmatter_is_frozen(release, profile):
+    """The prompt's skill index lists the frontmatter; the model reads the body when it runs."""
+    refresh = PromptRefresh()
+    refresh_frozen_sessions(profile, release, refresh)
+    set_pin(profile, "new-pin-hash")
+    skill = release.parent / "core/src/research_core/skills/common/repair/SKILL.md"
+
+    skill.write_text(skill.read_text() + "A new step in the body.\n")
+    assert refresh_frozen_sessions(profile, release, refresh) == []
+    assert pin(profile) == "new-pin-hash"
+
+    skill.write_text("---\nname: repair\ndescription: Fix things.\n---\n")
+    assert refresh_frozen_sessions(profile, release, refresh)
+    assert pin(profile) is None
 
 
 def test_a_tool_schema_change_refreshes(release, profile, monkeypatch):
@@ -167,8 +182,12 @@ def test_a_tool_schema_change_refreshes(release, profile, monkeypatch):
     assert pin(profile) is None
 
 
-def test_the_hash_is_the_same_in_every_process():
-    """Boots are separate processes: a hash that moved between them would refresh on every boot."""
+def test_the_hash_is_the_same_in_every_process(tmp_path):
+    """Boots are separate processes: a hash that moved between them would refresh on every boot.
+
+    Nothing about the machine or the workspace may enter it either: the seeds come with a different
+    directory and platform each.
+    """
     script = (
         "from pathlib import Path\n"
         "from research_core.frozen_sessions import agent_surface\n"
@@ -177,7 +196,18 @@ def test_the_hash_is_the_same_in_every_process():
     hashes = {
         subprocess.run(
             [sys.executable, "-c", script],
-            env={**os.environ, "PYTHONPATH": str(CORE_SRC), "PYTHONHASHSEED": seed},
+            cwd=tmp_path if seed == "2" else REPO,
+            env={
+                **os.environ,
+                "PYTHONPATH": str(CORE_SRC),
+                "PYTHONHASHSEED": seed,
+                "HOME": f"/home/boot-{seed}",
+                "HERMES_HOME": f"/profiles/boot-{seed}",
+                "IDE_WORKSPACE": f"/workspace/boot-{seed}",
+                "IDE_PLATFORM": "fake" if seed == "2" else "real",
+                "IDE_DEFAULT_COWORLD": f"cow_{seed}",
+                "IDE_ROLE": "researcher" if seed == "3" else "orchestrator",
+            },
             capture_output=True,
             text=True,
             check=True,
@@ -205,6 +235,21 @@ def test_a_failed_prompt_request_leaves_the_session_as_it_was_and_retries(releas
         "open sessions: refreshed tools and system prompts"
     ]
     assert pin(profile) is None
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        subprocess.TimeoutExpired(["hermes"], 120),
+        ValueError("a tool module's schema is broken"),
+    ],
+)
+def test_no_failure_of_the_refresh_stops_the_boot(release, profile, failure):
+    actions = refresh_frozen_sessions(profile, release, PromptRefresh(failure))
+
+    assert "the next boot tries again" in actions[0]
+    assert pin(profile) == OLD_PIN
+    assert recorded_surface(profile) is None
 
 
 def test_a_database_without_the_expected_tables_does_not_stop_the_boot(release, tmp_path):
@@ -283,3 +328,9 @@ def test_prepare_runs_the_refresh_through_the_hermes_command(tmp_path):
     assert pin(home) is None
     refresh_calls = [argv for argv in fake.hermes_calls() if argv[1:2] == ["sessions"]]
     assert refresh_calls == [["hermes", "sessions", "refresh-prompts", "--json"]]
+    # Bounded, so a stuck command cannot hold up the boot.
+    assert all(
+        kwargs["timeout"] == prepare_module.PROMPT_REFRESH_TIMEOUT_S
+        for argv, kwargs in fake.calls
+        if argv[1:2] == ["sessions"]
+    )

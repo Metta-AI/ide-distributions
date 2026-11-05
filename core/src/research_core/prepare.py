@@ -57,6 +57,8 @@ WATCHER_JOB_ID = "watcher"
 PREPARED_MARKER = ".softmax-prepared"
 CORE_PATH_FILE = Path("local") / "core-path.txt"
 LOCK_STAMP = ".lock-sha"
+# Nothing else in a boot waits on this command's success: a stuck one must not hold up the start.
+PROMPT_REFRESH_TIMEOUT_S = 120
 
 # Config keys the profile machinery relies on, re-applied at every preparation so that an edit
 # by the owner or an agent never switches a gate back on. ``<role>`` is substituted.
@@ -77,7 +79,7 @@ PROTECTED_KEYS: dict[str, Any] = {
     "platform_toolsets.api_server": ["hermes-api-server", "ide-<role>"],
     "known_plugin_toolsets.cron": ["ide-<role>"],
     # Hermes's loop guard only warns on api_server; a wake that repeated one refused call 185
-    # times (2026-11-02). The hard stop (Hermes v0.21.6) halts after 5 failures of one tool,
+    # times (2026-11-02). The hard stop (Hermes v0.22.6) halts after 5 failures of one tool,
     # blocks after 5 identical failing calls (Hermes's default) and halts after 10 identical
     # calls with identical results or 10 laps of an identical cycle, any tool but pollers;
     # that last limit is raised from Hermes's 5 so polling a job with `terminal` is not stopped.
@@ -223,7 +225,7 @@ class HermesCli:
     """``hermes config`` and ``hermes cron`` against one profile home.
 
     Every call runs with ``HERMES_HOME`` set to the profile so Hermes edits that profile's
-    ``config.yaml`` and cron store. Verified against Hermes v0.21.6: ``config get <key> --json``
+    ``config.yaml`` and cron store. Verified against Hermes v0.22.6: ``config get <key> --json``
     prints the resolved value as JSON; ``config set <key> <value>`` keeps a string-typed setting's
     text verbatim and parses a JSON list or mapping literal; ``config unset <key>`` exits 1 with
     "Config key not set" when the user's file has no such key.
@@ -238,10 +240,12 @@ class HermesCli:
         self.env = {**env, "HERMES_HOME": str(profile)}
         self.run = run
 
-    def _call(self, *args: str) -> subprocess.CompletedProcess:
+    def _call(self, *args: str, **run_options: Any) -> subprocess.CompletedProcess:
         argv = [self.hermes, *args]
         try:
-            return self.run(argv, env=self.env, capture_output=True, text=True, check=False)
+            return self.run(
+                argv, env=self.env, capture_output=True, text=True, check=False, **run_options
+            )
         except FileNotFoundError as exc:
             raise PrepareError(f"hermes executable not found: {self.hermes}") from exc
 
@@ -277,7 +281,9 @@ class HermesCli:
 
     def request_prompt_refresh(self) -> None:
         """Ask every session in this profile to rebuild its system prompt on its next turn."""
-        result = self._call("sessions", "refresh-prompts", "--json")
+        result = self._call(
+            "sessions", "refresh-prompts", "--json", timeout=PROMPT_REFRESH_TIMEOUT_S
+        )
         if result.returncode != 0:
             raise _failed(result)
 
