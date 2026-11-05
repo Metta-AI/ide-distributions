@@ -8,14 +8,16 @@ tools' argument check) and, for the actions whose store checks need no records, 
 too (``RECORD_CHECKS``). Calls before it get the answer production would give: the tool's own
 refusal when the argument check refuses them, otherwise a plausible result (``RESULT``, or the
 case's ``read_result``). A model that has not called the tool within ``MAX_REQUESTS`` requests
-(``MAX_REQUESTS_REAL_CONTEXT`` with a captured context) fails the case. A recovery case starts from a history holding one or three
-refused calls: the first answered with the refusal the tool returns today, a repeat with the
-shorter one the repeat hook puts in its place. Measured on 2026-11-04 with a real context, the
-rate was 60/60 after one refusal and 22/60 after three, so both depths are measured.
+(``MAX_REQUESTS_REAL_CONTEXT`` with a captured context) fails the case. A recovery case starts
+from a history holding one or three refused calls: the first answered with the refusal the tool
+returns today, a repeat with the shorter one the repeat hook puts in its place. Measured on
+2026-11-04 with a real context, the rate was 60/60 after one refusal and 22/60 after three, so
+both depths are measured.
 
 Which write actions are covered. One case per write action, of the record tools (claim, goal,
 task, experiment, directive, settings, ui), that has at least two required fields, so the model
-has to compose arguments rather than pass one reference; plus ``ui.notify``, the incident wake's other write. Left out, to keep a run small:
+has to compose arguments rather than pass one reference; plus ``ui.notify``, the incident wake's
+other write. Left out, to keep a run small:
   - actions with the same shape as a covered one: task.propose and task.reject for the
     Orchestrator (task.create, task.answer), task.link (two references), and the
     Researcher's claim.retire and experiment.abandon (covered for the Orchestrator);
