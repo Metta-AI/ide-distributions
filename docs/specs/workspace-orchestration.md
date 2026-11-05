@@ -135,10 +135,7 @@ Unmanaged local servers do not own the gateway lifecycle. Their owner first stop
 and workers, then uses `research workspace recover --runtime-stopped` to acknowledge exclusion.
 That command refuses managed-runtime obligations and never replays uncertain input.
 
-Pause is the common final gate for assignments, retries, and model wakes. It gates chat only
-while the pause is the harness's own (sleep, a newer store) or a sleep is under way: chat is how a
-user lifts their own pause, and a hosted client has no other resume control
-(`admissions.held_by_pause`). Domain command
+Pause is the common final gate for chat, assignments, retries, and model wakes. Domain command
 application and outcome settlement can continue while paused. Routine `release_requested` is a
 coordinator-driven transition, not a blocked execution requiring an operator.
 

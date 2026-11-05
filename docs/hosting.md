@@ -159,6 +159,10 @@ update`, `prepare.py` for each profile, the gateway, then `research workspace wa
 sleep-owned pause so the coordinator resumes drained work. A new image therefore takes effect at
 the next wake.
 
+A deliberate pause (the `paused` setting set by the user or the Orchestrator) is different: wake does
+not clear it, and it holds new chat messages as well as background work. Anything with access to the
+workspace lifts it with `research store apply --actor user:<id> --store workspace workspace.resume '{"cites": "<message ref>"}'`.
+
 Steering records its target run before transport. Explicit rejection can retry safely; an ambiguous
 reply closes delivery without replay while that known run remains tracked. It does not recycle
 the workspace. Unknown native run status or an expired/scope-invalid start receipt ends delivery as interrupted

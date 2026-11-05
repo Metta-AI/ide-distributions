@@ -641,9 +641,7 @@ class SeamServer:
                         )
                         tx.event("client.cancelled", row["op_id"], {})
                     continue
-                if not row["dispatch_started"] and admissions.held_by_pause(
-                    stores.wstore, row["origin"]
-                ):
+                if settings.get(stores.wstore, "paused") and not row["dispatch_started"]:
                     continue
                 if not inference.available(self.inference_lease_file, self.clock()):
                     continue

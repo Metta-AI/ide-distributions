@@ -702,7 +702,7 @@ class Backend:
     async def open(self, frontend_id: UUID, request_id: str, params: Open) -> dict:
         body = {
             "op_id": request_id,
-            "client": {"id": "aide", "kind": "ide", "guide": "client-web-ide"},
+            "client": {"id": "aide", "kind": "ide"},
             "actor": "user:aide",
             "session_context": {"contract_version": 1, **params.scope.model_dump()},
         }

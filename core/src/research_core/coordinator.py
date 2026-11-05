@@ -213,9 +213,7 @@ class Coordinator:
                             raise RunsBusy(
                                 "Session changed during steering admission", code="session_busy"
                             )
-                        if pending["cancel_requested"] or admissions.held_by_pause(
-                            store, pending["origin"]
-                        ):
+                        if pending["cancel_requested"] or settings.get(store, "paused"):
                             raise RunsBusy(
                                 "Admission is paused or cancelled", code="workspace_paused"
                             )
@@ -488,7 +486,7 @@ class Coordinator:
                             retryable=False,
                         )
                     with store.tx(ACTOR) as tx:
-                        if admissions.held_by_pause(store, row["origin"]):
+                        if settings.get(store, "paused"):
                             raise RunsBusy("Workspace paused", code="workspace_paused")
                         tx.execute(
                             "UPDATE client_admissions SET dispatch_started=1,delivery_mode='start',"
@@ -1178,7 +1176,7 @@ class Coordinator:
         now = self.clock()
         if (
             parse_iso(row["resume_after"]) > now
-            or admissions.held_by_pause(store, row["origin"])
+            or settings.get(store, "paused")
             or not inference.available(self.inference_lease_file, now)
         ):
             return None

@@ -69,7 +69,7 @@ Settings bound only the agents' own initiative; nothing the user asks for in a t
 
 `paused: true` stops everything in the background: no Researcher starts, no merge, no recovery,
 no autonomous submission; running Researcher Sessions are drained and resume on `paused: false`.
-You still answer the user, and what they ask for in a turn runs.
+A new user message waits too until the workspace resumes; a turn already running finishes.
 
 ## Abandoning
 

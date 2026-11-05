@@ -493,29 +493,3 @@ def test_a_late_report_of_the_failed_run_does_not_hold_the_message_again(dispatc
         dispatch.store, op_id, dispatch.hermes.status(run_id, profile="orchestrator")
     )
     assert dispatch.admission(op_id) == held
-
-
-def test_a_users_message_runs_while_they_have_paused_the_workspace(dispatch):
-    # Chat is how the user lifts their own pause; a hosted client has no other resume control.
-    settings.update(dispatch.store, Actor.session("orchestrator"), "paused", True, cites="message")
-    op_id = dispatch.say("resume, please")
-    dispatch.tick()
-    assert dispatch.admission(op_id)["status"] == "running"
-    assert len(dispatch.starts()) == 1
-
-
-def test_a_message_waits_while_the_workspace_sleeps_even_under_a_users_pause(dispatch):
-    settings.update(dispatch.store, Actor.session("orchestrator"), "paused", True, cites="message")
-    dispatch.store.set_meta("sleep_started", "2026-11-05T00:00:00Z")
-    op_id = dispatch.say("hello")
-    dispatch.tick()
-    assert dispatch.admission(op_id)["status"] == "queued"
-    assert dispatch.starts() == []
-
-
-def test_a_message_waits_under_the_watchers_own_pause(dispatch):
-    settings.update(dispatch.store, Actor.harness(), "paused", True, cites="N-1")
-    op_id = dispatch.say("hello")
-    dispatch.tick()
-    assert dispatch.admission(op_id)["status"] == "queued"
-    assert dispatch.starts() == []
