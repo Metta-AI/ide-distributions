@@ -31,8 +31,7 @@ def tools_for(role: Role) -> list[ToolSpec]:
     return sorted((spec for spec in TOOLS.values() if role in spec.roles), key=lambda s: s.name)
 
 
-# Tool modules, imported on first use so that importing the catalog stays cheap. A module that
-# does not exist yet is skipped; the tool-budget test catches a missing tool.
+# Tool modules, imported on first use so that importing the catalog stays cheap.
 TOOL_MODULES: tuple[str, ...] = (
     "research_core.tools.goal",
     "research_core.tools.task",
@@ -53,24 +52,22 @@ TOOL_MODULES: tuple[str, ...] = (
     "research_core.tools.github",
 )
 _loaded = False
-# Modules that failed to import, by name: a broken tool module costs its own tools, never the
-# others. workspace.doctor and the tool-budget test surface the entries.
-LOAD_ERRORS: dict[str, str] = {}
 
 
 def _load_tool_modules() -> None:
+    """Import every tool module, and let a failure propagate: a broken module must stop what asked
+    for the tools, never quietly drop its tool from a manifest, a prompt or a session.
+
+    Every module imports under Hermes's interpreter (only the standard library at import time;
+    ``test_in_process_imports_are_stdlib_only`` checks it), so no failure here is expected. In the
+    gateway the exception reaches Hermes's plugin loader, which logs "Failed to load plugin" and
+    keeps the gateway up without this profile's plugin.
+    """
     global _loaded
     if _loaded:
         return
     import importlib
 
-    for module_name in dict.fromkeys(TOOL_MODULES):
-        try:
-            importlib.import_module(module_name)
-        except ModuleNotFoundError as error:
-            if error.name and error.name.startswith("research_core.tools"):
-                continue  # not built yet
-            LOAD_ERRORS[module_name] = f"{type(error).__name__}: {error}"
-        except Exception as error:  # a syntax error or a failing import
-            LOAD_ERRORS[module_name] = f"{type(error).__name__}: {error}"
+    for module_name in TOOL_MODULES:
+        importlib.import_module(module_name)
     _loaded = True

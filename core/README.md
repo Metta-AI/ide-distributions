@@ -11,7 +11,10 @@ decisions is `docs/plans/ide-profile-refactor/`.
   profile puts `core/src` on `sys.path`, from the path `prepare.py` records). Everything the plugin
   touches in process must import without third-party packages: `layout`, `refs`, `store/*`,
   `plugin/*`, `tools/base.py` and the in-process tools (`goal`, `task`, `directive`, `claim`,
-  `settings`, `ui`). `core/tests/test_tool_budget.py` enforces it.
+  `settings`, `ui`). `core/tests/test_tool_budget.py` enforces it. The catalog imports every tool
+  module, and a module that fails to import stops whatever asked for the tools: the prompt build,
+  the tests or, on a gateway, the plugin (`test_broken_tool_module_real.py`: Hermes logs "Failed to
+  load plugin" and serves on, with none of that profile's tools or hooks).
 - **The workspace environment** (`$IDE_WORKSPACE/tools/venv`, built by `prepare.py` from the
   repository root `pyproject.toml` and `uv.lock`) has the `platform` extra: the official `coworld`
   and `softmax-cli` clients, PyYAML and numpy. The `research` CLI, the watcher and every tool

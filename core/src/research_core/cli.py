@@ -14,9 +14,7 @@ import sys
 
 from research_core import __version__
 
-# Module paths that register subcommands. Each is imported when the parser is built; a module
-# that does not exist yet (an entry still being built) is skipped, so one missing piece never
-# takes the whole CLI down, and `research --version` stays instant.
+# Module paths that register subcommands. Each is imported when the parser is built.
 COMMAND_MODULES: tuple[str, ...] = (
     "research_core.contract.cli",
     "research_core.tools.cli",
@@ -25,7 +23,6 @@ COMMAND_MODULES: tuple[str, ...] = (
     "research_core.coworld_cli",
     "research_core.watcher.cli",
     "research_core.serve",
-    "research_core.prepare_cli",
 )
 
 
@@ -33,14 +30,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="research", description="Softmax IDE research profiles")
     parser.add_argument("--version", action="version", version=f"research {__version__}")
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
-    for module_name in dict.fromkeys(COMMAND_MODULES):
-        try:
-            module = importlib.import_module(module_name)
-        except ModuleNotFoundError as error:
-            if error.name and error.name.startswith("research_core"):
-                continue  # not built yet
-            raise
-        module.add_parser(subparsers)
+    for module_name in COMMAND_MODULES:
+        importlib.import_module(module_name).add_parser(subparsers)
     return parser
 
 
