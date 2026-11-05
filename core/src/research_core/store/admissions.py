@@ -28,7 +28,24 @@ from research_core.store.errors import StoreError
 Origin = Literal[
     "client", "answer", "assignment", "continuation", "planning", "wake", "watcher", "migration"
 ]
+USER_ORIGINS = frozenset({"client", "answer"})
 _held_locks = threading.local()
+
+
+def held_by_pause(wstore: Store, origin: str) -> bool:
+    """Whether the ``paused`` setting stops this admission.
+
+    A pause a user or the Orchestrator set stops background work only: chat is how the user lifts
+    it, and a hosted client has no other resume control. Sleep's pause and a newer store's pause
+    (both set by the harness actor), and a sleep under way, stop chat too.
+    """
+    if not settings.get(wstore, "paused"):
+        return False
+    if origin not in USER_ORIGINS or wstore.get_meta("sleep_started"):
+        return True
+    return wstore.one("SELECT updated_by FROM settings WHERE key = 'paused'")["updated_by"] == str(
+        Actor.harness()
+    )
 
 
 @contextmanager

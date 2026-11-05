@@ -213,7 +213,9 @@ class Coordinator:
                             raise RunsBusy(
                                 "Session changed during steering admission", code="session_busy"
                             )
-                        if pending["cancel_requested"] or settings.get(store, "paused"):
+                        if pending["cancel_requested"] or admissions.held_by_pause(
+                            store, pending["origin"]
+                        ):
                             raise RunsBusy(
                                 "Admission is paused or cancelled", code="workspace_paused"
                             )
@@ -486,7 +488,7 @@ class Coordinator:
                             retryable=False,
                         )
                     with store.tx(ACTOR) as tx:
-                        if settings.get(store, "paused"):
+                        if admissions.held_by_pause(store, row["origin"]):
                             raise RunsBusy("Workspace paused", code="workspace_paused")
                         tx.execute(
                             "UPDATE client_admissions SET dispatch_started=1,delivery_mode='start',"
@@ -1176,7 +1178,7 @@ class Coordinator:
         now = self.clock()
         if (
             parse_iso(row["resume_after"]) > now
-            or settings.get(store, "paused")
+            or admissions.held_by_pause(store, row["origin"])
             or not inference.available(self.inference_lease_file, now)
         ):
             return None
@@ -1639,7 +1641,7 @@ class Coordinator:
             )
         failure = {
             "what_failed": f"Worker {task['held_by']} exhausted {max_attempts} attempts: {why}",
-            "next_step": "Review the failure and reopen with revised instructions",
+            "next_step": "Review the failure and create a new Task with revised instructions",
         }
         tasks.fail(store, Actor.session(task["held_by"]), task["id"], failure=failure)
         emit_event(
