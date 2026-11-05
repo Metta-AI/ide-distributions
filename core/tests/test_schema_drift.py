@@ -41,6 +41,16 @@ def test_a_required_nested_key_missing_from_the_frozen_schema_is_reported(drift_
     assert any("evidence.stance" in str(d) for d in drift_tool.compare(ROLE, tools))
 
 
+def test_a_closed_object_that_declares_no_keys_lacks_the_required_ones(drift_tool):
+    tools = copy.deepcopy(current_tools())
+    claim = next(t for t in tools if t["function"]["name"] == "claim")
+    claim["function"]["parameters"]["properties"]["evidence"]["items"] = {
+        "type": "object",
+        "additionalProperties": False,
+    }
+    assert any("evidence.stance" in str(d) for d in drift_tool.compare(ROLE, tools))
+
+
 def current_tools() -> list[dict]:
     return [{"type": "function", "function": s.schema(ROLE)} for s in catalog.tools_for(ROLE)]
 

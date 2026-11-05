@@ -12,7 +12,7 @@ from pathlib import Path
 
 import pytest
 
-from research_core.watcher.hermes_api import RunStatus
+from research_core.watcher.hermes_api import RunStatus, RunsUnavailable
 from tests.hermes.test_spike_s1 import Host
 from tests.model import harness, write_actions
 from tests.model.real_session import MAX_DETOURS, RealGateway
@@ -269,6 +269,10 @@ def test_stopping_the_gateway_removes_the_key_files(tmp_path):
     assert not (tmp_path / ".env").exists() and not (profile / ".env").exists()
 
 
+def raise_unavailable(*_, **__):
+    raise RunsUnavailable("connection refused")
+
+
 class FinishedRun:
     """The runs API of a run that has already ended, holding one call to ``claim``."""
 
@@ -341,6 +345,24 @@ def test_a_goal_the_store_refuses_is_invalid(change):
     args = {"action": "create", "title": "T", "end_state": "E", "reason": "R"}
     assert judged({**args, **change}, case)[0] == "invalid"
     assert judged(args, case) == ("valid", "")
+
+
+def test_a_goal_with_null_tags_is_valid_as_production_takes_it():
+    case = Case("orchestrator", "goal", "create", "Create a Goal.")
+    args = {"action": "create", "title": "T", "end_state": "E", "reason": "R", "tags": None}
+    assert judged(args, case) == ("valid", "")
+
+
+def test_a_failed_poll_still_stops_the_run_and_counts_as_a_host_error(monkeypatch):
+    runs = FinishedRun("completed", GOOD_CLAIM)
+    monkeypatch.setattr(runs, "session_messages", raise_unavailable)
+    gateway = RealGateway(Path("/"), Path("h"), "k", "m", runs=runs)
+    stopped = []
+    monkeypatch.setattr(gateway, "open_session", lambda role: "s")
+    monkeypatch.setattr(gateway, "_stop_and_wait", lambda role, run_id: stopped.append(run_id))
+    monkeypatch.setattr(gateway, "_billed_replies", lambda *_: [])
+    assert gateway.run_case("m", CLAIM_WRITE).outcome == "host_error"
+    assert stopped == ["r"]
 
 
 def test_the_detour_limit_applies_before_a_later_judged_call():

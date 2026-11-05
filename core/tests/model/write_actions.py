@@ -38,7 +38,7 @@ from typing import Any
 from research_core.plugin.repeats import firmer_refusal
 from research_core.store import claims, experiments, goals, settings, tasks
 from research_core.tools import catalog
-from research_core.tools.base import validate_args
+from research_core.tools.base import coerce_args, validate_args
 from tests.model import harness
 
 # Models and hosts of the standard measurement: two hosts each, every column a distinct host.
@@ -326,7 +326,7 @@ def _task_create(args: dict, problems: list[str]) -> None:
 
 def _goal_create(args: dict, problems: list[str]) -> None:
     fields = {name: args.get(name) for name in ("title", "end_state", "reason")}
-    goals._check_fields(problems, {**fields, "tags": args.get("tags", [])})
+    goals._check_fields(problems, {**fields, "tags": args.get("tags") or []})
 
 
 def _settings_update(args: dict, problems: list[str]) -> None:
@@ -427,7 +427,7 @@ def judge(case: Case, call: harness.Call, args: dict) -> tuple[str, str]:
         return "invalid", f"{'; '.join(problems)}; sent {sorted(args)}"
     check = RECORD_CHECKS.get((case.tool, case.action))
     if check is not None:
-        check(args, problems)
+        check(coerce_args(spec, case.role, args), problems)  # production checks the coerced values
         if problems:
             # The structured fields show what went wrong; the prose ones only take up room.
             shown = {k: v for k, v in args.items() if k not in ("summary", "body", "description")}

@@ -109,8 +109,9 @@ def _missing_keys(frozen: dict, deployed: dict) -> list[str]:
     frozen = frozen.get("items") or frozen
     deployed = deployed.get("items") or deployed
     known = frozen.get("properties")
-    if known is None:
-        return []
+    if known is None and frozen.get("additionalProperties") is not False:
+        return []  # an open object takes any key
+    known = known or {}
     missing = [key for key in deployed.get("required", ()) if key not in known]
     for key, schema in deployed.get("properties", {}).items():
         if key in known:

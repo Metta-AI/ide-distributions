@@ -45,7 +45,7 @@ from research_core.store import claims, coworlds, goals, sessions, tasks
 from research_core.store.actors import Actor
 from research_core.store.db import Store
 from research_core.tools import catalog
-from research_core.watcher.hermes_api import HermesRuns, mint_session_id
+from research_core.watcher.hermes_api import HermesRuns, RunsUnavailable, mint_session_id
 from tests.fixtures.fakegame_repo import COWORLD_ID, make_fakegame_repo
 from tests.hermes.test_spike_s1 import REPO, Host, SecretEnv, free_port, hermes_python, run
 from tests.model import harness, write_actions
@@ -337,18 +337,23 @@ class RealGateway:
             text=text,
             idempotency_key=f"model-test:{session_id}",
         )
-        while time.monotonic() - started < RUN_TIMEOUT_S:
-            status = self.runs.status(run_id, profile=case.role)
-            stored = self.runs.session_messages(session_id, profile=case.role)
-            if self._judge_new_calls(case, stored[seeded:], result):
-                break
-            if status.terminal:
-                self._judge_end(status, stored[seeded:], result)
-                break
-            time.sleep(POLL_S)
-        else:
-            result.outcome, result.detail = "host_error", f"no judged call in {RUN_TIMEOUT_S} s"
-        self._stop_and_wait(case.role, run_id)
+        try:
+            while time.monotonic() - started < RUN_TIMEOUT_S:
+                status = self.runs.status(run_id, profile=case.role)
+                stored = self.runs.session_messages(session_id, profile=case.role)
+                if self._judge_new_calls(case, stored[seeded:], result):
+                    break
+                if status.terminal:
+                    self._judge_end(status, stored[seeded:], result)
+                    break
+                time.sleep(POLL_S)
+            else:
+                result.outcome = "host_error"
+                result.detail = f"no judged call in {RUN_TIMEOUT_S} s"
+        except RunsUnavailable as error:
+            result.outcome, result.detail = "host_error", f"the gateway stopped answering: {error}"
+        finally:
+            self._stop_and_wait(case.role, run_id)  # a run left going keeps spending
         result.replies = self._billed_replies(case.role, session_id, time.monotonic() - started)
         return result
 

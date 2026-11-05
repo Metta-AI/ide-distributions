@@ -196,9 +196,12 @@ def _field_problems(label: str, body: str, properties: dict, required) -> tuple[
                 unknown.append(f"{label}: no field {name!r}")
                 continue
             schema = properties[name].get("items") or properties[name]
+            shown_objects = listed_objects(match[2] or match[3] or "")
+            if shown_objects and schema.get("type") not in (None, "object"):
+                unknown.append(f"{label}: {name} is a {schema['type']}, not an object")
             if not schema.get("properties"):
                 continue
-            for keys in listed_objects(match[2] or match[3] or ""):
+            for keys in shown_objects:
                 inner = _field_problems(
                     f"{label}: {name}", keys, schema["properties"], schema.get("required", ())
                 )
@@ -333,6 +336,10 @@ def test_every_object_of_a_list_is_checked():
 )
 def test_unusual_spelling_does_not_escape_the_scan(text):
     assert problems_with(only(text)) != ([], [])
+
+
+def test_keys_on_a_field_that_is_not_an_object_are_found():
+    assert "not an object" in problems_with(only("`claim.search {query {typo}}`"))[0][0]
 
 
 def test_a_required_key_left_out_is_found():
