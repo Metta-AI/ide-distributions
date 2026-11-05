@@ -64,5 +64,5 @@ Paging: list routes take `limit` and `cursor` and return the next cursor in the 
 
 - Unknown fields in a body are refused (4xx): re-derive the body from the error detail; do not retry blind.
 - Platform errors are retried with backoff by the tool; a lasting one puts a Task on a `platform` wait with the route, status and request id.
-- A 403 names a missing permission (the Player may not read it): report it, never look for another credential.
+- A 403 names a missing permission (the Player may not read it): report it, never look for another credential. Only the Orchestrator may try again with `identity: "user"`, when the `user-identity` skill covers it.
 - A route that works today can change: record the ones you needed in your result so they become tools.

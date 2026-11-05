@@ -1,4 +1,5 @@
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -64,6 +65,11 @@ def test_register_lists_exactly_the_play_tools_with_their_schemas():
         assert parameters["required"] == required and set(parameters["properties"]) == properties
     for name in ("practice_request", "program_release"):
         assert "account credits" in ctx.tools[name]["description"].lower()
+
+
+def test_the_readme_tool_table_lists_every_registered_tool():
+    readme = (DISTRIBUTION / "README.md").read_text()
+    assert set(re.findall(r"^\| `([a-z_]+)` \|", readme, re.MULTILINE)) == set(plugin.TOOLS)
 
 
 def test_schemas_accept_and_refuse_the_documented_shapes():
