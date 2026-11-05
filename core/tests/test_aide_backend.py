@@ -284,6 +284,34 @@ def test_a_dropped_run_stream_resumes_from_its_last_sequence_without_duplicates(
     run(system, scenario)
 
 
+def test_chat_send_forwards_optional_context_and_instructions_to_the_admission(system):
+    view = {"id": "league-standings", "label": "League standings"}
+    sent = {}
+
+    async def scenario(backend, gateway, ctx, hermes):
+        session_id = await opened(backend)
+        plain = {"session_id": session_id, "messages": say("hi"), "scope": WORKSPACE}
+        sent["plain"] = (await call(backend, "chat.send", plain))["result"]["request_id"]
+        await until(lambda: backend.socket.notes("chat.finished"))
+        rich = {
+            **plain,
+            "context": {"contract_version": 1, "view": view},
+            "instructions": "Answer briefly.",
+        }
+        sent["rich"] = (await call(backend, "chat.send", rich))["result"]["request_id"]
+
+    run(system, scenario)
+    ctx = system[0]
+
+    def payload(op_id):
+        row = ctx.wstore.one("SELECT payload FROM client_admissions WHERE op_id=?", (op_id,))
+        return json.loads(row["payload"])
+
+    plain, rich = payload(sent["plain"]), payload(sent["rich"])
+    assert "view" not in plain["context"] and plain["instructions"] is None
+    assert rich["context"]["view"] == view and rich["instructions"] == "Answer briefly."
+
+
 def test_scope_mismatches_are_forbidden_and_unscoped_sessions_are_hidden(system):
     async def scenario(backend, gateway, ctx, hermes):
         session_id = await opened(backend)
