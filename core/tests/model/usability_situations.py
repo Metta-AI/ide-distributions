@@ -25,6 +25,10 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
+
+from research_core.mixin import CommandResult
+from research_core.tools.version import background_result
 
 
 @dataclass(frozen=True)
@@ -53,6 +57,8 @@ class Situation:
     task_type: str = "research"
     claimed: bool = True
     prior: tuple[Prior, ...] = ()
+    # The message that resumes the Session after ``prior``, as the watcher sends it.
+    after_prior: str = ""
     # The client: what it declared at session open, and the turn's context block.
     declared: dict | None = None
     capabilities: dict | None = None
@@ -331,8 +337,9 @@ ORCHESTRATOR_CHATS = [
     # Experiments
     chat(
         "experiment-create",
-        "Set up a comparison of V-12 against V-11. The idea is that earlier scouting raises the "
-        "win rate because we see their build sooner. Adopt V-12 if it works and keep V-11 if not. "
+        "Set up a comparison of V-12 against V-11. The idea is that a lower retreat threshold "
+        "raises the win rate because we lose fewer late fights. Adopt V-12 if it works and keep "
+        "V-11 if not. "
         "Primary metric win_rate, going up, by at least 3 points, with 40 paired seeds.",
         ("experiment.create",),
         ("experiment",),
@@ -800,16 +807,21 @@ XP_ACCEPTED = ok(
     '["xreq_1", "xreq_2"]} and end your run; the watcher resumes you when they finish, then '
     "xp.status stores the rows",
 )
-BUILD_BACKGROUND = ok(
-    background={
-        "pid": 4242,
-        "log": "documents/logs/build-20261104.log",
-        "resume": "res_8c1",
-    },
-    output_tail="building...",
-    next="the build is still running: task.wait {task, kind: process, ref: 4242, detail: 'the "
-    "build'} and end this run. Only after the watcher resumes you, call version.create with the "
-    "same arguments plus resume: <background.resume>",
+BUILD_BACKGROUND = json.dumps(
+    background_result(
+        "researcher",
+        CommandResult(
+            name="build",
+            command="tools/build.sh",
+            finished=False,
+            exit_code=None,
+            output_tail="building...",
+            log_path=Path("documents/logs/build-20261104.log"),
+            duration_s=600.0,
+            pid=4242,
+            resume_token="res_8c1",
+        ),
+    )
 )
 # ``_credits_refused`` in tools/xp.py, as a Researcher gets it; an Orchestrator's ``next`` differs.
 CREDITS_REFUSAL = json.dumps(
@@ -1207,6 +1219,46 @@ HARD = [
         ("goals-and-tasks",),
         args={"key": "max_researchers", "value": '^"?2"?$', "cites": r"\bm-81\b"},
     ),
+    # Settings the goals-and-tasks skill does not name: settings.read has to find them.
+    chat(
+        "hard-setting-xp-threshold",
+        "Check with me before going over 50 XP requests on any one Experiment. Message m-82.",
+        ("settings.update",),
+        ("goals-and-tasks",),
+        args={
+            "key": r"xp\.ask_above_requests_per_experiment",
+            "value": '^"?50"?$',
+            "cites": r"\bm-82\b",
+        },
+    ),
+    chat(
+        "hard-setting-forum",
+        "Ask me before you post on the forum on your own. Message m-83.",
+        ("settings.update",),
+        ("goals-and-tasks",),
+        args={"key": r"platform_writes\.forum", "value": "ask", "cites": r"\bm-83\b"},
+    ),
+    chat(
+        "hard-setting-anti-stall",
+        "Move the daily check on stalled Goals to 6 in the morning. Message m-84.",
+        ("settings.update",),
+        ("goals-and-tasks",),
+        args={"key": r"anti_stall\.hour", "value": "06:00", "cites": r"\bm-84\b"},
+    ),
+    chat(
+        "hard-setting-park-rounds",
+        "Give a Goal five rounds of ideation without progress before you park it. Message m-85.",
+        ("settings.update",),
+        ("goals-and-tasks",),
+        args={"key": r"ideation\.park_after_rounds", "value": '^"?5"?$', "cites": r"\bm-85\b"},
+    ),
+    chat(
+        "hard-setting-recovery",
+        "If a Researcher's run keeps failing, try it four times before giving up. Message m-86.",
+        ("settings.update",),
+        ("goals-and-tasks",),
+        args={"key": r"recovery\.max_attempts", "value": '^"?4"?$', "cites": r"\bm-86\b"},
+    ),
     chat(
         "hard-directive-reaches-running-task",
         "From now on, never use more than 30 seeds in an evaluation. This goes for everything, "
@@ -1540,8 +1592,7 @@ HARD = [
     task(
         "hard-resume-build",
         "Test the retreat threshold",
-        "Build the candidate for X-5. Its change is committed. The background build you started "
-        "(pid 4242) has now ended; the watcher resumed you.",
+        "Build the candidate for X-5. Its change is committed.",
         ("version.create",),
         ("candidate",),
         task_type="improvement",
@@ -1551,7 +1602,31 @@ HARD = [
                 {"action": "create", "summary": "Lower retreat threshold", "experiment": "X-5"},
                 BUILD_BACKGROUND,
             ),
+            Prior(
+                "task",
+                {
+                    "action": "wait",
+                    "task": "T-21",
+                    "kind": "process",
+                    "ref": 4242,
+                    "detail": "the build",
+                },
+                ok(
+                    record={
+                        "id": "T-21",
+                        "status": "in-progress",
+                        "waiting_on": {
+                            "kind": "process",
+                            "detail": "the build",
+                            "ref": 4242,
+                            "since": "2026-11-04T18:00:00Z",
+                        },
+                    }
+                ),
+            ),
         ),
+        # coordinator.wait_resolved's prompt, with waits._process's note.
+        after_prior="Your wait on process resolved: process 4242 has ended. Continue.",
         args={"resume": r"\bres_8c1\b"},
         x5="designed",
     ),

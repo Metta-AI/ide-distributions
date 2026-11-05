@@ -481,7 +481,7 @@ QUESTIONS: dict[str, list[Question]] = {
     "tool:ui": [
         q("What are the required arguments for panel_set?", r"panel", r"kind", r"content"),
         q("Does notify ask anything?", r"\bno\b|never|inform"),
-        q("What is the only channel a wake has to the user?", r"notice|notify"),
+        q("How does a wake report to the user?", r"notice|notify"),
     ],
     "tool:upload": [
         q("Which argument is required?", r"version"),

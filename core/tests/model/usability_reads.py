@@ -526,7 +526,7 @@ def claim_written(situation: Situation, args: dict) -> dict:
 VERSIONS = {
     "V-7": ("Baseline with resource cap fix", "champion"),
     "V-11": ("Retreat when outnumbered", "uploaded"),
-    "V-12": ("Earlier scouting in the opening", "built"),
+    "V-12": ("Lower retreat threshold", "built"),
 }
 
 
@@ -803,9 +803,8 @@ def _x3() -> dict:
 
 
 def _x6() -> dict:
-    return _experiment(
-        "X-6", "Does earlier scouting raise the win rate?", "proposed", "V-11", "V-12", [], {}
-    )
+    question = "Does a lower retreat threshold raise the win rate?"
+    return _experiment("X-6", question, "proposed", "V-11", "V-12", [], {})
 
 
 def _experiment_for(situation: Situation, experiment_id: str) -> dict | None:

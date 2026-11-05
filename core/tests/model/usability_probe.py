@@ -190,6 +190,12 @@ def first_user_message(situation: Situation) -> str:
     return situation.text
 
 
+def session_kind(situation: Situation) -> str:
+    if situation.role == "researcher":
+        return "task"
+    return "wake" if situation.wake else "chat"
+
+
 def messages_for(situation: Situation, schemas: harness.SchemaSet) -> list[dict]:
     your_task = ""
     if situation.role == "researcher":
@@ -203,6 +209,7 @@ def messages_for(situation: Situation, schemas: harness.SchemaSet) -> list[dict]
         declared=situation.declared,
         capabilities=situation.capabilities,
         has_coworld=situation.has_coworld,
+        kind=session_kind(situation),
     )
     history = [
         {"role": "system", "content": system},
@@ -216,6 +223,8 @@ def messages_for(situation: Situation, schemas: harness.SchemaSet) -> list[dict]
             _assistant_call(call_id, situation.role, prior.tool, prior.args, schemas),
             {"role": "tool", "tool_call_id": call_id, "content": prior.result},
         ]
+    if situation.after_prior:
+        history.append({"role": "user", "content": situation.after_prior})
     return history
 
 
