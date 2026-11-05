@@ -26,7 +26,7 @@ def release(tmp_path) -> Path:
     """A release's distribution folder: only the files the hash reads, plus an unrelated one."""
     package = tmp_path / "release" / "core" / "src" / "research_core"
     (package / "plugin").mkdir(parents=True)
-    for module in ("briefing.py", "session_context.py"):
+    for module in ("briefing.py", "session_context.py", "register.py"):
         (package / "plugin" / module).write_text("# section\n")
     (package / "watcher.py").write_text("# unrelated\n")
     skill = package / "skills" / "common" / "repair"
@@ -128,6 +128,7 @@ def test_a_commit_that_changes_nothing_frozen_keeps_every_pin(release, profile):
         "researcher/SOUL.md",
         "core/src/research_core/plugin/briefing.py",
         "core/src/research_core/plugin/session_context.py",
+        "core/src/research_core/plugin/register.py",
     ],
 )
 def test_a_change_to_a_frozen_file_refreshes(release, profile, frozen_file):
@@ -235,6 +236,22 @@ def test_a_failed_prompt_request_leaves_the_session_as_it_was_and_retries(releas
         "open sessions: refreshed tools and system prompts"
     ]
     assert pin(profile) is None
+
+
+def test_a_failure_after_the_prompt_request_records_nothing_and_retries(release, tmp_path):
+    home = tmp_path / "no-sessions-table"
+    home.mkdir()
+    connection = sqlite3.connect(home / "state.db")
+    connection.execute("CREATE TABLE state_meta (key TEXT PRIMARY KEY, value TEXT)")
+    connection.close()
+    refresh = PromptRefresh()
+
+    assert "the next boot tries again" in refresh_frozen_sessions(home, release, refresh)[0]
+    assert refresh.calls == 1
+    assert recorded_surface(home) is None
+
+    assert "the next boot tries again" in refresh_frozen_sessions(home, release, refresh)[0]
+    assert refresh.calls == 2
 
 
 @pytest.mark.parametrize(

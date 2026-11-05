@@ -30,8 +30,10 @@ What this depends on in Hermes (checked by ``core/tests/hermes/test_frozen_sessi
   refresh, nothing else. The record lives there, not in a file, so that restoring ``state.db``
   from a backup also restores which release its sessions were refreshed for.
 
-A failed refresh must not stop a workspace from starting: the chats stay as they were and the next
-boot tries again, because the hash is recorded only in the transaction that clears the pins.
+A failed refresh must not stop a workspace from starting. No conversation is touched and the next
+boot tries again, because the hash is recorded only in the transaction that clears the pins. The
+pins stay as they were, though a prompt rebuild may already be requested: the Hermes command
+commits on its own, before that transaction.
 """
 
 from __future__ import annotations
@@ -47,8 +49,9 @@ from research_core.tools.catalog import tools_for
 
 SURFACE_KEY = "ide_distribution.agent_surface"
 STATE_DB = "state.db"
-# The plugin code that writes the two prompt sections into the frozen system prompt.
-PROMPT_SECTION_MODULES = ("plugin/briefing.py", "plugin/session_context.py")
+# The plugin code behind the two prompt sections in the frozen system prompt: their text, and in
+# register.py the ids Hermes uses as their headings and the size above which it drops them.
+PROMPT_SECTION_MODULES = ("plugin/briefing.py", "plugin/session_context.py", "plugin/register.py")
 
 
 def agent_surface(source: Path) -> str:

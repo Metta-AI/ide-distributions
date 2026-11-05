@@ -72,8 +72,8 @@ compaction by the gateway left both stale. A chat could then keep a schema the d
 refuse.
 
 `prepare.py` closes this (`core/src/research_core/frozen_sessions.py`). It hashes what the release
-freezes into a session: the role's tool schemas, `SOUL.md`, the two prompt section modules and,
-for each shipped `SKILL.md`, its path and frontmatter (the prompt's skill index reads nothing
+freezes into a session: the role's tool schemas, `SOUL.md`, the plugin code behind the two prompt
+sections and, for each shipped `SKILL.md`, its path and frontmatter (the prompt's skill index reads nothing
 else, so editing a skill's body does not count). The hash is kept in the profile's `state.db` (`state_meta`, key
 `ide_distribution.agent_surface`). When the hash differs, it runs `hermes sessions refresh-prompts`
 and sets `tool_names` to NULL on every session; each session's next turn sends and stores the
@@ -88,8 +88,9 @@ frozen, no session is touched and the cache stays valid.
 - The first boot that sees sessions without a recorded hash refreshes them once. That heals
   chats opened before this existed, and also happens on the second boot of a new workspace, because
   a new profile has no `state.db` when `prepare.py` first runs.
-- A failed refresh does not stop the boot. `prepare.py`'s summary line says what failed, sessions
-  stay as they were, and the next boot tries again.
+- A failed refresh does not stop the boot. `prepare.py`'s summary line says what failed, and the
+  next boot tries again. Conversations and stored tools stay as they were; a prompt rebuild may
+  already be requested, because the Hermes command commits on its own.
 - Run `prepare.py` with the gateway stopped, as the image and `tools/local_stack.py` do. A turn
   on a gateway still running the old release stores the old tools as the session's new pin, and
   since the hash is already recorded, that chat stays on them until a later release changes the
