@@ -360,3 +360,29 @@ def test_an_action_the_role_cannot_call_is_found():
 def test_a_closing_ellipsis_allows_leaving_out_required_fields(body):
     omitted = problems_with(only(f"`experiment.abandon {{{body}}}`"))[1]
     assert (omitted == []) is body.endswith("...")
+
+
+def enum_problems(signature: Signature) -> list[str]:
+    """Example values in a signature that the field's enum would refuse. A value in angle brackets
+    or with an alternative (``yes|no``, ``"yes" or "no"``) is a description, not an example."""
+    spec = catalog.TOOLS.get(signature.tool)
+    if spec is None:
+        return []
+    action = spec.action(signature.action) if signature.action else None
+    properties = spec.accepted(action)
+    problems = []
+    for item in top_level_items(signature.body):
+        match = ITEM.fullmatch(item)
+        if match is None or match[2] is None:
+            continue
+        name, value = match[1].rstrip("?"), match[2].strip().strip('"')
+        allowed = properties.get(name, {}).get("enum")
+        if allowed is None or "<" in value or "|" in value or " or " in value:
+            continue
+        if value not in allowed:
+            problems.append(f"{signature.source}: {signature.label} {name}: {value!r}")
+    return problems
+
+
+def test_every_example_value_is_one_the_field_accepts():
+    assert [p for signature in shipped_signatures() for p in enum_problems(signature)] == []
