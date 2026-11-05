@@ -288,3 +288,11 @@ checks installed profiles with the pinned agent and a scripted external HTTP pro
 covers rate-limit retry timing, canonical cache usage, semantic tool rejection and interval
 reconciliation without spending model credits. This component proof does not attest the
 container logging path or deployed Datadog ingestion.
+
+Some native fatal-error paths return before `on_session_end`. The existing coordinator emits
+`workspace_run_observation` after its authoritative terminal transition, including failed runs
+held for retry. This event's `message_acceptance_to_terminal_observation` envelope includes
+polling delay: `native_terminal_at` and `terminal_observation_delay_ms` are unknown. It carries
+native `completed`, `failed`, `cancelled` or `interrupted` outcomes. Use it for observed native
+receipt/failure counts and coverage checks, separately from precise hook-window distributions.
+Neither source reconstructs timings lost during a process crash.
