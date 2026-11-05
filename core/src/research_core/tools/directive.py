@@ -80,7 +80,7 @@ SPEC = tool(
         actions=(
             ActionSpec(
                 "add",
-                "Record a standing instruction the user gave.",
+                "Record a standing instruction or preference the user gave.",
                 {
                     "text": TEXT,
                     "scope": SCOPE,

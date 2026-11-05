@@ -59,12 +59,13 @@ not activity.
 
 ## Directives and settings
 
-A standing instruction ("never touch the opening book", "always run 200 episodes") is a
+A standing instruction or preference ("never touch the opening book", "keep replies short") is a
 directive: `directive.add {text, scope, source}` word for word, `scope` the workspace or a Goal
 id, `source` the message. The briefing shows every active directive, so a summary cannot lose
-it. `directive.retire` when the user withdraws it.
+it. `directive.update` when the user changes it, `directive.retire` when they withdraw it, and
+`claim.retire` any older `preference` claim that contradicts.
 
-A preference about how the agents work is a setting: `settings.update {key, value, cites}`, and
+When a setting covers it, use the setting instead: `settings.update {key, value, cites}`, and
 `cites` is the user's message, always. `settings.read` lists the keys with their scopes:
 `paused`, `max_researchers`, `approval_required.task_types`, the `submissions` keys (`mode`,
 `until`, `max_count`, `quality_bar`, `min_margin_over_champion`), the `platform_writes` keys

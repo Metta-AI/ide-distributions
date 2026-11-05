@@ -1,8 +1,7 @@
 """The ``settings`` tool (design B.9, Appendix H): bounds on the agents' own initiative.
 
 Each key has a scope (A2.4); ``update`` writes to the store that scope names, so the caller
-never picks a store. Settings never refuse a user's explicit request, and an update that
-reflects a user preference should also become a preference claim: the result says so.
+never picks a store. Settings never refuse a user's explicit request.
 """
 
 from __future__ import annotations
@@ -16,10 +15,6 @@ from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolErro
 ORCHESTRATOR = frozenset({"orchestrator"})
 BOTH = frozenset({"orchestrator", "researcher"})
 KEY = a.string("The setting, such as paused or max_researchers; read without it lists all.")
-
-NEXT = (
-    "record a preference claim (claim.write tagged preference) when this reflects a user preference"
-)
 
 
 def describe(found: settings.SettingSpec, value: Any) -> dict:
@@ -80,7 +75,7 @@ def handle(call: ToolCall) -> dict:
             call.get("value"),
             cites=call.get("cites"),
         )
-        return {"record": record, "next": NEXT}
+        return {"record": record}
     raise AssertionError(call.action)
 
 
