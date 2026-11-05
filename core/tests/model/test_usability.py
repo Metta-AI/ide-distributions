@@ -66,6 +66,7 @@ def inputs_fingerprint(model: str, host: str, schemas: harness.SchemaSet) -> dic
     return {
         "model": model,
         "host": host,
+        "provider": harness.provider_for(model, host),
         "schemas": schemas.label,
         "reads": usability_reads.READS_HASH,
         "source": usability_results.short_hash(source),

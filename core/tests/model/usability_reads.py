@@ -19,7 +19,7 @@ import functools
 import hashlib
 import json
 import re
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from pathlib import Path
 from typing import Any
 
@@ -1080,6 +1080,16 @@ def _replay_pin(episode: str) -> dict:
     }
 
 
+def _standings(args: dict) -> dict:
+    if args.get("division"):
+        return {"division": args["division"], "standings": _standing_rows()}
+    return {
+        "league": args.get("league") or LEAGUE,
+        "divisions": [_division_row()],
+        "standings": _standing_rows(),
+    }
+
+
 def _forum_read(args: dict) -> dict:
     post = _post(str(args["post"]))
     markdown = f"# {post['title']}\n\n{post['body']}\n\n## Comments\n\n- Ember: agreed."
@@ -1104,11 +1114,7 @@ PLATFORM: dict[str, Callable[[Situation, dict], dict]] = {
     "leagues": lambda s, a: {"leagues": [_league_row()]},
     "league": lambda s, a: {"league": _league_row(str(a["league"]))},
     "divisions": lambda s, a: {"league": a["league"], "divisions": [_division_row()]},
-    "standings": lambda s, a: {
-        "league": a.get("league") or LEAGUE,
-        "divisions": [_division_row()],
-        "standings": _standing_rows(),
-    },
+    "standings": lambda s, a: _standings(a),
     "active_policies": lambda s, a: {
         "league": a["league"],
         "excluded": {"player": PLAYER if a.get("exclude_player") else None, "user_players": None},
@@ -1318,10 +1324,32 @@ ACTIONS: dict[str, Callable[[Situation, dict], dict]] = {
 READS_HASH = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()[:10]
 
 
-def result(situation: Situation, label: str, args: dict | None) -> str:
+def version_ref(args: dict | None) -> str:
+    return _ref("V", (args or {}).get("version"))
+
+
+def _show_uploads(answer: dict, uploaded: Sequence[str]) -> None:
+    """A read after this run's own ``upload`` finds it uploaded."""
+    records = answer["records"] if "records" in answer else [answer["record"]]
+    for record in records:
+        if record["id"] in uploaded:
+            record["uploaded"] = {
+                "at": NOW,
+                "digest_checked": True,
+                "policy_version_id": POLICY_VERSIONS.get(record["id"], "pv-new"),
+            }
+            record["submission_status"] = "uploaded"
+
+
+def result(
+    situation: Situation, label: str, args: dict | None, uploaded: Sequence[str] = ()
+) -> str:
     """The answer to a call the tool's checks accepted. ``label`` is ``tool.action`` or a flat
-    tool's name. An IDE tool's answer carries ``ok``, as ``run_tool`` adds it."""
+    tool's name. An IDE tool's answer carries ``ok``, as ``run_tool`` adds it. ``uploaded`` names
+    the Versions this run has uploaded."""
     answer = ACTIONS[label](situation, args or {})
+    if label in ("version.read", "version.list"):
+        _show_uploads(answer, uploaded)
     if label not in BUILTINS:
         answer.setdefault("ok", True)
     return json.dumps(answer)
