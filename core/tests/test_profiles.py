@@ -6,6 +6,9 @@ from pathlib import Path
 import pytest
 import yaml
 
+from research_core.plugin.register import make_register
+from tests.test_plugin_register import FakeContext
+
 REPO = Path(__file__).resolve().parents[2]
 PROFILES = {"orchestrator": REPO / "orchestrator", "researcher": REPO / "researcher"}
 
@@ -55,8 +58,11 @@ def test_plugin_manifest(role):
     manifest = yaml.safe_load((PROFILES[role] / "plugins" / role / "plugin.yaml").read_text())
     assert manifest["name"] == role
     assert manifest["kind"] == "standalone"
-    assert "transform_tool_result" in manifest["provides_hooks"]
-    assert ("pre_llm_call" in manifest["provides_hooks"]) == (role == "orchestrator")
+    distribution = yaml.safe_load((PROFILES[role] / "distribution.yaml").read_text())
+    assert manifest["requires_hermes"] == distribution["hermes_requires"]
+    ctx = FakeContext()
+    make_register(role)(ctx)
+    assert sorted(manifest["provides_hooks"]) == sorted({name for name, _ in ctx.hooks})
 
 
 def test_profiles_ship_no_observation_cron():
