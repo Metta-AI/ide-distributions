@@ -426,6 +426,17 @@ def test_offline_how_a_run_is_judged(monkeypatch, replies, outcome, valid, skill
     assert run.skills == skills
 
 
+def test_offline_the_baseline_compares_clean_with_itself():
+    baseline = json.loads(BASELINE.read_text())
+    headline_lines = 6  # the date line and one line per scope: nothing else differs
+    assert len(usability_results.compare(baseline, baseline)) == headline_lines
+
+
+def test_offline_fisher_separates_only_what_five_repeats_can():
+    assert usability_results.fisher_p(0, 5, 5, 5) < 0.01
+    assert usability_results.fisher_p(3, 5, 5, 5) > 0.4
+
+
 @pytest.mark.skipif(not harness.KEY, reason="OPENROUTER_API_KEY is not set")
 def test_measure_usability(capsys):
     harness.hermes_sanitizers()  # fails loudly without IDE_HERMES_SRC
@@ -467,7 +478,7 @@ def test_measure_usability(capsys):
         old = json.loads(BASELINE.read_text())
         lines += usability_results.compare(old, results)
     if os.environ.get("USABILITY_WRITE_BASELINE") == "1":
-        BASELINE.write_text(json.dumps(results, indent=1) + "\n")
+        BASELINE.write_text(usability_results.baseline_text(results))
         lines.append(f"Wrote {BASELINE}.")
     with capsys.disabled():
         print("\n" + "\n".join(lines))

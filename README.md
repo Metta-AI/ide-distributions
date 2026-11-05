@@ -87,6 +87,17 @@ write actions are covered and how a call is judged. `IDE_TOOL_CALL_MODELS`,
 `test_tool_call_format.py` sends one instruction per tool, on the shipped models and pins. The
 judging rules have offline tests that the default `pytest` runs.
 
+`test_usability.py` measures how easy the research tools and skills are to find, read and use for
+Kimi K3.1 Pro, with a session's real system prompt and tool list. It compares a run with
+`core/tests/model/usability_baseline.json` to show what a tools or skills change did;
+[`docs/reports/tool-usability-baseline-2026-11-04.md`](docs/reports/tool-usability-baseline-2026-11-04.md)
+is the first run, how to read it, what it cost and what it took:
+
+```bash
+OPENROUTER_API_KEY=... IDE_HERMES_SRC=/path/to/hermes-agent \
+  uv run pytest -m model core/tests/model/test_usability.py -k measure
+```
+
 To run the profiles end to end on your Mac against a real Hermes gateway (one command, an
 interactive session, or inside the hosted image), see [`docs/local-end-to-end.md`](docs/local-end-to-end.md).
 

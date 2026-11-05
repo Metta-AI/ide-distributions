@@ -1,7 +1,7 @@
 """Turning the raw runs into the baseline file, and comparing two baselines.
 
 ``usability_baseline.json`` holds counts, not rates, so a later run can be tested against it:
-:func:`compare` runs Fisher's exact test on each count. With about 140 situations some will differ
+:func:`compare` runs Fisher's exact test on each count. With about 180 situations some will differ
 by chance, so a single situation is listed only below p = 0.01 and a whole skill or tool below
 p = 0.05. Each situation and item carries a short hash of its text: a changed hash says the test
 or the text changed, which is what a before/after comparison needs to show.
@@ -88,7 +88,8 @@ def situation_row(situation: Situation, runs: list[dict]) -> dict:
         "outcomes": dict(Counter(r["outcome"] for r in counted)),
         "first_calls": _top(Counter(_first_real_call(r) or "(none)" for r in counted)),
         "ended_with": _top(Counter(r["act"] or r["outcome"] for r in counted)),
-        "skills_opened": _top(Counter(s for r in counted for s in set(r["skills"]))),
+        # All of them: by_skill counts each skill from this, so a top few would undercount.
+        "skills_opened": dict(Counter(s for r in counted for s in set(r["skills"]))),
     }
     if accepted:
         row["skill_opened"] = sum(bool(accepted & set(r["skills"])) for r in counted)
@@ -332,3 +333,48 @@ def compare(old: dict, new: dict) -> list[str]:
                     f"{was.get('tokens')} -> {row.get('tokens')} tokens"
                 )
     return [*lines, *[line for line in found if line]]
+
+
+# --- the baseline file ------------------------------------------------------------------------
+
+
+def _without(row: dict, *keys: str) -> dict:
+    return {key: value for key, value in row.items() if key not in keys}
+
+
+def _baseline_view(results: dict) -> dict:
+    """The counts :func:`compare` tests, without what the situations file or raw runs hold."""
+    return {
+        **results,
+        "situations": {
+            name: _without(
+                row,
+                "role",
+                "acts",
+                "skills",
+                "outcomes",
+                "first_calls",
+                "skills_opened",
+                "first_ide_valid",
+                "mean_preparation",
+                "mean_requests",
+                "mean_skills_opened",
+            )
+            for name, row in results["situations"].items()
+        },
+        "acts": {name: _without(row, "situations") for name, row in results["acts"].items()},
+        "skills": {name: _without(row, "situations") for name, row in results["skills"].items()},
+    }
+
+
+def baseline_text(results: dict) -> str:
+    """JSON with one line per entry of each section, so two baselines diff line by line."""
+    sections = []
+    for section, content in _baseline_view(results).items():
+        if section == "meta" or not isinstance(content, dict):
+            body = json.dumps(content)
+        else:
+            lines = [f"  {json.dumps(key)}: {json.dumps(row)}" for key, row in content.items()]
+            body = "{\n" + ",\n".join(lines) + "\n }"
+        sections.append(f" {json.dumps(section)}: {body}")
+    return "{\n" + ",\n".join(sections) + "\n}\n"

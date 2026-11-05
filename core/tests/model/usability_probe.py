@@ -17,6 +17,11 @@ Outcomes: ``right`` (also words alone when ``"text"`` is in ``situation.acts``),
 ``text`` (answered in words where a call was wanted, with or without earlier calls),
 ``limit`` (still preparing after ``MAX_REQUESTS``), ``rejected`` (the host refused the request),
 ``host_error`` (transport, 5xx, or account limit; not counted in any rate).
+
+Known limit: every read gets the same placeholder text, so an experiment or Task the model looks up
+never shows any state, and the model notices (one run ended with a ``task.complete`` saying "All
+record tools return the same stub response"). Long Researcher runs and some ``wrong_act`` outcomes
+come from this; ``docs/reports/tool-usability-baseline-2026-11-04.md`` marks which.
 """
 
 from __future__ import annotations
