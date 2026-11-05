@@ -1,4 +1,5 @@
-"""The ``api_request_error`` hook: record failed model calls in the inference state.
+"""The ``api_request_error`` hook, which records failed model calls in the inference state, and
+``bound_output_request``, the ``llm_request`` middleware that caps a request's output.
 
 Hermes calls the hook after it classifies each failed model call, with the class as ``reason``
 (a ``FailoverReason`` value from ``agent/error_classifier.py``: ``billing``, ``rate_limit``,

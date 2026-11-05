@@ -1,4 +1,4 @@
-"""Repeated failures inside one turn: a shorter history, and a notice when Hermes halts the turn.
+"""Repeated failures: a shorter history across the request, and a notice when Hermes halts a turn.
 
 Hermes's loop guard (``tool_loop_guardrails``, hard stop on in the shipped configs) ends a turn
 with ``turn_exit_reason = "guardrail_halt"``. In Hermes v0.22.6 the shipped hard stop halts after

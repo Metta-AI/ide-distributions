@@ -1,5 +1,5 @@
 """Each profile's model: what the bridge shows the client and changes on the user's request
-(``contract/CONTRACT.md``, "Profile models").
+(``research_core/contract/CONTRACT.md``, "Profile models").
 
 The model is the profile's own Hermes setting: ``model.default`` and ``model.provider``, with
 ``fallback_providers`` tried in order when the primary fails, all in the profile's

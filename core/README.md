@@ -11,7 +11,8 @@ decisions is `docs/plans/ide-profile-refactor/`.
   profile puts `core/src` on `sys.path`, from the path `prepare.py` records). Everything the plugin
   touches in process must import without third-party packages: `layout`, `refs`, `store/*`,
   `plugin/*`, `tools/base.py` and the in-process tools (`goal`, `task`, `directive`, `claim`,
-  `settings`, `ui`, and the tools split from their actions). `core/tests/test_tool_budget.py`
+  `settings`, `ui`, and those split from their actions; `experiment_create` and `experiment_add_run`
+  are not, as `experiment` is not). `core/tests/test_tool_budget.py`
   enforces it. The catalog imports every tool module, and a module that fails to import stops whatever asked for the tools: the prompt build,
   the tests or, on a gateway, the plugin (`test_broken_tool_module_real.py`: Hermes logs "Failed to
   load plugin" and serves on, with none of that profile's tools or hooks).
@@ -29,7 +30,7 @@ decisions is `docs/plans/ide-profile-refactor/`.
 | `refs.py` | The one reference parser: `G-3`, `T-42#failure`, platform ids, policy labels, URLs. |
 | `store/` | The record store: SQLite per Coworld plus a workspace store; numbered migrations; token-marked transactions with an append-only `events` table and `change_log` detection; schema check and rebuild. One module per record kind (`goals`, `tasks`, `claims`, `experiments`, `versions`, `champion`, `directives`, `settings`, `capabilities`, `intents`, `sessions`, `ui_state`, `notices`, `pins`, `coworlds`), the field `registry`, `events.KINDS`, and `cli.py` (`research store apply|export|snapshot|events|backup|restore-check|quiesce`). |
 | `tools/` | The profile tools. `base.py` defines `ToolSpec`/`ActionSpec`/`ToolContext` and `run_tool` (validates every problem at once, never raises, scrubs store paths); `catalog.py` lists the modules and the role sets; one module per tool. |
-| `plugin/` | The Hermes plugin: `register.py` (tools, hooks, prompt sections per role), `executor.py` (in-process or workspace subprocess), `briefing.py` and `session_context.py` (prompt sections), `turn.py` (the Orchestrator's chat-turn hook: context block, notices, changed-since, away summary), `advisory.py` + `rules.py` (the never-blocking advisory hook and the last-error hook), `repeats.py` (each request keeps only the latest of identical refused calls, a short refusal in place of a repeated identical one, and a notice when Hermes's loop guard halts a turn), `inference_hook.py` (the `api_request_error` hook that records failed model calls in the inference state). |
+| `plugin/` | The Hermes plugin: `register.py` (tools, hooks, prompt sections per role), `executor.py` (in-process or workspace subprocess), `briefing.py` and `session_context.py` (prompt sections), `turn.py` (the Orchestrator's chat-turn hook: context block, notices, changed-since, away summary), `advisory.py` + `rules.py` (the never-blocking advisory hook and the last-error hook), `repeats.py` (each request keeps only the latest of identical refused calls, a short refusal in place of a repeated identical one, and a notice when Hermes's loop guard halts a turn), `inference_hook.py` (the `api_request_error` hook that records failed model calls in the inference state, and `bound_output_request`, the `llm_request` middleware that caps output). |
 | `platform/` | The Softmax platform behind one `Platform` protocol: `real.py` on the official clients, `fake.py` (a persistent test double with fault injection), `identity.py`, `errors.py`, `wait.py` (retries, then a Task wait), `submission.py` (status ladder and the autonomous quality bar), `xp.py`, `credits.py`, `cli.py` (`research softmax`, `research platform check`). |
 | `stats/` | Evaluation design, pairing, the decision rule (`confirmed`/`refuted`/`inconclusive`), noise and power. |
 | `inference.py` | The inference gate every run start passes: the lease file (the installed key's expiry, fingerprint and when it changed) and the inference state (`.inference-state` beside it: why model work is blocked and until when, which key ran out, and the last failed model call). A budget block ends when the lease file names a different key. Stdlib only; the plugin hook, the image's lease loop and the runs client share it. |
@@ -45,7 +46,7 @@ decisions is `docs/plans/ide-profile-refactor/`.
 | `prompts/` | The SOUL parts per role, `vocabulary.md` (from metta) and `build.py`; `tools/build_prompts.py` renders `orchestrator/SOUL.md` and `researcher/SOUL.md` and syncs the plugin manifests. |
 | `skills/` | The shipped skills: `common/<category>/<skill>/`, `orchestrator/<skill>/`, `researcher/<skill>/`; `prepare.py` points `skills.external_dirs` at them. |
 | `task_types/` | The four Task types with their completion checklists and Researcher instructions. |
-| `prepare.py` | Profile preparation after install or update: core path marker, protected and retired config keys, every profile's skill and trusted-project directories, shipped values over earlier defaults (not the model settings, but for one Orchestrator migration off `kimi-k3`), stores, retiring the watcher job, the workspace environment. |
+| `prepare.py` | Profile preparation after install or update: core path marker, protected and retired config keys, the profile's skill and trusted-project directories, shipped values over earlier defaults (not the model settings, but for one Orchestrator migration off `kimi-k3`), stores, retiring the watcher job, the workspace environment. |
 | `frozen_sessions.py` | Called by `prepare.py`: when a release changes the tool schemas or the instructions, open chats drop their stored copies and take the new ones on their next turn (`docs/hosting.md`, "Open chats after a release"). |
 | `cli.py` | The `research` command; each subcommand module registers itself. |
 
@@ -132,8 +133,9 @@ nowhere.
   4 times, then ends the turn with nothing run, so one call costs at most about $1.35.
 - **Record:** a migration (`store/migrations/<kind>/NNNN_*.sql`), a module under `store/`, a
   `RecordSpec` in `store/registry.py`, its event kinds in `store/events.py`, and a tool action.
-- **Skill:** `skills/<root>/<category>/<name>/SKILL.md` with `name` equal to the directory and a
-  one-sentence `description` of at most 60 characters; `tools/check_prompts.py` checks it.
+- **Skill:** `skills/common/<category>/<name>/SKILL.md` or `skills/<role>/<name>/SKILL.md`, with
+  `name` equal to the directory and a one-sentence `description` of at most 60 characters;
+  `core/tests/test_skills.py` and `test_skills_common.py` check it.
 - **A call shown in a prompt, skill, task type or wake:** write it as
   `tool.action {a, b: value, c?, d | e, f {g, h}}`, or `tool_action {...}` for an action with a
   tool of its own, in backticks. Every name must exist on that action,

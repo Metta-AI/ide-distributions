@@ -18,9 +18,7 @@ tools. The tools are ``model_tools.get_tool_definitions(enabled_toolsets=["herme
 disabled_toolsets=["browser", "connections", "cronjob"])`` run inside the image, without
 ``memory`` (the profiles turn it off) and with ``vision_analyze`` (it appears only with a vision
 provider; its schema is from the same capture). ``delegate_task`` has the text a real session
-froze, which leaves out the sentence on what children may call. ``hermes_builtin_tools.json`` on
-``main`` is still v0.21.6, with other ``terminal`` and ``skill_view`` descriptions; the
-``tools/model-test-gaps`` branch refreshes it. The ``Execution discipline`` section is the one Hermes adds only for Kimi models, so it
+froze, which leaves out the sentence on what children may call. The ``Execution discipline`` section is the one Hermes adds only for Kimi models, so it
 is here for both roles because the test model is Kimi.
 
 What is not real: the workspace itself. :data:`BRIEFING` and the session context describe a made
@@ -257,7 +255,7 @@ def builtin_names() -> set[str]:
 
 
 def session_tools(role: Role, schemas: harness.SchemaSet, model: str) -> list[dict]:
-    """``harness.full_toolset`` with the pinned image's built-in tools instead of v0.21.6's."""
+    """``harness.full_toolset`` with the pinned image's built-in tools."""
     sanitizer, moonshot = harness.hermes_sanitizers()
     ide = [{"type": "function", "function": schema} for schema in schemas.tools(role)]
     tools = sanitizer.sanitize_tool_schemas(
