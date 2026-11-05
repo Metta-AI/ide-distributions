@@ -394,8 +394,8 @@ def install_toolchains(
     """Install the toolchains a mixin declares under ``<workspace>/tools/<kind>-<version>/``.
 
     Supported: ``python`` (``uv python install <version>`` then a venv at that path). Other
-    kinds are recorded as problems for the setup wake to handle by hand (a ``nim`` tarball URL
-    with a sha256 is the planned next kind). A toolchain already present is left alone.
+    kinds are recorded as problems, to install by hand. A toolchain already present is left
+    alone. Setup calls this, and so do the watcher's merge and full checks.
     """
     results: list[dict[str, Any]] = []
     problems: list[str] = []

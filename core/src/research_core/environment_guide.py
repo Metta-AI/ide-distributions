@@ -105,8 +105,8 @@ def _environments(venv_python: Path, tools: Path) -> list[str]:
         f"- The workspace environment `{venv_python}` runs this tool, the `research` CLI, the "
         "platform tools, mixin commands and the watcher. It holds `coworld`, `softmax`, "
         "`numpy` and `PyYAML`.",
-        f"- Mixin-declared toolchains (another Python, Nim) install under "
-        f"`{tools}/<kind>-<version>`.",
+        f"- Mixin-declared toolchains live under `{tools}/<kind>-<version>`: `python` ones are "
+        "installed for you, any other kind (Nim) by hand.",
         "",
     ]
 
@@ -117,7 +117,7 @@ def _paths(checkout: Path | None, coworld) -> list[str]:
         lines.append(
             f"- Writable: everything under `{coworld.root}` except its bookkeeping folder: "
             "`code/` (commit on a branch in a worktree, never on `main` directly), `documents/`, "
-            "`worktrees/`, and `source/` (a clone; re-fetched by setup)."
+            "and `worktrees/`. `source/` is a clone to read, not to edit."
         )
     else:
         lines.append("- Writable: the session Coworld's `code/`, `documents/` and `worktrees/`.")
