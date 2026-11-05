@@ -174,6 +174,16 @@ def test_an_interrupted_retry_that_finds_the_result_leaves_the_next_retry_protec
     assert count(ctx, "tasks") == 1
 
 
+def test_a_call_that_waited_long_for_the_lock_leaves_its_retry_protected(ctx, monkeypatch):
+    with monkeypatch.context() as patch:
+        patch.setattr(transitions, "HERMES_INTERRUPT_GRACE_SECONDS", 0)
+        first = call_applied(ctx, CREATE)
+    retried = call(ctx, CREATE)
+    assert retried["command_id"] == first["command_id"]
+    assert "did nothing" in retried["repeat_of_earlier_call"]
+    assert count(ctx, "tasks") == 1
+
+
 def test_a_repeat_that_joins_a_pending_command_and_sees_it_finish_says_so(ctx, monkeypatch):
     with monkeypatch.context() as patch:
         patch.setattr(transitions, "REQUEST_WAIT_SECONDS", 0)

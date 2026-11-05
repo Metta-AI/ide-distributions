@@ -48,7 +48,8 @@ call or by `task.command`), an identical call is a new intent, so a deliberate s
 call after a refusal both run. This is `transitions.request_generated`. A retry whose fields differ
 is a new intent, which the domain rules bound: a second assignment or completion is refused, a
 reworded message is sent. An interrupt (the user's stop, for one) ends a call's wait with its
-pending receipt, which marks nothing, so its retry joins too. Marking happens in the tool call, before the model reads the reply, which leaves these gaps, where a
+pending receipt, which marks nothing, so its retry joins too; so does the retry of a call that
+waited three seconds or more for the admission lock, because Hermes may have given up on it. Marking happens in the tool call, before the model reads the reply, which leaves these gaps, where a
 retry would apply as new: a gateway that stops between marking a result returned and Hermes saving
 it; an interrupt that arrives just after the wait ends while marking waits over three seconds for
 the store's write lock (Hermes has given up on the call by then); an interrupted

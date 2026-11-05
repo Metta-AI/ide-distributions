@@ -23,6 +23,9 @@ from research_core.store.errors import StoreError
 from research_core.tools.base import ToolCall, ToolContext, ToolError, ToolSpec, tool
 
 REQUEST_WAIT_SECONDS = 15
+# How long Hermes waits for a tool thread after an interrupt before it abandons the call and,
+# later, clears the interrupt (agent/tool_executor.py).
+HERMES_INTERRUPT_GRACE_SECONDS = 3
 PENDING_NEXT_STEP = (
     "Accepted, not done yet. Read the result with task.command and this command_id, or call again "
     "with the same fields: that will not do it twice."
@@ -185,6 +188,7 @@ def request_generated(ctx: ToolContext, tool: str, args: dict) -> dict:
     fields = {name: value for name, value in args.items() if value not in (None, "")}
     fields.pop("operation_id", None)
     payload = json.dumps(fields, sort_keys=True)
+    started = time.monotonic()
     with admissions.dispatch_lock(ctx.wstore), ctx.store.tx(ctx.actor) as tx:
         earlier = tx.one(
             "SELECT id FROM transition_commands WHERE reply_seen_at IS NULL AND tool=?"
@@ -196,13 +200,17 @@ def request_generated(ctx: ToolContext, tool: str, args: dict) -> dict:
         else:
             command_id = command_identity(ctx, tool, f"generated:{uuid4()}")
             _accept(tx, ctx, tool, fields, command_id, payload)
+    # A lock cannot be waited on and an interrupt watched at once, and by the end of a long wait
+    # Hermes may have abandoned this call and cleared its interrupt. Then the reply may be lost.
+    maybe_abandoned = time.monotonic() - started >= HERMES_INTERRUPT_GRACE_SECONDS
     result = _await_result(ctx, command_id)
     state = CommandReceipt.parse(result).state
     if state == "pending":
         return {**result, "next": PENDING_NEXT_STEP}
     if state == "applied" and earlier is not None:
         result["repeat_of_earlier_call"] = REPEAT_NOTE
-    note_delivery(ctx, result)
+    if not maybe_abandoned:
+        note_delivery(ctx, result)
     return result
 
 
