@@ -109,7 +109,8 @@ def _missing_keys(frozen: dict, deployed: dict) -> list[str]:
     frozen = frozen.get("items") or frozen
     deployed = deployed.get("items") or deployed
     known = frozen.get("properties")
-    if known is None and frozen.get("additionalProperties") is not False:
+    is_object = frozen.get("type") in (None, "object")
+    if known is None and is_object and frozen.get("additionalProperties") is not False:
         return []  # an open object takes any key
     known = known or {}
     missing = [key for key in deployed.get("required", ()) if key not in known]

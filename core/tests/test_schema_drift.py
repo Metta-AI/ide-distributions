@@ -41,13 +41,13 @@ def test_a_required_nested_key_missing_from_the_frozen_schema_is_reported(drift_
     assert any("evidence.stance" in str(d) for d in drift_tool.compare(ROLE, tools))
 
 
-def test_a_closed_object_that_declares_no_keys_lacks_the_required_ones(drift_tool):
+@pytest.mark.parametrize(
+    "frozen_items", [{"type": "object", "additionalProperties": False}, {"type": "string"}]
+)
+def test_frozen_items_that_cannot_hold_the_required_keys_are_reported(drift_tool, frozen_items):
     tools = copy.deepcopy(current_tools())
     claim = next(t for t in tools if t["function"]["name"] == "claim")
-    claim["function"]["parameters"]["properties"]["evidence"]["items"] = {
-        "type": "object",
-        "additionalProperties": False,
-    }
+    claim["function"]["parameters"]["properties"]["evidence"]["items"] = frozen_items
     assert any("evidence.stance" in str(d) for d in drift_tool.compare(ROLE, tools))
 
 

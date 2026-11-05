@@ -42,8 +42,15 @@ OPENING = re.compile(r"`([A-Za-z_0-9]+)(?:\.([A-Za-z_0-9]+))?\s*\{")
 ITEM = re.compile(r"([a-z_]+\??(?:\s*\|\s*[a-z_]+\??)*)\s*(?::\s*(.*)|(\{.*\}))?", re.DOTALL)
 NAME = re.compile(r"[a-z_]+")
 FRAGMENT = "..."
-# The role that reads each folder; a folder not listed here is read by both.
-FOLDER_ROLES = {
+# The role that reads each folder or file; anything not listed here is read by both, or is shared
+# text that may show one role's call.
+READER_ROLES = {
+    "watcher/wakes/task_start.md": "researcher",
+    "watcher/wakes/task_resume.md": "researcher",
+    "watcher/wakes/setup.md": "orchestrator",
+    "watcher/wakes/review.md": "orchestrator",
+    "watcher/wakes/management.md": "orchestrator",
+    "watcher/wakes/anti_stall.md": "orchestrator",
     "skills/orchestrator": "orchestrator",
     "skills/researcher": "researcher",
     "prompts/orchestrator": "orchestrator",
@@ -224,7 +231,7 @@ def problems_with(signature: Signature) -> tuple[list[str], list[str]]:
         return [f"{label}: {signature.tool} has no action {signature.action!r}"], []
     if spec.actions is None and signature.action:
         return [f"{label}: {signature.tool} has no actions"], []
-    role = next((r for f, r in FOLDER_ROLES.items() if signature.source.startswith(f + "/")), None)
+    role = next((r for f, r in READER_ROLES.items() if signature.source.startswith(f)), None)
     if role is not None and (
         spec not in catalog.tools_for(role) or (action and action not in spec.actions_for(role))
     ):
