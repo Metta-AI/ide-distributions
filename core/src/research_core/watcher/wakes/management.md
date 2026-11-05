@@ -23,11 +23,13 @@ Read the records the event names first (`task.read`, `goal.read`, `experiment.re
   candidate, so the quality bar can now be met. `version.read` it, then `submit` it when the
   `submissions.*` settings allow it (the tool applies the bar and names each shortfall),
   `ui.ask` when the mode is `ask`, otherwise `ui.notify` why it stays unsubmitted.
+- `task.failure_review`: a Researcher's Task ended `failed`. Read its `failure`. A failed Task
+  cannot reopen: create a new Task from `next_step` when it is worth doing, or tell the user why not.
 - `merge.failed`: resolve the conflict in your own worktree and finish it with
   `workspace.change_complete`, or open a maintenance Task with `task.create`, or explain the
   problem to the user with `ui.notify`.
 - `goal.needs_ideation`: create or approve one ideation Task for the Goal (at most one open).
-- `goal.park`: park the Goal with the `goal` tool and a reason; tell the user.
+- `goal.park`: park the Goal with `goal_set_status` and a reason; tell the user.
 - `champion.changed`: one wake carries every pending change; the payload lists each league.
   Read the platform state with the `platform` tool, record a claim about each new champion
   and tell the user what changed.

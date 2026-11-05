@@ -23,8 +23,8 @@ they mean what they say. Nobody is reading a chat: use `ui.notify`, or `ui.ask` 
 4. `claim.read` on each new claim: a summary of at most 40 words, evidence whose stance supports
    it, no duplicate of what `claim.search` already finds. `claim.inspect_evidence` when a claim
    rests on one measurement or one replay.
-5. A maintenance Task: the committed change and, for a repair, that `workspace.capabilities`
-   now shows its capability `ok`.
+5. A maintenance Task: the committed change and, for a repair, that the failing command now
+   passes on the branch.
 
 ## Decide with one call
 
@@ -32,9 +32,9 @@ they mean what they say. Nobody is reading a chat: use `ui.notify`, or `ui.ask` 
 
 - `accept: true` when the deliverables are real and the reasoning holds. A refuted hypothesis
   with sound evidence is a completed improvement Task, not a failed one.
-- `accept: false` reopens the Task: the same Researcher Session resumes with your reason. Write
+- `accept: false` reopens the Task: the Session that holds it resumes with your reason. Write
   what to do next, not what is wrong. Good: "the baseline arm ran 40 episodes; the mixin's
-  minimum is 100; rerun seeds 5-9 on both arms and close X-7 again." Bad: "insufficient
+  minimum is 100; X-7 is closed, so run a new Experiment with 100 per arm." Bad: "insufficient
   evidence."
 - `merge: yes` when the change is the point: an improvement whose Experiment confirmed, a
   maintenance fix, a mixin edit. The watcher merges the recorded commit with no model after the
@@ -58,8 +58,8 @@ now rather than leaving it to the next wake.
    and its Experiment against the champion confirmed its decision rule with an effect at or above
    the margin; with no champion, a merged Version that passes the mixin's checks. `submit`
    applies this itself and names each shortfall.
-3. Mode `autonomous` and the Version already merged: `submit {version, league, reason}`, then
-   `ui.notify` the result.
+3. Mode `autonomous` and the Version already merged: `submit {version, league, reason}`, which
+   writes its own notice.
 4. Mode `autonomous` but the merge you just approved has not landed: you cannot submit in this
    wake. Say in `reason` that V-n is a candidate pending merge. The watcher merges it within
    minutes and wakes a management Session (event `submission.candidate`), which submits it
@@ -75,4 +75,4 @@ A submission the user already asked for in chat is never gated: carry it out as 
 ## End
 
 `ui.notify` the outcome in one or two sentences with the record ids (T-n, X-n, V-n), then end
-the run. Never write the review into a user conversation.
+the run.

@@ -12,9 +12,9 @@ Task.
 
 The assignment prompt names the Task and your first call: `task.claim {task: T-n}`. The
 workspace reserved ownership before starting you. This call renews that lease, creates
-`worktrees/task-<n>/` on branch `task/<n>` from `main`, and returns the Task, its Goal, the type's
-instructions and the Orchestrator's messages. A refused claim means you lack valid ownership:
-end your run without writing anything.
+`worktrees/task-<n>/` on branch `task/<n>` from `main`, and returns the Task, its Goal's id, the
+type's instructions and the Orchestrator's messages. A refused claim names its reason (ownership,
+an unset repository, a git failure, an unfinished dependency): end your run without writing anything.
 
 ## 2. Read before working
 
@@ -49,9 +49,9 @@ claim to write, how to fix a broken build. A question you can answer with a tool
 
 Anything outside your control is a wait: `task_wait {task, kind, detail, ref}` with kind `xp`
 (`ref`: the request ids from `xp.request`), `credits` (after a 402), `process` (`ref`: the pid of
-a background build or evaluate), `question`, `permit` (`ref`: the route to read), `submission`
-(`ref`: the policy version id), `platform` (set for you when a route keeps failing), `user` or
-`dependency`. Then stop: end the run with no further tool call. That
+a background build or evaluate), `permit` (`ref`: the route to read), `submission` (`ref`: the
+policy version id), `platform` (set for you when a route keeps failing), `user` (`ref`: the setting
+or T-n their answer changes) or `dependency`. Then stop: end the run with no further tool call. That
 is not quitting: the watcher resumes this Session, with its history, when the wait resolves.
 Never poll in a loop and never sleep. On resume, call the tool you were waiting for
 (`xp.status {experiment}` for XP) and `directive.list`, since your briefing does not update.
@@ -65,10 +65,8 @@ again. `commit` is the commit on your branch to merge; `merge: no` needs `merge_
 is two or three sentences the Orchestrator reads first.
 
 `task.complete {task, outcome: "failed", failure: {what_failed, next_step, error, exit_code,
-tried}}` when the Task cannot succeed. Good: `what_failed: "the build failed on nim 2.2:
-undefined symbol X"`, `next_step: "pin nim 2.0 in MIXIN.md toolchains or patch tools/build.sh
-line 12"`. Bad: `what_failed: "it broke"`, `next_step: "try again"`. Fill `tried` so nobody
-repeats it.
+tried}}` when the Task cannot succeed; the type's instructions show a good one. Fill `tried` so
+nobody repeats it.
 
 `task_release {task, reason}` when you must not continue, as when a directive forbids the only
 path; tried and it did not work is `outcome: "failed"`. End your run afterward. The workspace stops your recorded run, then returns the Task to scheduling.

@@ -22,7 +22,7 @@ Do this, then end the run:
    reject with a specific, actionable reason when something must be redone, and the same
    Researcher Session resumes with your reason.
 3. The watcher merges accepted work mechanically and re-runs the mixin checks; a merge that
-   conflicts or fails its checks comes back to you as a management wake. When the accepted
-   Version is a submission candidate, `submit` applies the `submissions.*` settings and the
-   quality bar; a user's earlier request to submit is carried out, never gated.
+   conflicts or fails its checks comes back to you as a management wake. A submission candidate
+   you just accepted waits for that merge, then a `submission.candidate` wake decides it; a user's
+   earlier request to submit is carried out, never gated.
 4. `ui.notify` the outcome in one or two sentences with the record references.

@@ -29,7 +29,7 @@ Attack the design before starting: does the metric measure the mechanism or a co
 1. `experiment.start {experiment}` locks the design; it refuses while a part is missing and names each, and the candidate may still be empty.
 2. Build the candidate (`candidate` skill): one conceptual change, `version.create {summary, task, experiment}`, then `upload {version}`.
 3. `xp.request {experiment}`: one request per seed and arm, recorded as runs the moment the platform accepts them. In an A/B both arms get the same `opponents` and are paired by seed (`run-eval`).
-4. Then `task_wait {task, kind: xp, detail: "X-n's requests", ref: [<request ids>]}` and end your run; the watcher resumes you when the requests are terminal. Never poll. A credits refusal (402) is `task_wait {task, kind: credits, detail}`. The Orchestrator ends its turn and returns later.
+4. Then `task_wait {task, kind: xp, detail: "X-n's requests", ref: [<request ids>]}` and end your run; the watcher resumes you when the requests are terminal. Never poll. A credits refusal (402) is `task_wait {task, kind: credits, detail}`. The Orchestrator has no wait: nothing wakes it when a build or request ends, so it tells the user and picks the work up on the next message or wake.
 5. On resume, `xp.status {experiment}` refreshes the runs, downloads finished results, runs the mixin's `evaluate` and stores the rows. If `evaluate` is backgrounded, `task_wait {task, kind: process, detail: "evaluate of X-n", ref: <pid>}`, then `xp.status {resume}`.
 6. Inspect before you trust: failed episodes, dropped rows, the right Versions and seeds, and that the change activated (one replay per arm, `replay-diagnosis`). Mark a bad run `experiment.update_run {run, validity: "invalid: <reason>"}`.
 

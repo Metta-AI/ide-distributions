@@ -16,7 +16,7 @@ from research_core.tools.catalog import ROLES, tools_for
 
 REPO = Path(__file__).resolve().parents[2]
 BUILD_PROMPTS = REPO / "tools" / "build_prompts.py"
-SUMMARY_LINE = "If this conversation is summarised, keep the user's instructions word for word."
+SUMMARY_LINE = "Directives and records are stored and survive it"
 FORBIDDEN = ("promotion", "kanban", "coordinator", ".state", "store.db")
 
 # Every tool name the catalog knows, so a backticked `name` or `name.action` in a SOUL is checked
@@ -90,7 +90,7 @@ def test_authority_is_the_first_paragraph_and_the_guide_is_near_the_top(role):
     text = build.render(role)
     first = paragraphs(text)[0]
     assert first.startswith("The user's explicit request comes first")
-    assert "never refuse an action the platform allows" in first
+    assert "refuse only what the platform refuses" in first
     assert build.sections(text)[0][0] == "Order of authority"
     assert "workspace.environment_guide" in " ".join(text.split()[:400])
 
@@ -105,7 +105,7 @@ def test_section_order_follows_the_design(role):
         "Your role: the Orchestrator" if role == "orchestrator" else "Your role: a Researcher",
         build.RECORDS_TITLE,
         *(["Context and the UI"] if role == "orchestrator" else []),
-        "How to act as your Player and User",
+        "How to act as your Player",
         *(["The User identity"] if role == "orchestrator" else []),
         "When something breaks",
         "If this conversation is summarised",
@@ -140,7 +140,7 @@ def test_records_section_names_ids_statuses_and_writers():
     text = build.render_records("orchestrator")
     assert "**Goal** (G-n)" in text and "**Task** (T-n)" in text
     assert "Statuses: proposed, unclaimed, in-progress, complete, abandoned" in text
-    assert "**Session** (one per Hermes Session)" in text and "Written by the watcher." in text
+    assert "**Session** (one per Hermes Session)" in text and "Written by the workspace." in text
     assert "**Champion** (one per League)" in text
     assert "Written by `ui.notify`" in text
     researcher = build.render_records("researcher")

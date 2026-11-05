@@ -116,8 +116,8 @@ def _paths(checkout: Path | None, coworld) -> list[str]:
     if coworld is not None:
         lines.append(
             f"- Writable: everything under `{coworld.root}` except its bookkeeping folder: "
-            "`code/` (commit on a branch in a worktree, never on `main` directly), `documents/`, "
-            "and `worktrees/`. `source/` is a clone to read, not to edit."
+            "`code/` (after setup, commit on a branch in a worktree, never on `main` directly), "
+            "`documents/` and `worktrees/`. `source/` is a clone to read, not to edit."
         )
     else:
         lines.append("- Writable: the session Coworld's `code/`, `documents/` and `worktrees/`.")
