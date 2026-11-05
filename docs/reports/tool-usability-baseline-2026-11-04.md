@@ -92,7 +92,8 @@ and `r-hard-wait-credits-args`. No paid rerun followed the last counted run, bec
    - `delegate_task` counts only when it spawns a task. All 8 here did.
    - X-5 in `r-candidate`, `r-wait-build`, `r-hard-wait-build-args` and `r-hard-resume-build` now reads
      as started, as the Task's own instructions have it, and each situation's records agree with its
-     text (`o-hard-explicit-verdict`'s renamed metric, `o-hard-review-reopen`'s floor of 100).
+     text (`o-hard-explicit-verdict`'s renamed metric, `o-hard-review-reopen`'s floor of 100,
+     `o-hard-goal-complete`'s rank 3, the deliverables of a Task under review).
    - In `o-hard-after-xp-stop` and `r-hard-end-after-wait` any call but opening a skill now counts as
      not stopping. Here one `o-hard-after-xp-stop` run polled `xp.status` first and scored right.
    - An empty reply is no longer a right answer. None occurred here.

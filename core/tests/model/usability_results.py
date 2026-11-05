@@ -43,6 +43,14 @@ def _first_real_call(run: dict) -> str:
     return next((c for c in run["calls"] if not c.startswith("skill")), "")
 
 
+def _first_call_is_right(situation: Situation, run: dict) -> bool:
+    """No call at all is the right first move only where words were wanted and given."""
+    first = _first_real_call(run)
+    if first:
+        return first in situation.acts
+    return run["outcome"] == "right"
+
+
 def _steps_before_act(run: dict) -> int:
     """Calls before the one that ended the run; all of them when no call did. The last call with
     its label is that one: a refused try can come before it, and other calls after it in a reply."""
@@ -70,7 +78,7 @@ def situation_row(situation: Situation, runs: list[dict]) -> dict:
         "n": len(counted),
         "host_errors": len(runs) - len(counted),
         "right": sum(r["outcome"] == "right" for r in counted),
-        "first_call_right": sum((_first_real_call(r) or "text") in situation.acts for r in counted),
+        "first_call_right": sum(_first_call_is_right(situation, r) for r in counted),
         "args_checked": sum(r.get("args_right") is not None for r in counted),
         "args_right": sum(r.get("args_right") is True for r in counted),
         "attempted": len(attempts),

@@ -281,7 +281,9 @@ def test_offline_x5_rows_give_its_verdict_under_the_real_rule(state, verdict):
     assert len(pairs) == expected_pairs
     assert decision_rule.evaluate(design, pairs).verdict == verdict
     if record["status"] != "running":
-        assert record["results"]["verdict"] == verdict
+        results = record["results"]
+        assert results["verdict"] == verdict
+        assert {row["metric"] for row in results["measurements"]} == {"win_rate", "timeouts"}
 
 
 def test_offline_read_results_agree_with_what_the_situation_says():
@@ -397,6 +399,43 @@ def test_offline_argument_rules_ignore_list_order():
     situation = next(s for s in SITUATIONS if s.id == "r-hard-wait-xp-args")
     args = {"task": "T-21", "kind": "xp", "ref": ["xreq_2", "xreq_1"]}
     assert usability_probe.args_hold(situation.args, args)
+
+
+def test_offline_a_call_to_the_wanted_tool_with_no_action_is_a_refused_first_try(monkeypatch):
+    situation = next(s for s in SITUATIONS if s.id == "o-review")
+    fields = {"task": "T-8", "accept": True, "merge": "yes", "reason": "r", "operation_id": "o"}
+    replies = [[("task", fields)], [("task", {"action": "review", **fields})]]
+    run = _run_replies(monkeypatch, situation, replies)
+    assert (run.outcome, run.act_valid, run.act_attempts) == ("right", False, 2)
+
+
+def test_offline_a_comparison_needs_both_arms_or_the_default():
+    rule = next(s for s in SITUATIONS if s.id == "r-hard-xp-ab-args").args
+    opponents = {"opponents": ["pv-1", "pv-2"]}
+    assert usability_probe.args_hold(rule, opponents)
+    assert usability_probe.args_hold(rule, {**opponents, "arms": ["baseline", "candidate"]})
+    assert not usability_probe.args_hold(rule, {**opponents, "arms": ["candidate"]})
+
+
+def test_offline_a_met_goal_reads_as_met():
+    situation = next(s for s in SITUATIONS if s.id == "o-hard-goal-complete")
+    standings = _read("platform.standings", {"league": "league_cogs_main"}, situation)["standings"]
+    assert standings[2]["player_id"] == usability_reads.PLAYER
+    assert "rank 3" in _read("goal.read", {"goal": "G-1"}, situation)["record"]["where_it_stands"]
+
+
+def test_offline_a_reviewed_task_holds_its_deliverables():
+    situation = next(s for s in SITUATIONS if s.id == "o-hard-review-candidate")
+    record = _read("task.read", {"task": "T-8"}, situation)["record"]
+    assert record["checklist"]["versions"] == ["V-12"]
+    assert record["checklist"]["submission_candidate"] == "yes"
+
+
+def test_offline_words_are_a_right_first_move_only_when_they_were_given():
+    situation = next(s for s in SITUATIONS if s.id == "o-hard-greeting")
+    run = {"calls": [], "outcome": "right"}
+    assert usability_results._first_call_is_right(situation, run)
+    assert not usability_results._first_call_is_right(situation, {**run, "outcome": "text"})
 
 
 def test_offline_a_second_call_in_the_reply_that_settles_it_still_counts(monkeypatch):
