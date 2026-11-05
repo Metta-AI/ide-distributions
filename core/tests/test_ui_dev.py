@@ -51,3 +51,11 @@ def test_the_page_scenario_ends_in_a_submission(seam_url):
     )
     assert events[-1]["kind"] == "version.submitted", events
     assert events[-1]["subject"] == "V-1"
+
+
+def test_a_session_without_a_coworld_is_told_so_and_the_seam_lives(seam_url):
+    client = ScriptedClient(seam_url)
+    client.open("test", "web-ide", session_context={"contract_version": 1, "scope": "workspace"})
+    reply = client.say(REQUEST, CONTEXT, wait=True)
+    assert "no Coworld" in client.run(reply["run_id"])["output"]
+    assert client.health()["ok"] is True
