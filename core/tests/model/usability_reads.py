@@ -50,6 +50,8 @@ TASK_MESSAGES = {
 }
 TOOLCHAIN_DIRECTIVE = {"r-complete-failed", "r-hard-fail-args"}
 LOW_CREDITS = {"r-wait-credits", "r-hard-wait-credits-args"}
+# What a situation's payload says of the mixin, against the fixture's floor of 20 episodes.
+MIXIN_FLOOR = {"o-hard-review-reopen": 100}
 BROKEN_EVALUATE = {"r-repair"}
 
 
@@ -484,7 +486,8 @@ VERSIONS = {
 
 def _version(version_id: str) -> dict:
     summary, status = VERSIONS.get(version_id, ("An earlier build", "built"))
-    policy_version = POLICY_VERSIONS.get(version_id)
+    # Only what has been uploaded has a policy version; V-12 gets one when ``upload`` is called.
+    policy_version = POLICY_VERSIONS.get(version_id) if status != "built" else None
     return {
         "id": version_id,
         "summary": summary,
@@ -539,24 +542,32 @@ def uploaded(situation: Situation, args: dict) -> dict:
 # --- Experiments ----------------------------------------------------------------------------------
 
 X5_STATUS = {
-    "designed": "proposed",  # no candidate yet
+    "designed": "running",  # started, as a Task's type says to; no candidate is built yet
     "ready": "proposed",  # V-12 fills the candidate
     "started": "running",  # no runs yet
     "pending": "running",  # requests xreq_1 and xreq_2 are running
     "finished": "running",  # those requests ended; xp.status has not stored the rows
     "stored": "running",  # every row is stored and n_min is reached
+    "renamed": "running",  # the same, but the metric was renamed halfway, so the rule cannot apply
     "confirmed": "confirmed",
     "refuted": "refuted",
 }
 
 
 # How much a stored X-5's candidate beats its baseline by, in win rate.
-X5_EFFECT = {"stored": 0.04, "confirmed": 0.04, "refuted": -0.03}
+X5_EFFECT = {"stored": 0.04, "renamed": 0.02, "confirmed": 0.04, "refuted": -0.03}
 BASELINE_WIN_RATE = 0.5
 
 
 def _run(
-    run_id: int, seed: int, arm: str, state: str, baseline: str, effect: float | None = None
+    run_id: int,
+    seed: int,
+    arm: str,
+    state: str,
+    baseline: str,
+    effect: float | None = None,
+    *,
+    metric_renamed: bool = False,
 ) -> dict:
     version = "V-12" if arm == "candidate" else baseline
     results: dict = {
@@ -567,6 +578,8 @@ def _run(
     if effect is not None:
         # The two arms differ by the effect on every seed, around a rate that moves by seed.
         win_rate = BASELINE_WIN_RATE + (seed % 5 - 2) / 100 + (effect if arm == "candidate" else 0)
+        # The rename: the later seeds of a "renamed" X-5 report the metric under another name.
+        metric = "wins_share" if metric_renamed and seed > N_MIN // 2 else "win_rate"
         results["rows"] = [
             {
                 "episode_id": f"ereq_{run_id}",
@@ -575,7 +588,7 @@ def _run(
                 "seed": seed,
                 "seats": [0],
                 "opponents": HIGH_ROSTER,
-                "metrics": {"win_rate": round(win_rate, 4), "timeouts": 1.0},
+                "metrics": {metric: round(win_rate, 4), "timeouts": 1.0},
             }
         ]
     return {
@@ -617,8 +630,11 @@ def _x5_runs(state: str) -> list[dict]:
     runs = []
     for seed in range(1, N_MIN + 1):
         effect = X5_EFFECT[state]
-        runs.append(_run(2 * seed - 1, seed, "candidate", "completed", baseline, effect))
-        runs.append(_run(2 * seed, seed, "baseline", "completed", baseline, effect))
+        renamed = state == "renamed"
+        for run_id, arm in ((2 * seed - 1, "candidate"), (2 * seed, "baseline")):
+            runs.append(
+                _run(run_id, seed, arm, "completed", baseline, effect, metric_renamed=renamed)
+            )
     return runs
 
 
@@ -772,7 +788,10 @@ def xp_status(situation: Situation, args: dict) -> dict:
     pending = [run["platform_request_id"] for run in runs if run["state"] != "completed"]
     complete = bool(runs) and not pending and "rows" in runs[0]["results"]
     report = {"experiment": "X-5", "runs": runs, "complete": complete, "pending": pending}
-    if complete:
+    status = X5_STATUS.get(situation.x5, "absent")
+    if status in ("confirmed", "refuted"):
+        report["note"] = f"X-5 is {status}; its runs are final"
+    elif complete:
         report["next"] = "experiment.close {experiment: X-5} applies the decision rule"
     elif pending:
         report["next"] = f"{len(pending)} requests still run; task.wait {{kind: xp}} or try later"
@@ -1211,6 +1230,9 @@ def read_file(situation: Situation, args: dict) -> dict:
         text = _code_files().get(relative.lstrip("./"))
     if text is None:
         return {"error": f"File not found: {path}", "not_found": True}
+    floor = MIXIN_FLOOR.get(situation.id)
+    if floor:
+        text = text.replace("min_episodes: 20", f"min_episodes: {floor}")
     lines = text.splitlines()
     numbered = "\n".join(f"{n:6}|{line}" for n, line in enumerate(lines, start=1))
     return {

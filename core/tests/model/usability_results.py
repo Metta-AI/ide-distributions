@@ -44,8 +44,12 @@ def _first_real_call(run: dict) -> str:
 
 
 def _steps_before_act(run: dict) -> int:
-    """Calls before the one that ended the run; all of them when no call did."""
-    return len(run["calls"]) - (1 if run["act"] else 0)
+    """Calls before the one that ended the run; all of them when no call did. The last call with
+    its label is that one: a refused try can come before it, and other calls after it in a reply."""
+    calls = run["calls"]
+    if not run["act"]:
+        return len(calls)
+    return len(calls) - 1 - calls[::-1].index(run["act"])
 
 
 def _preparation_count(run: dict) -> int:

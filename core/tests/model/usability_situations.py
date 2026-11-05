@@ -1259,7 +1259,7 @@ HARD = [
         ("experiment.close",),
         ("experiment",),
         args={"verdict": "inconclusive", "measurements": "win_rate", "interpretation": "."},
-        x5="stored",
+        x5="renamed",
     ),
     chat(
         "hard-baseline-is-champion",
@@ -1434,7 +1434,7 @@ HARD = [
         ("experiment", "run-eval", "working-a-task", "task"),
         task_type="improvement",
         prior=(Prior("xp", {"action": "request", "experiment": "X-5"}, XP_ACCEPTED),),
-        args={"kind": "xp", "ref": "xreq_1.*xreq_2", "task": "T-21"},
+        args={"kind": "xp", "ref": "(?=.*xreq_1)(?=.*xreq_2)", "task": "T-21"},
         x5="pending",
     ),
     task(
@@ -1526,7 +1526,7 @@ HARD = [
         ("xp.request",),
         ("run-eval", "experiment"),
         task_type="improvement",
-        args={"opponents": "pv-1.*pv-2", "league": None},
+        args={"opponents": "(?=.*pv-1)(?=.*pv-2)", "league": None},
         before=("upload",),
     ),
     task(
@@ -1598,7 +1598,7 @@ HARD = [
         "Record it.",
         ("claim.write",),
         ("writing-claims", "replay-diagnosis"),
-        args={"evidence": r"replay.*episode:ereq_1[12].*xp:none", "tags": "G-1"},
+        args={"evidence": r"(?=.*replay)(?=.*episode:ereq_1[12][^\"]*xp:none)", "tags": "G-1"},
     ),
     task(
         "hard-supersede",

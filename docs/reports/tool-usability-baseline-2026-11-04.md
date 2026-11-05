@@ -87,13 +87,18 @@ and `r-hard-wait-credits-args`. No paid rerun followed the last counted run, bec
    - A call the checks refuse gets its refusal and the run goes on. Here it could end as `wrong_act`:
      one of the 30 is that case (`r-candidate`, `experiment.create` with an empty `methods.candidate`).
    - A store check's refusal is answered as a refusal. Here the model was told it had worked.
-   - Every call in the reply that settles a run counts. Here later calls in that reply went unseen,
-     and the raw runs did not keep them, so how many there were is unknown.
+   - A write later in the reply that settled a run right makes it `wrong_act`. Here later calls in
+     that reply went unseen, and the raw runs did not keep them, so how many there were is unknown.
+   - `delegate_task` counts only when it spawns a task. All 8 here did.
+   - X-5 in `r-candidate`, `r-wait-build`, `r-hard-wait-build-args` and `r-hard-resume-build` now reads
+     as started, as the Task's own instructions have it, and each situation's records agree with its
+     text (`o-hard-explicit-verdict`'s renamed metric, `o-hard-review-reopen`'s floor of 100).
    - In `o-hard-after-xp-stop` and `r-hard-end-after-wait` any call but opening a skill now counts as
      not stopping. Here one `o-hard-after-xp-stop` run polled `xp.status` first and scored right.
    - An empty reply is no longer a right answer. None occurred here.
-   - Two argument rules are exact: `o-hard-setting-not-directive`'s value and
-     `r-hard-xp-field-args`'s arms. Every counted run here sent the exact value, so 124/127 stands.
+   - Argument rules are stricter on value and looser on order: `o-hard-setting-not-directive`'s value
+     and `r-hard-xp-field-args`'s arms are exact, and lists may come in any order. No counted run here
+     changes under them, so 124/127 stands.
    - `r-ask`'s Task sits under G-2, because G-1 names the league it says no record settles, and
      `settings.read` in `o-submission-ask` now shows mode `ask`. Both were 5/5 here.
    - `delegate_task`'s text matches what a real session froze, one sentence shorter.
@@ -405,7 +410,8 @@ Names that do not exist: the binding names in finding 8, and `method.survey` and
 ## Per tool
 
 Sizes are alone, with no other tool beside them. Counts add up the situations whose first-listed act
-is one of the tool's actions. A tool can be right at a low "first" rate because the model reads first; that is not a fault.
+is one of the tool's actions, so a situation that accepts several acts credits that tool even when
+another of them ended the run. A tool can be right at a low "first" rate because the model reads first; that is not a fault.
 
 | Tool | Bytes | Tokens | Right call reached | Right call first | Valid at first try | Clarity | Comprehension |
 |---|---:|---:|---:|---:|---:|---:|---:|
@@ -462,7 +468,7 @@ counts, then only what passes Fisher's exact test (p < 0.01 for a situation, p <
 skill or tool, since about 180 situations would otherwise show differences by chance). Each situation
 and text carries a hash, so a changed one is reported as changed and not compared, and whole-skill
 and whole-tool totals are left out while any situation differs, because they would add up different
-situations. 34 situations are already marked this way, because later fixes changed them. `meta.reads` records
+situations. 36 situations are already marked this way, because later fixes changed them. `meta.reads` records
 which reads a run used: this baseline says `placeholder`, so the first comparison opens by saying the
 two are not comparable as a change in the tools. Write a new baseline from that rerun with
 `USABILITY_WRITE_BASELINE=1`, leaving tools and skills as they are, then compare later changes with it.
