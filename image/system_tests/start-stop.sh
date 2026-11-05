@@ -17,8 +17,9 @@ git rev-parse HEAD > "$scratch/source-revision.txt"
 cleanup() {
   docker logs "$name" > "$scratch/container.log" 2>&1 || true
   cat "$scratch/container.log"
-  docker rm -f "$name" "$name-recovery" >/dev/null 2>&1 || true
-  docker volume rm "$volume" >/dev/null 2>&1 || true
+  docker logs "$name-aide" > "$scratch/aide.log" 2>&1 || true
+  docker rm -f "$name" "$name-recovery" "$name-aide" >/dev/null 2>&1 || true
+  docker volume rm "$volume" "$volume-aide" >/dev/null 2>&1 || true
   if [[ -z "${STARTUP_ARTIFACTS:-}" ]]; then rm -rf "$scratch"; fi
 }
 trap cleanup EXIT
@@ -85,3 +86,14 @@ docker run --rm --read-only --cap-drop ALL --security-opt no-new-privileges --tm
 
 # Rare uncertain starts recover inside the image; no operator or forced platform hold is needed.
 bash image/system_tests/check-recovery.sh "$image" "$name-recovery" "$volume" "$scratch"
+
+# One workspace serves both protocols: the check plays the platform (lease, legacy control and
+# the AIDE backend socket) and a scripted model, then drives an AIDE chat round trip.
+printf '%s\n' '{"workspace_id":"00000000-0000-4000-8000-000000000150","platform_url":"http://127.0.0.1:8700","credential":"fixture-aide"}' > "$scratch/aide-bootstrap.json"
+chmod 644 "$scratch/aide-bootstrap.json"
+docker volume create "$volume-aide" >/dev/null
+docker run --rm --user 0 --entrypoint /bin/sh -v "$volume-aide:/workspace" "$image" -c 'chown 10000:10000 /workspace'
+docker run -d --name "$name-aide" --read-only --cap-drop ALL --security-opt no-new-privileges \
+  --tmpfs /tmp:rw,size=1g --mount "type=volume,src=$volume-aide,dst=/workspace" \
+  --mount "type=bind,src=$scratch/aide-bootstrap.json,dst=/run/workspace/bootstrap.json,readonly" "$image"
+docker exec "$name-aide" /opt/hermes/.venv/bin/python /opt/distribution/image/system_tests/check-aide.py 8700 8701

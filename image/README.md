@@ -107,7 +107,22 @@ Metta vendors the artifact from an immutable agent commit and records its SHA-25
 frontend types, runtime request validator and browser fixture consume that artifact.
 Changing a public shape requires regenerating the artifact and checking both consumers
 before release. Existing operation names and wire bodies remain unchanged.
-The separate AIDE v1 proposal owns the future bidirectional protocol.
+
+## AIDE 1.0.0 backend
+
+`image/aide.py` also connects every workspace to the platform's AIDE backend socket
+(`/v2/workspaces/{id}/aide/1.0.0/backend`, subprotocol `aide.1.0.0`, the bootstrap credential)
+and answers the [AIDE 1.0.0](https://softmax.com/docs/aide) JSON-RPC methods. It runs beside the
+legacy connection, gates neither readiness nor sleep, and reconnects forever; nothing reaches
+it until the platform routes a frontend to it. The contract stays in Metta; this image does not
+bundle or validate it, the relay does.
+
+Each method maps to the same seam and gateway calls as the legacy adapter. The AIDE request id
+is the seam `op_id` or gateway `Idempotency-Key`, so retries need no new tables. Notifications
+go to the frontends that named a session in the last ten minutes: run output from the gateway's
+resumable run stream (`chat.chunk`, `chat.message`, `chat.finished`) and session changes from
+the seam's event stream (`state.changed`). Coworld sessions without a league have no AIDE scope
+and are not listed.
 
 The normal image smoke checks execute the real packaged adapter against its running
 seam, including the previously accepted-by-the-stub invalid actor field. Real model
