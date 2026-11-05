@@ -96,6 +96,12 @@ and `r-hard-wait-credits-args`. No paid rerun followed the last counted run, bec
    - In `o-hard-after-xp-stop` and `r-hard-end-after-wait` any call but opening a skill now counts as
      not stopping. Here one `o-hard-after-xp-stop` run polled `xp.status` first and scored right.
    - An empty reply is no longer a right answer. None occurred here.
+   - `o-hard-merge-decision`, `o-hard-need-from-user` and `o-submission-ask` now declare client
+     capabilities. Here their session context said "ask in chat when only the user can answer", while
+     they wanted `ui.ask` or a panel, which may explain part of `o-hard-need-from-user`'s 3/5. A real
+     wake session with no declared capabilities would read the same; that is not checked here.
+   - A Version this run uploaded reads as uploaded afterwards, and `task.complete`'s deliverables meet
+     the argument rule under `checklist` as well as flat.
    - Argument rules are stricter on value and looser on order: `o-hard-setting-not-directive`'s value
      and `r-hard-xp-field-args`'s arms are exact, and lists may come in any order. No counted run here
      changes under them, so 124/127 stands.
@@ -468,7 +474,7 @@ counts, then only what passes Fisher's exact test (p < 0.01 for a situation, p <
 skill or tool, since about 180 situations would otherwise show differences by chance). Each situation
 and text carries a hash, so a changed one is reported as changed and not compared, and whole-skill
 and whole-tool totals are left out while any situation differs, because they would add up different
-situations. 36 situations are already marked this way, because later fixes changed them. `meta.reads` records
+situations. 38 situations are already marked this way, because later fixes changed them. `meta.reads` records
 which reads a run used: this baseline says `placeholder`, so the first comparison opens by saying the
 two are not comparable as a change in the tools. Write a new baseline from that rerun with
 `USABILITY_WRITE_BASELINE=1`, leaving tools and skills as they are, then compare later changes with it.

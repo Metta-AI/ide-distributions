@@ -98,6 +98,7 @@ class Run:
     act_args: dict | None = None  # the arguments of the call that ended the run
     problems: list[str] = field(default_factory=list)  # what the checks said, per refused call
     unknown_tools: list[str] = field(default_factory=list)
+    uploaded: list[str] = field(default_factory=list)  # Versions an allowed ``upload`` sent
     requests: int = 0
     first_prompt_tokens: int = 0
     prompt_tokens: int = 0
@@ -236,7 +237,11 @@ def _problems(situation: Situation, call: harness.Call) -> str:
 
 
 def _answer(
-    situation: Situation, call: harness.Call, schemas: harness.SchemaSet, problems: str = ""
+    situation: Situation,
+    run: Run,
+    call: harness.Call,
+    schemas: harness.SchemaSet,
+    problems: str = "",
 ) -> str:
     if call.name == "skill_view":
         return usability_context.skill_view_result(
@@ -251,7 +256,7 @@ def _answer(
         return answer  # the tool's argument check refused it
     if problems:  # only a store check refused it, which production reports the same way
         return json.dumps(error_payload([problems], {"tool": call.name}))
-    return usability_reads.result(situation, label_of(call.name, args), args)
+    return usability_reads.result(situation, label_of(call.name, args), args, run.uploaded)
 
 
 def args_hold(wanted: dict[str, str | None], args: dict) -> bool:
@@ -264,6 +269,11 @@ def args_hold(wanted: dict[str, str | None], args: dict) -> bool:
         elif value is None or not re.search(pattern, json.dumps(value), re.DOTALL):
             return False
     return True
+
+
+def _with_checklist(args: dict) -> dict:
+    """``task.complete`` takes its deliverables flat or under ``checklist``, which wins there."""
+    return {**args, **(args.get("checklist") or {})}
 
 
 def _is_ide_tool(situation: Situation, name: str) -> bool:
@@ -282,7 +292,7 @@ def _handle_call(
     run.calls.append(label)
     if call.name == "skill_view":
         run.skills.append(usability_context.bare_skill_name(str((args or {}).get("name"))))
-        return _answer(situation, call, schemas)
+        return _answer(situation, run, call, schemas)
     if situation.stop and call.name != "skills_list":
         run.outcome, run.act, run.act_args = "wrong_act", label, args
         run.detail = call.raw[:300]
@@ -303,13 +313,15 @@ def _handle_call(
                 return None
             run.outcome, run.act, run.act_args = "right", label, args
             if situation.args is not None:
-                run.args_right = args_hold(situation.args, args or {})
+                run.args_right = args_hold(situation.args, _with_checklist(args or {}))
             return None
-        return _answer(situation, call, schemas, problems)
+        return _answer(situation, run, call, schemas, problems)
     if problems or is_preparation(call.name, args) or call.name == "skills_list":
-        return _answer(situation, call, schemas, problems)
+        return _answer(situation, run, call, schemas, problems)
     if label in situation.before:
-        return _answer(situation, call, schemas)
+        if label == "upload":
+            run.uploaded.append(usability_reads.version_ref(args))
+        return _answer(situation, run, call, schemas)
     run.outcome, run.act, run.act_args = "wrong_act", label, args
     run.detail = call.raw[:300]
     return None

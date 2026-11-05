@@ -765,6 +765,7 @@ ORCHESTRATOR_WAKES = [
         ("ui.ask",),
         ("submission",),
         x5="confirmed",
+        capabilities=WEB_IDE_CAPS,
     ),
     wake(
         "submission-auto",
@@ -1338,6 +1339,7 @@ HARD = [
         },
         ("ui.ask",),
         ("merge-conflicts",),
+        capabilities=WEB_IDE_CAPS,
     ),
     wake(
         "hard-merge-maintenance",
@@ -1424,6 +1426,7 @@ HARD = [
         },
         ("ui.panel_set", "ui.ask"),
         ("working-with-the-ide",),
+        capabilities=WEB_IDE_CAPS,
     ),
     # A Researcher's calls, where the arguments carry the rule
     task(
