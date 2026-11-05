@@ -2,7 +2,8 @@
 
 The turn boundary is pre_llm_call -> on_session_end, after session/prompt setup.
 Model intervals use the observed pre-request timestamp and native response end;
-tool windows use observed pre/post callback timestamps. Unpaired tools have unknown bounds. Union accounting
+tool windows use observed pre/post callback timestamps. Unpaired tools have unknown bounds.
+Union accounting
 clips intervals to the observed turn; nested/concurrent work is never summed.
 Stdlib only: this module executes in Hermes's interpreter.
 """
