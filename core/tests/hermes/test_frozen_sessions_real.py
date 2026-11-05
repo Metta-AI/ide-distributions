@@ -71,9 +71,10 @@ class FakeModel:
                 model.requests.append(request)
                 usage = {"prompt_tokens": 10, "completion_tokens": 2, "total_tokens": 12}
                 base = {"id": "reply", "model": "fake"}
+                message = model.reply(request)
+                finish = "tool_calls" if message.get("tool_calls") else "stop"
                 if not request.get("stream"):
-                    message = {"role": "assistant", "content": "Done."}
-                    choice = {"index": 0, "message": message, "finish_reason": "stop"}
+                    choice = {"index": 0, "message": message, "finish_reason": finish}
                     self._send_json(
                         {**base, "object": "chat.completion", "choices": [choice], "usage": usage}
                     )
@@ -81,11 +82,10 @@ class FakeModel:
                 self.send_response(200)
                 self.send_header("Content-Type", "text/event-stream")
                 self.end_headers()
-                delta = {"role": "assistant", "content": "Done."}
                 chunks = [
-                    {"choices": [{"index": 0, "delta": delta, "finish_reason": None}]},
+                    {"choices": [{"index": 0, "delta": message, "finish_reason": None}]},
                     {
-                        "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                        "choices": [{"index": 0, "delta": {}, "finish_reason": finish}],
                         "usage": usage,
                     },
                 ]
@@ -97,6 +97,9 @@ class FakeModel:
         self.server = ThreadingHTTPServer(("127.0.0.1", 0), Handler)
         self.port = self.server.server_address[1]
         threading.Thread(target=self.server.serve_forever, daemon=True).start()
+
+    def reply(self, request: dict) -> dict:
+        return {"role": "assistant", "content": "Done."}
 
 
 def old_release(checkout: Path) -> None:
@@ -131,7 +134,13 @@ def unrelated_commit(checkout: Path) -> None:
 class Workspace:
     """Boots the release the way the image does, and runs turns against a fake model."""
 
-    def __init__(self, root: Path, hermes_bin: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    def __init__(
+        self,
+        root: Path,
+        hermes_bin: Path,
+        monkeypatch: pytest.MonkeyPatch,
+        model: FakeModel | None = None,
+    ) -> None:
         self.hermes_bin = hermes_bin
         self.checkout = root / "release"
         self.prebuilt_env = root / "workspace-env"
@@ -155,7 +164,7 @@ class Workspace:
         )
         self.host.home.mkdir()
         self.host.write_host_dotenv()
-        self.model = FakeModel()
+        self.model = model or FakeModel()
 
     def publish(self, change=None) -> None:
         """Put a release at the checkout path, as a new image does at /opt/distribution."""
