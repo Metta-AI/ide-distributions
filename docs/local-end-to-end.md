@@ -56,7 +56,7 @@ on the pinned image.
 - For the real platform (Option B with `IDE_E2E_PLATFORM=real`) a **test** Player's
   `SOFTMAX_PLAYER_ID` and `SOFTMAX_PLAYER_CREDENTIAL` (a bare `cga_` token, or a player session
   as JSON; see `researcher/distribution.yaml`), `COGAMES_API_URL` when it is not
-  `https://softmax.com/api`, and `IDE_E2E_COWORLD`, the Coworld the Session opens on. The scenario
+  `https://softmax.com/api`, and `IDE_E2E_COWORLD`, the Coworld the chat Session is bound to. The scenario
   makes a real submission as that Player and spends model calls doing it. Check the credential
   first:
 
@@ -222,14 +222,14 @@ IDE_E2E_KEEP=1 IDE_E2E_PLATFORM=real IDE_E2E_TIMEOUT_S=1800 \
 ```
 
 With `IDE_E2E_PLATFORM=real` the harness does not configure the fake platform and writes
-`IDE_PLATFORM=real` plus `SOFTMAX_PLAYER_ID`, `SOFTMAX_PLAYER_CREDENTIAL`, `IDE_E2E_COWORLD` and
-`COGAMES_API_URL` (when set) from your environment into the host's and both profiles' `.env`. The
-three required ones must be set, or the test fails naming them. The Session opens on
-`IDE_E2E_COWORLD`, so the fixed request applies to it.
+`IDE_PLATFORM=real` plus `SOFTMAX_PLAYER_ID`, `SOFTMAX_PLAYER_CREDENTIAL`, `COGAMES_API_URL` and
+`IDE_E2E_COWORLD` (those that are set) from your environment into the host's and both
+profiles' `.env`, and opens the chat Session bound to `IDE_E2E_COWORLD`, so the fixed request
+applies to it. The run fails at once without the Player's two variables or `IDE_E2E_COWORLD`.
 
 The scenario's assertions were kept, read through the real client: it records the Player's
 submissions on the ladder when it starts and passes when a submission that was not there
-before appears (`RealPlatform.submissions(player_id=...)`), and the Session must still be on
+before appears (`RealPlatform.submissions(player_id=...)`), and the Session's Coworld must be
 `IDE_E2E_COWORLD`. The per-Player check is implied by the ladder's Player
 filter (the real `Submission` record carries no Player id), so a run with the real platform
 proves the chain ends in a submission as the test Player, not that the fake's `.env` isolation
@@ -313,7 +313,7 @@ store). The exact output is below.
   reads it); the tool never prints it and writes nothing on this machine. A later `up` without
   the key in the environment keeps the one already in the `.env` files.
 - For the real platform, the same variables as Option B: `SOFTMAX_PLAYER_ID`,
-  `SOFTMAX_PLAYER_CREDENTIAL`, optionally `COGAMES_API_URL` and `IDE_DEFAULT_COWORLD`.
+  `SOFTMAX_PLAYER_CREDENTIAL` and optionally `COGAMES_API_URL`.
 
 ### Commands
 
