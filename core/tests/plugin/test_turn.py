@@ -179,3 +179,15 @@ def test_an_opening_goal_is_said_to_be_the_first_request():
     block = turn.render_context_block({"opening_goal": "Reach the top 10"})
     assert "opening_goal: Reach the top 10" in block and session_context.OPENING_GOAL in block
     assert session_context.OPENING_GOAL not in turn.render_context_block({"league": "league_x"})
+
+
+def test_context_block_prints_the_guide_and_the_agent_profile():
+    text = turn.render_context_block(
+        {
+            "contract_version": 1,
+            "client": {"id": "aide", "kind": "ide", "guide": "client-web-ide"},
+            "agent_profile": {"name": "Ada", "focus": "openings"},
+        }
+    )
+    assert "(guide skill: client-web-ide)" in text
+    assert "agent profile:" in text and "Ada" in text

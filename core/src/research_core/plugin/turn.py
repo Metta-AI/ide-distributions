@@ -82,6 +82,8 @@ def render_context_block(parsed: dict) -> str | None:
         lines.append(OPENING_GOAL)
     if kept.get("policy"):
         lines.append(f"policy: {kept['policy']}")
+    if kept.get("agent_profile"):
+        lines.append(f"agent profile: {kept['agent_profile']}")
     if kept.get("view"):
         view = kept["view"]
         lines.append(

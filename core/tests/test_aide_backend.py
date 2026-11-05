@@ -215,6 +215,15 @@ def test_session_open_replays_its_session_and_refuses_reused_ids(system):
     assert ctx.wstore.one("SELECT COUNT(*) FROM client_admissions WHERE kind='open'")[0] == 1
 
 
+def test_session_open_names_the_web_ide_guide_for_every_turn(system):
+    async def scenario(backend, gateway, ctx, hermes):
+        await opened(backend)
+
+    run(system, scenario)
+    row = system[0].wstore.one("SELECT request FROM client_admissions WHERE kind='open'")
+    assert json.loads(row["request"])["client"]["guide"] == "client-web-ide"
+
+
 def test_chat_round_trip_streams_chunks_messages_and_outcome_to_every_subscriber(system):
     async def scenario(backend, gateway, ctx, hermes):
         session_id = await opened(backend)

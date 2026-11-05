@@ -12,9 +12,9 @@ steers or resumes the holder's run with them (entry 5).
 
 from __future__ import annotations
 
-from research_core import gitops, task_types
+from research_core import gitops, refs, task_types
 from research_core.coordinator import Coordinator
-from research_core.store import admissions, sessions, tasks
+from research_core.store import admissions, sessions, settings, tasks
 from research_core.store.registry import TASK_STATUSES, TASK_TYPES, WAIT_KINDS
 from research_core.tools import _args as a
 from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolError, ToolSpec
@@ -256,6 +256,14 @@ def handle(call: ToolCall) -> dict:
     if call.action == "reject":
         return {"record": tasks.reject(store, actor, n, next_step=call.get("next_step"))}
     if call.action == "wait":
+        ref = call.get("ref")
+        if call.get("kind") == "user" and not (
+            ref in settings.SETTINGS or refs.parse(str(ref)).record_kind == "task"
+        ):
+            raise ToolError(
+                "a user wait needs ref: the setting or Task (T-n) the user's answer changes; "
+                "nothing else ends it. For a decision, use task_ask"
+            )
         record = tasks.wait(
             store,
             actor,
