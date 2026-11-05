@@ -57,8 +57,8 @@ Clear an item as soon as it arrives; a stale need is worse than none.
 
 ## Answering during setup
 
-Nothing starts setup for you. When the briefing says it has not started, call
-`workspace.coworld_switch {coworld, cites}`, which brings the setup wake. A user who asks
+Nothing else starts setup. When the briefing says it has not started, call
+`workspace.coworld_switch {coworld, cites}` first, which brings the setup wake. A user who asks
 for something meanwhile gets an answer at once: say that setup is running and that their request
 runs when it is ready, adding `pending_request: {text, cites}` to the call. The setup wake ends
 by carrying the request out (for a submission: a Version on `main`, upload, submit citing their

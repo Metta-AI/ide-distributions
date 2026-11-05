@@ -54,7 +54,7 @@ WRITERS: dict[str, tuple[tuple[str, str], ...]] = {
     "directive": (("directive.add", "directive"),),
     "workspace_directive": (("directive.add", "directive"),),
     "champion": (("submit", "submit"),),
-    "capability": (("workspace.capabilities", "workspace.capabilities"),),
+    "capability": (),
     "intent": (
         ("upload", "upload"),
         ("submit", "submit"),

@@ -234,7 +234,12 @@ def load_mixin(tree: Path, fallback: Path) -> mixin.Mixin:
     try:
         return submission.load_mixin_for(tree, fallback)
     except mixin.MixinError as error:
-        raise ToolError(error.problems, mixin=str(tree / "mixin")) from error
+        problems = list(error.problems)
+        if not (fallback / mixin.FRONT_MATTER_FILE).is_file():
+            problems.append(
+                "setup has not run: the Orchestrator's workspace.coworld_switch does it"
+            )
+        raise ToolError(problems, mixin=str(tree / "mixin")) from error
 
 
 def dirty_files_excluding(tree: Path, artifact_path: str) -> list[str]:

@@ -261,7 +261,11 @@ def _setup_status(inputs: Inputs) -> str | None:
     )
     if started:
         return "Coworld setup: started, not finished"
-    return "Coworld setup: not started; workspace.coworld_switch starts it"
+    # The imperative is measured: 7 of 8 Kimi runs set up before building, against 1 of 8 for
+    # "not started; workspace.coworld_switch starts it".
+    return (
+        "Coworld setup: not started. Call workspace.coworld_switch first: nothing builds before it."
+    )
 
 
 def _credits(inputs: Inputs) -> str:

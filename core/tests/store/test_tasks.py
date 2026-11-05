@@ -915,6 +915,19 @@ def test_review_accept_sets_merge_pending_or_not_merged(
         tasks.set_merge(coworld_store, harness, task["id"], "sort of merged")
 
 
+def test_review_queues_a_merge_again_after_it_failed(
+    coworld_store, harness, researcher, session_actor, goal
+):
+    # merge-conflicts tells the Orchestrator to do this once a fix has merged.
+    task = finished(coworld_store, harness, researcher, goal)
+    tasks.review(coworld_store, session_actor, task["id"], accept=True, merge="yes", reason="ok")
+    tasks.set_merge(coworld_store, harness, task["id"], "not merged: merge conflict in a.py")
+    again = tasks.review(
+        coworld_store, session_actor, task["id"], accept=True, merge="yes", reason="fixed"
+    )
+    assert again["merge"] == "pending"
+
+
 def test_review_reopen_same_task(coworld_store, harness, researcher, session_actor, goal):
     task = finished(coworld_store, harness, researcher, goal)
     reopened = tasks.review(

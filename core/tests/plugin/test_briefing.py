@@ -344,7 +344,7 @@ def test_the_briefing_says_when_it_was_written_and_that_it_does_not_update(tmp_p
 
 def test_the_orchestrator_is_told_when_nothing_has_started_setup(tmp_path):
     ctx = make_ctx(tmp_path)
-    due = "workspace.coworld_switch starts it"
+    due = "Call workspace.coworld_switch first"
     assert due in briefing.render(ctx, "chat1", role="orchestrator", now=NOW)
     assert "Coworld setup" not in briefing.render(ctx, "chat1", role="researcher", now=NOW)
 

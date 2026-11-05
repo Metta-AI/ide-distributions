@@ -353,6 +353,13 @@ def image_policy(lab):
     return "sha256:" + config_digest
 
 
+def test_version_create_before_setup_says_what_starts_setup(lab):
+    (lab.code / "mixin" / "MIXIN.md").unlink()
+    result = lab.run("version", {"action": "create", "summary": "Too early"})
+    assert result["ok"] is False
+    assert "workspace.coworld_switch" in json.dumps(result)
+
+
 def test_version_create_records_image_archive_kind(lab):
     image_policy(lab)
     record = lab.create("Image")
