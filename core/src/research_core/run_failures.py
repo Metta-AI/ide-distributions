@@ -57,6 +57,7 @@ WAITING_CLASSES: frozenset[str] = frozenset(
 
 REASON_CLASSES: dict[str, ErrorClass] = {
     "billing": "budget_exhausted",
+    "output_limit": "too_large",
     "rate_limit": "rate_limited",
     "upstream_rate_limit": "rate_limited",
     "overloaded": "provider_unavailable",

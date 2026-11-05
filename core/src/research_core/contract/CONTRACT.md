@@ -159,8 +159,10 @@ other status). A budget wait can last past it, until the workspace's new key arr
 Each profile's model belongs to the profile, not to the host: a new install starts with what the
 profile's shipped `config.yaml` names (the Orchestrator: `moonshotai/kimi-k3.1-pro`, falling
 back to `z-ai/glm-5.3`; a Researcher: `recursive/flint-v1.0:free`, falling back to
-`moonshotai/kimi-k3`, all through OpenRouter), `prepare.py` never changes it, and only the user
-changes it, through the bridge. `moonshotai/kimi-k3.1-pro` and `moonshotai/kimi-k3` go only to
+`moonshotai/kimi-k3`, all through OpenRouter), and only the user changes it, through the bridge.
+`prepare.py` does not change it, with one exception: an Orchestrator on `moonshotai/kimi-k3`
+through OpenRouter, with no `profile.model_updated` event yet, moves once to
+`moonshotai/kimi-k3.1-pro`, recorded as that event with the actor `harness`. `moonshotai/kimi-k3.1-pro` and `moonshotai/kimi-k3` go only to
 Moonshot's own OpenRouter endpoint: `provider_routing.models` pins them, unless the owner routed
 that model. Another model the user picks gets no pin.
 

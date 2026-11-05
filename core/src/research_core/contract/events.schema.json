@@ -1,6 +1,6 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "https://github.com/Metta-AI/ide-distributions/contract/events.schema.json",
+  "$id": "https://github.com/softmax-universe/ide-distributions/contract/events.schema.json",
   "title": "Event",
   "description": "One row of a store's append-only events table, as the bridge streams it to clients (design A.11). Each store (the workspace store and each Coworld store) has its own seq; a client keeps one cursor per store and ignores kinds it does not know.",
   "contract_version": 1,

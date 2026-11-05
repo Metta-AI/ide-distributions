@@ -11,11 +11,12 @@ In order, ``prepare``:
 3. re-applies the protected config keys, removes the retired ones, points the profile at the
    shared skills, keeps profile cwd at the neutral workspace root, and applies the
    shipped values over earlier defaults only (``SHIPPED_VALUES``, ``EARLIER_DEFAULTS``) and
-   unions the shipped ``terminal.env_passthrough`` entries with the owner's. It never touches
-   the model settings (``model``, ``fallback_providers``): a new install takes them from the
-   shipped ``config.yaml`` and the bridge's ``/models`` route changes them. It adds the
-   shipped OpenRouter host pins (``PROVIDER_ROUTING_MODELS``) the owner's routing does not
-   already decide, so the two shipped Kimi models go only to Moonshot's own endpoint;
+   unions the shipped ``terminal.env_passthrough`` entries with the owner's. A new install
+   takes the model settings (``model``, ``fallback_providers``) from the shipped
+   ``config.yaml`` and the bridge's ``/models`` route changes them; the one exception is
+   ``migrate_orchestrator_model``. It adds the shipped OpenRouter host pins
+   (``PROVIDER_ROUTING_MODELS``) the owner's routing does not already decide, so the two
+   shipped Kimi models go only to Moonshot's own endpoint;
 4. (Orchestrator) removes the retired observation cron; research serve owns scheduling;
 5. builds or checks the workspace environment under a file lock;
 6. writes ``<profile>/.softmax-prepared`` and prints one JSON summary line.
@@ -44,6 +45,7 @@ from research_core import layout
 from research_core.layout import Workspace
 from research_core.locks import file_lock
 from research_core.store import coworlds
+from research_core.store.actors import Actor
 from research_core.store.db import Store
 
 ROLES = ("orchestrator", "researcher")
@@ -130,6 +132,10 @@ PROVIDER_ROUTING_MODELS: dict[str, dict[str, Any]] = {
     "moonshotai/kimi-k3.1-pro": {"only": ["moonshotai"]},
     "moonshotai/kimi-k3": {"only": ["moonshotai"]},
 }
+# The Orchestrators installed before Kimi K3.1 Pro became the default: see
+# migrate_orchestrator_model.
+SUPERSEDED_ORCHESTRATOR_MODEL = "moonshotai/kimi-k3"
+ORCHESTRATOR_MODEL = "moonshotai/kimi-k3.1-pro"
 # Lists the shipped config contributes to: the union of the shipped and retained entries is kept.
 ENV_PASSTHROUGH: dict[str, list[str]] = {
     "common": [
@@ -432,6 +438,67 @@ def apply_config(hermes: HermesCli, role: str, core_src: Path) -> list[str]:
     return actions
 
 
+def _model_change_recorded(ws: Workspace, profile_name: str) -> bool:
+    """Whether this profile's model has already been changed through the bridge or by a
+    migration. Read-only, so check mode can ask too."""
+    if not ws.store_path.exists():
+        return False
+    with sqlite3.connect(f"file:{ws.store_path}?mode=ro", uri=True) as store:
+        row = store.execute(
+            "SELECT 1 FROM events WHERE kind='profile.model_updated' AND subject=? LIMIT 1",
+            (profile_name,),
+        ).fetchone()
+    return row is not None
+
+
+def migrate_orchestrator_model(hermes: HermesCli, ws: Workspace, profile_name: str) -> list[str]:
+    """Move an Orchestrator still on the superseded default to the current one.
+
+    The one case where preparation changes a model. Kimi K3 refuses far more first-try tool
+    calls than K3.1 Pro (Asana 1220151358122555), and workspaces installed earlier kept it only
+    because they were installed earlier. A ``profile.model_updated`` event for the profile means
+    the model was chosen on purpose, so it stays, K3 included. The change records that event
+    itself, so a user who moves back to K3 afterwards stays there.
+    """
+    if (
+        hermes.config_get("model.default") != SUPERSEDED_ORCHESTRATOR_MODEL
+        or hermes.config_get("model.provider") != "openrouter"
+        or _model_change_recorded(ws, profile_name)
+    ):
+        return []
+    hermes.config_set("model.default", ORCHESTRATOR_MODEL)
+    action = f"config: moved model.default to {ORCHESTRATOR_MODEL} (one-time migration)"
+    if hermes.dry_run:
+        return [action]
+    fallbacks = [
+        {"provider": entry.get("provider") or "", "model": entry.get("model") or ""}
+        for entry in hermes.config_get("fallback_providers") or []
+        if isinstance(entry, dict)
+    ]
+    current = {
+        "profile": profile_name,
+        "role": "orchestrator",
+        "model": ORCHESTRATOR_MODEL,
+        "provider": "openrouter",
+        "fallbacks": fallbacks,
+    }
+    store = Store.open(ws.store_path, kind="workspace")
+    try:
+        with store.tx(Actor.harness()) as tx:
+            tx.event(
+                "profile.model_updated",
+                profile_name,
+                {
+                    **current,
+                    "previous": {**current, "model": SUPERSEDED_ORCHESTRATOR_MODEL},
+                    "changed": ["model.default"],
+                },
+            )
+    finally:
+        store.close()
+    return [action]
+
+
 # --- the watcher cron job ---------------------------------------------------------------------
 
 
@@ -606,6 +673,7 @@ def prepare(
 
     marker = profile / PREPARED_MARKER
     if role == "orchestrator":
+        actions.extend(migrate_orchestrator_model(cli, ws, profile.name))
         if not check:
             actions.append(retire_watcher_job(profile))
 

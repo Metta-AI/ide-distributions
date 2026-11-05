@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import sqlite3
 from pathlib import Path
 from subprocess import CompletedProcess
 
@@ -566,6 +567,85 @@ def test_prepare_never_touches_the_model_settings(homes):
     ]
     assert not [argv for argv in touched if any(a.startswith(("model", "fallback")) for a in argv)]
     assert "OPENROUTER_MODEL" not in fake.config["terminal.env_passthrough"]  # retired
+
+
+def _model_events(env):
+    path = layout.from_env(env).store_path
+    with sqlite3.connect(f"file:{path}?mode=ro", uri=True) as store:
+        rows = store.execute(
+            "SELECT actor, subject, payload FROM events WHERE kind='profile.model_updated'"
+        ).fetchall()
+    return [(actor, subject, json.loads(payload)) for actor, subject, payload in rows]
+
+
+KIMI_K3_ORCHESTRATOR = {
+    "model.default": "moonshotai/kimi-k3",
+    "model.provider": "openrouter",
+    "fallback_providers": [{"provider": "openrouter", "model": "z-ai/glm-5.3"}],
+}
+
+
+def test_prepare_moves_an_orchestrator_off_the_superseded_default_once(homes):
+    fake = FakeHermes(dict(KIMI_K3_ORCHESTRATOR))
+    profile, env = _prepared(homes, fake)
+    assert fake.config["model.default"] == "moonshotai/kimi-k3.1-pro"
+    assert fake.config["fallback_providers"] == KIMI_K3_ORCHESTRATOR["fallback_providers"]
+    [(actor, subject, payload)] = _model_events(env)
+    assert (actor, subject) == ("harness", profile.name)
+    assert payload["model"] == "moonshotai/kimi-k3.1-pro"
+    assert payload["previous"]["model"] == "moonshotai/kimi-k3"
+    assert payload["fallbacks"] == [{"provider": "openrouter", "model": "z-ai/glm-5.3"}]
+    assert payload["changed"] == ["model.default"]
+
+    # A user who moves back to K3 afterwards stays there, and no second event appears.
+    fake.config["model.default"] = "moonshotai/kimi-k3"
+    _prepared(homes, fake)
+    assert fake.config["model.default"] == "moonshotai/kimi-k3"
+    assert len(_model_events(env)) == 1
+
+
+def test_prepare_keeps_a_kimi_k3_the_user_chose(homes):
+    from research_core.store.actors import Actor
+    from research_core.store.db import Store
+
+    profile, env = homes
+    store = Store.open(layout.from_env(env).store_path, kind="workspace")
+    with store.tx(Actor.user("james")) as tx:
+        tx.event("profile.model_updated", profile.name, {"model": "moonshotai/kimi-k3"})
+    store.close()
+    fake = FakeHermes(dict(KIMI_K3_ORCHESTRATOR))
+    _prepared(homes, fake)
+    assert fake.config["model.default"] == "moonshotai/kimi-k3"
+
+
+@pytest.mark.parametrize(
+    "config, role",
+    [
+        (KIMI_K3_ORCHESTRATOR, "researcher"),
+        ({**KIMI_K3_ORCHESTRATOR, "model.provider": "custom"}, "orchestrator"),
+        ({**KIMI_K3_ORCHESTRATOR, "model.default": "owner/choice"}, "orchestrator"),
+    ],
+)
+def test_prepare_moves_only_an_orchestrator_on_the_superseded_default(homes, config, role):
+    fake = FakeHermes(dict(config))
+    _, env = _prepared(homes, fake, role=role)
+    assert fake.config["model.default"] == config["model.default"]
+    assert _model_events(env) == []
+
+
+def test_prepare_check_mode_plans_the_model_move_without_making_it(homes, capsys):
+    profile, env = homes
+    fake = FakeHermes(dict(KIMI_K3_ORCHESTRATOR))
+    summary = prepare.prepare(
+        REPO / "orchestrator",
+        prepare.HermesCli("hermes", profile, env, fake.run),
+        env=env,
+        run=fake.run,
+        check=True,
+    )
+    assert any("moonshotai/kimi-k3.1-pro" in action for action in summary["planned"])
+    assert fake.config["model.default"] == "moonshotai/kimi-k3"
+    assert not layout.from_env(env).store_path.exists()
 
 
 def test_prepare_keeps_the_owners_passthrough_entries(homes):

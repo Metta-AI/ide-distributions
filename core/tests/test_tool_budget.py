@@ -72,6 +72,7 @@ def test_in_process_imports_are_stdlib_only():
         "class Ctx:\n"
         "    def register_tool(self, **k): pass\n"
         "    def register_hook(self, *a, **k): pass\n"
+        "    def register_middleware(self, *a, **k): pass\n"
         "    def register_system_prompt_section(self, *a, **k): pass\n"
         "for role in ('orchestrator', 'researcher'):\n"
         "    research_core.plugin.register.make_register(role)(Ctx())\n"

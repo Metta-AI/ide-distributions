@@ -214,9 +214,41 @@ session DELETE route and then retire their workspace registry/admission records.
 write guards are retained and reported for a later retry. Scoped chats, workspace chats,
 tasks and goals are outside this cleanup. Startup never performs this deletion automatically.
 
-Text acceptance uses durable native intake identities; ordered OpenAI messages and every user
-attachment remain intact. Full retained messages are pushed during work; the native HTTP API
+Text acceptance uses durable native intake identities. Supported input is one final user message,
+preceded optionally by plain-text system/developer messages or user messages named
+`softmax_page_context`. Page data uses the named user form. Other prefix shapes return
+`unsupported` before acceptance. The final user keeps its structured attachments.
+The owned request middleware injects the current prefix into each model call while native
+conversation history remains authoritative. Context turns wait for the active turn instead of
+steering it. Full retained messages are pushed during work; the native HTTP API
 exposes persisted messages rather than raw OpenAI completion chunks. Pending approvals and
 clarifications are generation-fenced. Commands persist their identities before dispatch.
 A saved reply replays exactly; interrupted dispatch returns `unavailable` with
 `outcome: "unknown"` and never repeats a possibly executed control action.
+
+## Distribution tool timing
+
+`workspace_tool` schema version 1 is one JSON stderr line per completed `run_tool` invocation.
+It covers registered distribution tools in both executors. Workspace subprocess telemetry is
+relayed once by the plugin; the parent does not emit a second event. Native Hermes built-in
+tools are outside this boundary.
+
+Fields are `session_id` (native session, possibly empty outside Hermes), `role`, `tool`,
+`action` (registered action or null), `outcome`, and `elapsed_ms`. Unknown tool names are
+recorded as `unknown`. No arguments, results, prompt content or error text are emitted.
+`elapsed_ms` uses a monotonic clock from tool-module loading through validation, execution,
+JSON rendering and state-path scrubbing. It excludes workspace subprocess startup, Hermes
+post-result processing, model calls and transport delivery. A timeout or terminated subprocess
+can exit without an event; this is completion coverage, not an attempted-call denominator.
+
+Outcomes distinguish `validation_rejected` (handler never ran), `tool_rejected` (`ToolError`),
+`store_rejected` (`StoreError`), `internal_error` (unexpected error), `failed` (handler returned
+false `ok`), `succeeded`, and `unknown_tool`. Count events, rather than summing elapsed time,
+for tool counts; concurrent tool durations can overlap. Session IDs are join fields, not
+metric tags. There is no inferred run ID or provider cache classification.
+
+These are structured logs, not custom Datadog metrics. Release the normal distribution image
+and verify log ingestion before making dashboard availability claims. A current model trace,
+time to first token, provider cached-token usage, session restoration and cache-miss evidence
+must come from the supported native runtime/provider surfaces. Retained workspace startup
+alone does not prove a warm model context or provider key/value cache hit.

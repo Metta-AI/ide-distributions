@@ -41,8 +41,10 @@ when you call the script). With `IDE_WORKSPACE` unset the workspace defaults to
    the Orchestrator's compaction settings, the tool-result prune trigger, the disabled Hermes
    toolsets), removes retired keys, points every profile at the
    active Coworld (`skills.external_dirs`, `skills.trusted_project_dirs`, `terminal.cwd`), and
-   applies shipped values only where the owner kept an earlier default; it never changes the
-   model, but adds the OpenRouter host pins for the Kimi models (`provider_routing.models`,
+   applies shipped values only where the owner kept an earlier default; it does not change the
+   model (the one exception: an Orchestrator on `moonshotai/kimi-k3` with no recorded model
+   change moves once to `moonshotai/kimi-k3.1-pro`, see `contract/CONTRACT.md`, "Profile
+   models"), but adds the OpenRouter host pins for the Kimi models (`provider_routing.models`,
    Moonshot only) unless the owner set routing for that model or for every model
    (Hermes applies a per-model entry over the rules for every model, so route a Kimi model
    differently with an entry under `provider_routing.models`);
@@ -208,3 +210,12 @@ daily lock refresh keeps `coworld` and `softmax-cli` current.
 - S3: the bridge reads a store with WAL under gVisor.
 - S4: whether the profile venv is writable (not needed any more: the workspace environment is
   the one `prepare.py` manages).
+
+## Output reservations
+
+Both research profiles use Hermes's `llm_request` middleware to cap OpenRouter output at
+16,384 tokens, preserving smaller explicit caps. This limits the up-front credit reservation
+without changing the context window. A 402 reporting a positive affordable output count does
+not prove exhausted credit: it records `output_limit` and fails that run without locking other
+model work or scheduling budget-refill continuations. A zero affordable count and other billing
+failures retain the budget gate. The platform owns daily allowance and owner team membership.

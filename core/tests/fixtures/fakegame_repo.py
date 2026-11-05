@@ -316,7 +316,7 @@ def _citation(mechanics: str, start: int, end: int) -> dict:
     lines = mechanics.splitlines(keepends=True)
     text = "".join(lines[start - 1 : end])
     return {
-        "repo": f"Metta-AI/{COWORLD_NAME}",
+        "repo": f"softmax-universe/{COWORLD_NAME}",
         "path": "docs/mechanics.md",
         "commit": SOURCE_COMMIT,
         "start": start,
@@ -335,7 +335,7 @@ def _claim_doc(claim_id: str, ref: str, sentence: str) -> str:
         evidence:
         - direct: true
           ref: {ref}
-          source_group: Metta-AI/{COWORLD_NAME}@{SOURCE_COMMIT}
+          source_group: softmax-universe/{COWORLD_NAME}@{SOURCE_COMMIT}
           stance: supports
           tier: A
         evidence_grade: high
