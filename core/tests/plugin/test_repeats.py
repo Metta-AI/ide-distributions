@@ -101,6 +101,24 @@ def test_transform_never_raises_and_ignores_non_refusals():
     assert hook(tool_name="claim", args=object(), result="{", session_id="s") is None
 
 
+def test_a_short_refusal_keeps_what_the_dropped_copy_held():
+    conflict = {
+        "ok": False,
+        "error": "the page changed since you read it",
+        "problems": ["wiki edit conflict"],
+        "conflict": True,
+        "current_body": "the page now",
+        "current_revision_id": "r2",
+        "context": {"action": "edit"},
+        "usage": {"does": "long"},
+    }
+    short = json.loads(repeats.firmer_refusal("researcher", "wiki_edit", conflict, 2))
+    assert short["current_body"] == "the page now"
+    assert short["current_revision_id"] == "r2"
+    assert short["context"] == {"action": "edit", "tool": "wiki_edit", "refused": 2}
+    assert "usage" not in short
+
+
 def refused_pair(call_id: str, arguments: str = '{"action":"write"}', name: str = "claim") -> list:
     """A call and its refusal as they appear in a request, with Hermes's loop warning appended."""
     return [

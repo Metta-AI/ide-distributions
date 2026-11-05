@@ -114,8 +114,8 @@ and the model's next call is judged. It runs like the command above, with this f
 `test_real_session.py` and `--add-host proxy.openrouter.ai:127.0.0.1` added to `docker run`: Hermes
 shapes a request by its base URL, and that name makes the proxy count as OpenRouter (about $1).
 
-Each request keeps only the latest of identical refused calls (`plugin/repeats.py`,
-`without_repeated_refusals`). Rates of the next call on Kimi K3.1 Pro, November 4, 2026. The first
+Each request keeps only the latest of identical refused calls, for responses holding one call
+(`plugin/repeats.py`, `without_repeated_refusals`). Rates of the next call on Kimi K3.1 Pro, November 4, 2026. The first
 row is this test, 40 runs per cell; the others are direct calls with the real context, 60 per cell:
 
 | Refused calls in the history | Sent in full | Latest of each only |

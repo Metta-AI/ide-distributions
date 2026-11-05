@@ -12,7 +12,8 @@ subagent spawns. So a halt does not always mean a tool failed. The runs API repo
 
 * ``without_repeated_refusals`` (``llm_request`` middleware): a model shown the same refused call
   several times tends to send it again, whatever the refusal says. So each request keeps only the
-  latest of identical refused calls. Only the request changes: the stored history keeps them all,
+  latest of identical refused calls (a response with one call; a batch is left alone). Only the
+  request changes: the stored history keeps them all,
   and Hermes's guard still counts them. When a call is refused again, the provider's cache misses
   once from where the earlier copy was. Measured on Kimi K3.1 Pro on 2026-11-04 (README, "Develop
   and test").
@@ -88,7 +89,8 @@ def args_hash(args: Any) -> str:
 
 
 def firmer_refusal(role: Role, tool_name: str, refusal: dict, count: int) -> str:
-    """The short refusal that replaces the ``count``-th identical one."""
+    """The short refusal that replaces the ``count``-th identical one. It may be the only copy a
+    request keeps, so all but the long ``usage`` stays: a wiki conflict's ``current_body``, say."""
     problems = [str(p) for p in refusal.get("problems") or []]
     fields = [m.group(1) for p in problems if (m := _REQUIRED.match(p))]
     if fields:
@@ -97,12 +99,14 @@ def firmer_refusal(role: Role, tool_name: str, refusal: dict, count: int) -> str
         supply = f"Fix what the refusal names ({'; '.join(problems)[:300]})"
     way_out = WAY_OUT.get(role, "report the problem")
     message = f"This exact call was refused {count} times. {supply}, or {way_out} and end the run."
+    kept = {key: value for key, value in refusal.items() if key != "usage"}
     return json.dumps(
         {
+            **kept,
             "ok": False,
             "error": message,
             "problems": problems,
-            "context": {"tool": tool_name, "refused": count},
+            "context": {**(refusal.get("context") or {}), "tool": tool_name, "refused": count},
         }
     )
 

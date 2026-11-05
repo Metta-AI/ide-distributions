@@ -8,9 +8,9 @@ real hooks, Hermes's real loop guard), the turn is one turn, and the model's nex
 
 It listens under a name in OpenRouter's domain (``PROXY_HOST``, which the docker command in the
 README points at the container itself), because Hermes shapes a request by its base URL: only for
-OpenRouter does it add cache markers (``agent/agent_runtime_helpers.py``, which turn the last results
-into text parts) and replay ``reasoning_details`` (``agent/reasoning_params.py``). So what the model
-gets is what production sends.
+OpenRouter does it add cache markers (``agent/agent_runtime_helpers.py``, which turn the last
+results into text parts) and replay ``reasoning_details`` (``agent/reasoning_params.py``). So what
+the model gets is what production sends.
 """
 
 from __future__ import annotations
