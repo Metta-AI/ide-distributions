@@ -1,5 +1,7 @@
 """The plugin reads its environment through the routed profile's secret scope."""
 
+import json
+import subprocess
 import sys
 import types
 
@@ -57,3 +59,36 @@ def test_workspace_process_env_drops_hermes_interpreter_variables(tmp_path):
     assert clean["PATH"].split(":")[0] == str(ws.venv / "bin")
     assert clean["PATH"].endswith("/opt/hermes/.venv/bin:/usr/bin")
     assert clean["OPENROUTER_API_KEY"] == "k" and clean["IDE_WORKSPACE"] == env["IDE_WORKSPACE"]
+
+
+def test_workspace_tool_telemetry_relay_is_once_and_omits_other_stderr(
+    tmp_path, monkeypatch, capsys
+):
+    from research_core import layout
+
+    env = {"IDE_WORKSPACE": str(tmp_path / "ws")}
+    ws = layout.from_env(env)
+    ws.venv_python.parent.mkdir(parents=True)
+    ws.venv_python.touch()
+    event = json.dumps(
+        {
+            "event": "workspace_tool",
+            "schema_version": 1,
+            "session_id": "s1",
+            "role": "researcher",
+            "tool": "demo",
+            "action": None,
+            "outcome": "validation_rejected",
+            "elapsed_ms": 0.2,
+        },
+        separators=(",", ":"),
+    )
+    monkeypatch.setattr(
+        executor.subprocess,
+        "run",
+        lambda *a, **kw: subprocess.CompletedProcess(
+            a[0], 0, stdout='{"ok":false}', stderr=f"secret diagnostic\n{event}\n"
+        ),
+    )
+    assert executor.run_in_workspace("demo", {}, env) == '{"ok":false}'
+    assert capsys.readouterr().err == event + "\n"

@@ -19,9 +19,11 @@ from __future__ import annotations
 
 import json
 import os
+import sys
+import time
 import traceback
 from collections.abc import Callable, Mapping
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from functools import cached_property
 from typing import TYPE_CHECKING, Any, Literal
 
@@ -447,36 +449,94 @@ def error_payload(problems: list[str], context: dict | None = None) -> dict:
     }
 
 
+@dataclass(frozen=True)
+class ToolTiming:
+    """Payload-free completion telemetry for the shared distribution tool boundary."""
+
+    # Discriminators lead the wire encoding so the workspace relay can select this event.
+    event: Literal["workspace_tool"] = field(default="workspace_tool", init=False)
+    schema_version: Literal[1] = field(default=1, init=False)
+    session_id: str
+    role: Role
+    tool: str
+    action: str | None
+    outcome: Literal[
+        "unknown_tool",
+        "validation_rejected",
+        "succeeded",
+        "failed",
+        "tool_rejected",
+        "store_rejected",
+        "internal_error",
+    ]
+    elapsed_ms: float
+
+
 def run_tool(name: str, args: Mapping[str, Any], ctx: ToolContext) -> str:
     """Validate, run and render a tool call as JSON text. Never raises."""
     from research_core.tools.catalog import _load_tool_modules
 
-    _load_tool_modules()
-    spec = TOOLS.get(name)
-    if spec is None or ctx.role not in spec.roles:
-        return json.dumps(error_payload([f"unknown tool {name!r} for the {ctx.role}"]))
-    action, problems = validate_args(spec, ctx.role, args)
-    if problems:
-        return json.dumps(argument_error(spec, ctx.role, action, args, problems))
+    started = time.monotonic()
+    tool_name = "unknown"
+    action = None
+    outcome = "internal_error"
+    spec = None
     try:
-        args = drop_unused_empty(spec, action, args)
-        call = ToolCall(spec=spec, args=coerce_args(spec, ctx.role, args), ctx=ctx, action=action)
-        result = spec.handler(call)
-        if not isinstance(result, dict):
-            result = {"result": result}
-        result.setdefault("ok", True)
-        text = json.dumps(result, default=str)
-    except ToolError as error:
-        text = json.dumps(error_payload(error.problems, {"tool": name, **error.context}))
-    except StoreError as error:
-        text = json.dumps(
-            error_payload(list(error.problems) or [str(error)], {"tool": name, "action": action})
-        )
-    except Exception as error:  # the agent must see what failed, with context
-        text = json.dumps(
-            error_payload(
-                [f"{type(error).__name__}: {error}"],
-                {"tool": name, "action": action, "traceback": traceback.format_exc()[-2000:]},
+        _load_tool_modules()
+        spec = TOOLS.get(name)
+        if spec is None or ctx.role not in spec.roles:
+            outcome = "unknown_tool"
+            return json.dumps(error_payload([f"unknown tool {name!r} for the {ctx.role}"]))
+        tool_name = spec.name
+        action, problems = validate_args(spec, ctx.role, args)
+        if problems:
+            outcome = "validation_rejected"
+            return json.dumps(argument_error(spec, ctx.role, action, args, problems))
+        try:
+            args = drop_unused_empty(spec, action, args)
+            call = ToolCall(
+                spec=spec, args=coerce_args(spec, ctx.role, args), ctx=ctx, action=action
             )
+            result = spec.handler(call)
+            if not isinstance(result, dict):
+                result = {"result": result}
+            result.setdefault("ok", True)
+            outcome = "succeeded" if result["ok"] else "failed"
+            text = json.dumps(result, default=str)
+        except ToolError as error:
+            outcome = "tool_rejected"
+            text = json.dumps(error_payload(error.problems, {"tool": name, **error.context}))
+        except StoreError as error:
+            outcome = "store_rejected"
+            text = json.dumps(
+                error_payload(
+                    list(error.problems) or [str(error)], {"tool": name, "action": action}
+                )
+            )
+        except Exception as error:  # the agent must see what failed, with context
+            outcome = "internal_error"
+            text = json.dumps(
+                error_payload(
+                    [f"{type(error).__name__}: {error}"],
+                    {"tool": name, "action": action, "traceback": traceback.format_exc()[-2000:]},
+                )
+            )
+        return ctx.scrub(text)
+    finally:
+        # No arguments, results, prompts or error text: tool payloads may contain secrets.
+        event = ToolTiming(
+            session_id=ctx.hermes_session_id(),
+            role=ctx.role,
+            tool=tool_name,
+            action=action if spec is not None and spec.action(action) is not None else None,
+            outcome=outcome,
+            elapsed_ms=round((time.monotonic() - started) * 1000, 3),
         )
-    return ctx.scrub(text)
+        sys.stderr.write(
+            json.dumps(
+                asdict(event),
+                separators=(",", ":"),
+            )
+            + "\n"
+        )
+        sys.stderr.flush()

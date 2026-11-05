@@ -206,8 +206,8 @@ def _call(raw: dict) -> Call:
 
 def catalog_refusal(role: Role, tool: str, args: dict) -> str:
     """``run_tool``'s text for a call it refuses before touching the store or the workspace
-    (the argument check), so the context needs only the role."""
-    ctx = ToolContext(role=role, actor=None, workspace=None, env={})  # type: ignore[arg-type]
+    (the argument check), using a valid context without opening the workspace."""
+    ctx = ToolContext.from_env(role, {})
     return run_tool(tool, args, ctx)
 
 
