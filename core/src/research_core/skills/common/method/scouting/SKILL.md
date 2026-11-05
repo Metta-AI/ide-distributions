@@ -12,7 +12,7 @@ Scouting keeps the picture of the League current: where the Player stands, who m
 1. `platform.results {league}`: our standing rows and memberships. `platform.champion {league}`: the policy version that represents the Player (the Champion is never the winner).
 2. `platform.standings {league}`: every Division with rank, score and rounds played; `platform.divisions` for the ladder.
 3. `platform.active_policies {league, exclude_player: true}`: the field by policy version and Player. Standings list Players; this is how you learn which policy version each one runs, never by guessing.
-4. Save the outputs under `documents/scouting/<date>/` and commit them in your worktree.
+4. Save the outputs under `documents/scouting/<date>/` in the Coworld folder, not in your worktree. `documents/` is not in git, so there is nothing to commit.
 
 ## Compare
 
