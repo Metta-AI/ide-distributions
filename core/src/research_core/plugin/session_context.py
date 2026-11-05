@@ -1,4 +1,4 @@
-"""The Orchestrator's session-context prompt section (design §10, A.3, A.7).
+"""The session-context prompt section of both roles (design §10, A.3, A.7).
 
 It shows what the client declared when the conversation opened (its session context and the
 capabilities of the attached clients) and the fixed authority paragraph for modes and commands.
@@ -28,10 +28,30 @@ OPENING_GOAL = (
 )
 
 
+def no_client_text(role: str, kind: str) -> str:
+    """What to do when no client declared what it can show. Only a chat has someone reading it, and
+    a Researcher has no ``ui`` tool."""
+    if role == "researcher":
+        return (
+            "No client is attached and the user does not read this Session: you reach the "
+            "Orchestrator through your Task, with task.ask for a question."
+        )
+    if kind == "wake":
+        return (
+            "No client is attached and nobody reads this Session: report with ui.notify, and use "
+            "ui.ask when only the user can answer."
+        )
+    return (
+        "No client capabilities are known: use ui.notify for news and ask in chat when only the "
+        "user can answer."
+    )
+
+
 def render(ctx: Any, session_id: str, max_chars: int = MAX_CHARS) -> str:
     from research_core.store import sessions
 
     session = sessions.read(ctx.wstore, session_id) if session_id else None
+    kind = session["kind"] if session else "chat"
     parts = ["[session context]", AUTHORITY]
     if session and session.get("session_context"):
         parts.append(
@@ -39,12 +59,12 @@ def render(ctx: Any, session_id: str, max_chars: int = MAX_CHARS) -> str:
         )
         if session["session_context"].get("opening_goal"):
             parts.append(OPENING_GOAL)
-    else:
+    elif kind == "chat":
         parts.append("No session context was declared; the client did not say what it shows.")
     coworld = ctx.coworld_or_none()
     if coworld is not None:
         parts.append(
-            f"Work only in {coworld.code}. "
+            f"Work only in {coworld.root}. "
             f"This session belongs to {coworld.coworld_id}; do not change its Coworld."
         )
         parts.append(
@@ -65,10 +85,7 @@ def render(ctx: Any, session_id: str, max_chars: int = MAX_CHARS) -> str:
             + json.dumps(session["client_capabilities"], sort_keys=True)
         )
     else:
-        parts.append(
-            "No client capabilities are known: use ui.notify for news and ask in chat when only "
-            "the user can answer."
-        )
+        parts.append(no_client_text(ctx.role, kind))
     text = "\n\n".join(parts)
     if len(text) > max_chars:
         text = text[: max_chars - 15].rstrip() + "\n[+ truncated]"

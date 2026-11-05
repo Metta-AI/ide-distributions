@@ -122,6 +122,28 @@ def test_session_context_section(tmp_path, monkeypatch):
     )
 
 
+def test_only_a_chat_is_told_to_ask_in_chat(tmp_path):
+    from research_core.store import sessions
+
+    ctx = make_ctx(tmp_path)
+    for session_id, kind in (("chat2", "chat"), ("wake1", "wake")):
+        sessions.register(
+            ctx.wstore,
+            Actor.parse("harness"),
+            session_id=session_id,
+            profile="orchestrator",
+            kind=kind,
+        )
+    assert "ask in chat" in session_context.render(ctx, "chat2")
+    wake = session_context.render(ctx, "wake1")
+    assert "ask in chat" not in wake and "nobody reads" in wake and "ui.ask" in wake
+    assert "No session context" not in wake
+    assert f"Work only in {ctx.coworld().root}." in wake
+    researcher = ToolContext.from_env("researcher", ctx.env)
+    text = session_context.render(researcher, "unknown")
+    assert "ui." not in text and "task.ask" in text
+
+
 def test_reactions_reach_the_agent_at_its_next_turn(tmp_path):
     from research_core.store import ui_state
 

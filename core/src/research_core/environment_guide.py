@@ -171,13 +171,13 @@ def _reaching_the_user(role: str) -> list[str]:
     if role == "orchestrator":
         lines += [
             "- In a chat Session, answer in the conversation.",
-            "- From a wake or any background Session, `ui.notify` is the only channel to the "
-            "user; it informs and never asks. Use `ui.ask` for a question a client can answer.",
+            "- From a wake or any background Session, nobody reads the chat: `ui.notify` informs "
+            "and never asks, and `ui.ask` asks what only the user can answer.",
         ]
     else:
         lines += [
             "- Researchers never talk to the user directly: `task.ask` puts a question on the "
-            "Task for the Orchestrator and the user, and `task.message` sends progress.",
+            "Task for the Orchestrator, and the Task's result reports the outcome.",
         ]
     lines.append("")
     return lines
