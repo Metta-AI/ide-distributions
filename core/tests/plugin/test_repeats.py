@@ -184,6 +184,20 @@ def test_a_result_holding_more_than_loop_guard_notes_is_kept():
     assert rewritten["request"]["messages"] == [user, *steered, *guarded]
 
 
+def test_a_drop_never_leaves_two_user_messages_in_a_row():
+    first_user, second_user = {"role": "user", "content": "a"}, {"role": "user", "content": "b"}
+    first, second = refused_pair("a"), refused_pair("b")
+    rewritten = repeats.without_repeated_refusals(
+        request={"messages": [first_user, *first, second_user, *second]}
+    )
+    assert rewritten is None, "nothing could be dropped"
+    third = refused_pair("c")
+    rewritten = repeats.without_repeated_refusals(
+        request={"messages": [first_user, *first, *second, second_user, *third]}
+    )
+    assert rewritten["request"]["messages"] == [first_user, *second, second_user, *third]
+
+
 def test_a_request_without_repeats_is_left_alone():
     success = [
         {

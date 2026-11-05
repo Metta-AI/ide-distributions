@@ -15,7 +15,7 @@ import pytest
 from research_core.plugin.repeats import drop_repeated_refusals
 from tests.model import harness
 from tests.model.forcing_proxy import FORCED_ID_PREFIX, ForcingProxy
-from tests.model.real_session import HOST_LABEL, RECOVERY_CASES, RealGateway, hermes_bin_from_env
+from tests.model.real_session import MID_TURN_LABEL, RECOVERY_CASES, RealGateway, hermes_bin_from_env
 from tests.model.test_real_session import AGREED_RATE, DEFAULT_REPEATS, MIN_SAMPLE, MODEL
 from tests.model.write_actions import RECOVERY_DEPTHS, Case
 
@@ -90,7 +90,7 @@ def test_the_agreed_rate(refusals: int):
     results = [
         r
         for r in harness.RESULTS.items
-        if r.host == HOST_LABEL and harness.refusals_in(r.case) == refusals
+        if r.host == MID_TURN_LABEL and harness.refusals_in(r.case) == refusals
     ]
     valid, total = harness.judged_rate(results)
     if total < MIN_SAMPLE and harness.env_list("IDE_TOOL_CALL_CASES"):

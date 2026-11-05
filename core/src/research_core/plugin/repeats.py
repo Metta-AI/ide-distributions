@@ -151,7 +151,15 @@ def drop_repeated_refusals(messages: list[dict]) -> list[dict]:
         if call in latest:
             dropped |= {latest[call], latest[call] + 1}
         latest[call] = index
-    return [message for index, message in enumerate(messages) if index not in dropped]
+    kept: list[dict] = []
+    for index, message in enumerate(messages):
+        if index in dropped:
+            continue
+        # Hermes merges adjacent user messages before this runs, and some providers reject them.
+        if index - 1 in dropped and message.get("role") == "user" and kept[-1].get("role") == "user":
+            kept += messages[index - 2 : index]
+        kept.append(message)
+    return kept
 
 
 def without_repeated_refusals(*, request: dict[str, Any], **_: Any) -> dict[str, Any] | None:

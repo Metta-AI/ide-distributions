@@ -54,6 +54,7 @@ from tests.model.forcing_proxy import ForcedCall, ForcingProxy
 from tests.model.write_actions import Case
 
 HOST_LABEL = "real session"
+MID_TURN_LABEL = "real session, one turn"
 RUN_TIMEOUT_S = 600
 STOP_TIMEOUT_S = 60
 POLL_S = 2
@@ -337,7 +338,8 @@ class RealGateway:
 
     def run_case(self, model: str, case: Case) -> harness.Result:
         """Start a run for the case and read the Session until the judged call shows up."""
-        result = harness.Result(model, HOST_LABEL, case.label, "wrong_tool")
+        label = MID_TURN_LABEL if self.forcing else HOST_LABEL
+        result = harness.Result(model, label, case.label, "wrong_tool")
         session_id = self.open_session(case.role)
         text = case.instruction.replace("<run>", str(next(RUN_NUMBERS)))
         seeded = 0
