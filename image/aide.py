@@ -1022,7 +1022,13 @@ class Backend:
                 "source_seq": source_seq,
                 "actor": "user:aide",
             }
-            await self.call(self.seam, "POST", "/message-events", json=body)
+            try:
+                await self.call(self.seam, "POST", "/message-events", json=body)
+            except httpx.TransportError as error:
+                # No answer says nothing about the commit, and ``place`` has already moved past
+                # this event, so following on would append after a gap. This fails like a 5xx:
+                # the backend ends and the next one resumes from what the log holds.
+                raise Refusal("unavailable", type(error).__name__, unknown=True) from error
             await self.notify(request.session_id, "chat.event", note | {"event": body["event"]})
             if isinstance(event, TextDelta):
                 chunk = {
@@ -1108,7 +1114,9 @@ class Backend:
                     await self.record(request, run.run_id, progress.flush())
                     if not progressed:
                         return False, after  # a quiet closed stream; the consumer follows again
-            except httpx.TransportError:  # the gateway stream dropped; resume after last_seq
+            # The run stream dropped, or a read for a push failed; ``record`` lets no failed append
+            # reach here. Resume after last_seq.
+            except httpx.TransportError:
                 await asyncio.sleep(1)
 
     async def consume(self, request_id: str, session_id: str, scope: Scope) -> None:
@@ -1117,7 +1125,8 @@ class Backend:
 
         It resumes after the log's last row, so a restarted backend neither repeats nor skips
         an event the log holds. The gateway restarts with the backend, so its buffer does not
-        cover the gap. Any failure here but a dropped run stream ends the backend's task group.
+        cover the gap. Any failure here but a dropped run stream or a failed read for a push ends
+        the backend's task group.
         """
         wake = self.wakes[request_id]
         request = await self.request(session_id, scope, request_id)
