@@ -351,7 +351,7 @@ def _champion_and_versions(inputs: Inputs) -> Section:
     )
     for row in rows:
         if row["state"] == "none":
-            lines.append(f"Champion in {row['league_id']}: none (empty league)")
+            lines.append(f"Champion in {row['league_id']}: none (this Player has no membership)")
             continue
         version = f"V-{row['version_id']}" if row["version_id"] else "an outside policy version"
         since = f" since {str(row['since'])[:10]}" if row["since"] else ""

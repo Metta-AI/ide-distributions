@@ -38,9 +38,8 @@ RULES: tuple[Rule, ...] = (
         "raw-submit",
         r"\bcoworld\s+submit\b",
         "submit",
-        "A raw `coworld submit` leaves no Version or submission record, so the briefing, the "
-        "champion sync and the user's clients will not know about it. Use the submit tool "
-        "(it records the intent, the result and a notice).",
+        "A raw `coworld submit` leaves no Version link or submission record and tells the user's "
+        "clients nothing. Use the submit tool (it records the intent, the result and a notice).",
         "upload",
         note_for={
             "researcher": "A Researcher does not submit, and a raw `coworld submit` leaves no "

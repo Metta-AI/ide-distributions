@@ -21,8 +21,8 @@ metta changes); the build decisions are in `docs/plans/ide-profile-refactor/00-o
   writable.
 - Hermes v0.22.6 or later, the version `image/Dockerfile` and CI pin, with its interpreter at a
   fixed path. Older versions have no `hermes sessions refresh-prompts`, so a release would not reach
-  open chats ("Open chats after a release"). The plugin, `prepare.py` and the watcher launcher are
-  stdlib-only Python and run under that interpreter.
+  open chats ("Open chats after a release"). The plugin (stdlib and OpenTelemetry, which the
+  image build installs there), `prepare.py` and the watcher launcher run under that interpreter.
 - `uv`, `git`, and the toolchains Coworld mixins declare (today: none shipped; a mixin may ask
   for another Python, which setup and the watcher install under `$IDE_WORKSPACE/tools/`; any
   other kind, such as Nim, is installed there by hand).

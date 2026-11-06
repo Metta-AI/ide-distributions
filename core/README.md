@@ -7,13 +7,14 @@ decisions is `docs/plans/ide-profile-refactor/`.
 
 ## Two environments
 
-- **Hermes's interpreter** imports the stdlib-only base of this package (the plugin shim in each
-  profile puts `core/src` on `sys.path`, from the path `prepare.py` records). Everything the plugin
-  touches in process must import without third-party packages: `layout`, `refs`, `store/*`,
+- **Hermes's interpreter** imports a base of this package (the plugin shim in each profile puts
+  `core/src` on `sys.path`, from the path `prepare.py` records). It has the stdlib and OpenTelemetry,
+  which the image build installs there, and no Softmax client. Everything the plugin touches in
+  process must import with only those: `layout`, `refs`, `store/*`,
   `plugin/*`, `tools/base.py` and the in-process tools (`goal`, `task`, `directive`, `claim`,
-  `settings`, `ui`, and those split from their actions; `experiment_create` and `experiment_add_run`
-  are not, as `experiment` is not). `core/tests/test_tool_budget.py`
-  enforces it. The catalog imports every tool module, and a module that fails to import stops whatever asked for the tools: the prompt build,
+  `settings`, `ui`, and those split from their actions; `experiment_create` is not, as `experiment`
+  is not). `core/tests/test_package.py` imports the plugin and catalog without the Softmax client.
+  The catalog imports every tool module, and a module that fails to import stops whatever asked for the tools: the prompt build,
   the tests or, on a gateway, the plugin (`test_broken_tool_module_real.py`: Hermes logs "Failed to
   load plugin" and serves on, with none of that profile's tools or hooks).
 - **The workspace environment** (`$IDE_WORKSPACE/tools/venv`, built by `prepare.py` from the
@@ -105,7 +106,7 @@ nowhere.
 ## Add a tool, a record or a skill
 
 - **Tool:** a module under `tools/` with `SPEC = tool(ToolSpec(...))`, listed in
-  `catalog.TOOL_MODULES`; in-process tools stay stdlib only; `core/tests/test_tool_budget.py`
+  `catalog.TOOL_MODULES`; in-process tools import only what Hermes's interpreter has; `core/tests/test_tool_budget.py`
   pins the role sets (24 Orchestrator, 22 Researcher) and the executor table; run
   `uv run python tools/build_prompts.py --write --manifests`. Describe the tool, every field
   and every key, shortly: every request carries the whole list. Build field schemas with
@@ -121,7 +122,7 @@ nowhere.
   The grouped tool stops offering the action and still runs a call that names it, because stored
   chats show that shape; refusing such a call, it shows the flat tool. Prompts and skills name the
   flat tool (`test_tool_signatures.py` checks), and telemetry reports the grouped tool and action.
-  Thirteen actions have one: the ones weak models got wrong and `claim_write`. It costs prompt size
+  Twelve actions have one: the ones weak models got wrong and `claim_write`. It costs prompt size
   and counts against `catalog.TOOL_BUDGET`, so add one only for a measured failure. Measured on
   2026-11-05 against the grouped form, 6 to 10 repeats per case: Kimi K3 first try 81/216 against
   185/216, Kimi K3.1 Pro no difference (160/162 against 161/162, findability 91/100 against 94/100),

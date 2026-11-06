@@ -67,8 +67,9 @@ of the optional model service, so an unavailable budget does not prevent stoppin
 A spent key is not an expired one, so the image also keeps the *inference state*,
 `.inference-state` beside the lease file (`core/src/research_core/inference.py`). The
 profiles' `api_request_error` hook sets `budget_exhausted` when Hermes classifies a model call
-as `billing` (a 402, or OpenRouter's 403 "Key limit exceeded"), except within two minutes of a
-key change, when such errors come from runs still finishing on the previous key. It sets
+as `billing` (a 402, or OpenRouter's 403 "Key limit exceeded"), except for a 402 that says a
+smaller response is still affordable, and within two minutes of a key change, when such errors
+come from runs still finishing on the previous key. It sets
 `provider_unavailable` for five minutes after three outage errors within three minutes. The
 lease loop sets `budget_exhausted` when the platform refuses a lease for that reason, and
 renews no later than the refill (the lease's expiry minus the platform's ten-minute grace).

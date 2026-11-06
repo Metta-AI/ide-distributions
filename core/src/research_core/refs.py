@@ -126,7 +126,8 @@ def _parse_url(url: str) -> Ref:
 
 
 def parse_many(text: str) -> list[Ref]:
-    """Every reference found in free text, in order of appearance, without duplicates."""
+    """Every reference found in free text, without duplicates: by kind (URLs, record ids, platform
+    ids, UUIDs, labels), and within a kind in order of appearance."""
     found: list[Ref] = []
     seen: set[tuple[str, str]] = set()
 

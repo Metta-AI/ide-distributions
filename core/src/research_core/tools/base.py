@@ -4,7 +4,8 @@ A tool is a :class:`ToolSpec`: a name, the roles that get it, where it executes,
 flat parameter set or a list of actions with flat optional inputs, and a handler that takes a
 :class:`ToolCall` and returns a JSON-ready dict. :func:`run_tool` validates the arguments
 against the role's view of the tool, reports every problem at once, runs the handler and
-renders the result as JSON text. It never raises: Hermes gets a string in every case.
+renders the result as JSON text. A failing call never raises: Hermes gets a string. Only a tool
+module that cannot load raises, on the first call that loads the catalog.
 
 A call is checked against its selected action: a missing required field, a field of another
 action given a value, an unknown field or a wrong type refuses the call before anything runs.
@@ -592,7 +593,7 @@ def error_payload(problems: list[str], context: dict | None = None) -> dict:
 
 
 def run_tool(name: str, args: Mapping[str, Any], ctx: ToolContext) -> str:
-    """Validate, run and render a tool call as JSON text. Never raises."""
+    """Validate, run and render a tool call as JSON text. Raises only if the catalog cannot load."""
     from opentelemetry import trace
     from opentelemetry.trace import StatusCode
 

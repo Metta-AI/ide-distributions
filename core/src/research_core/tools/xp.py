@@ -8,7 +8,8 @@ closes on (``tools/experiment.py``: ``results.rows`` objects with ``episode_id``
 ``game_version``, ``policy_version`` as the Version's record id, ``seed``, ``seats``,
 ``opponents``, ``metrics``, ``status``, ``reason``).
 
-Rules the tool keeps (A4.4): it never puts a Task on a wait itself; a Researcher calls
+Rules the tool keeps (A4.4): it puts a Task on a wait only when the platform stays down (below);
+a Researcher calls
 ``task_wait {kind: xp, ref: [...]}`` and ends its run, or ``task_wait {kind: credits}`` after a
 credits refusal. There is no local credits pre-check: the platform's refusal (402) is the
 refusal, reported with the balance, the held amount and the next refill. The
@@ -345,8 +346,8 @@ def _ask_orchestrator(record: dict, counts: dict) -> dict:
     task = record.get("task_id")
     question = (
         f"{record['id']} would have {counts['total']} XP requests ({counts['new']} new), above"
-        f" the {ASK_ABOVE_KEY} setting of {counts['limit']}. Should I shrink the design, or will you"
-        " raise the setting with the user's approval?"
+        f" the {ASK_ABOVE_KEY} setting of {counts['limit']}. Should I shrink the design, or will"
+        " you raise the setting with the user's approval?"
     )
     return {
         "ok": False,
@@ -670,7 +671,7 @@ SPEC = tool(
         actions=(
             ActionSpec(
                 "request",
-                "Create the requests for an Experiment's seeds and arms (never waits itself).",
+                "Create the requests for an Experiment's seeds and arms.",
                 {
                     "experiment": EXPERIMENT,
                     "candidate": a.string("The candidate Version (default: the locked design's)."),

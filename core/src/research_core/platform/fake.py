@@ -367,7 +367,7 @@ class FakePlatform:
     def upload_file_policy(
         self, *, name: str, content: bytes, tags: dict[str, str] | None = None
     ) -> PolicyVersion:
-        route = "POST /v2/policy-versions/upload"
+        route = "POST /stats/policies/files/upload"
         self._require_identity("player", route)
         self._upload_fault(route)
         content_hash = hashlib.sha256(content).hexdigest()

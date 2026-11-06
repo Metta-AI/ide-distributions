@@ -26,8 +26,8 @@ under `docs/` carry a banner saying so.
   a plugin shim, scripts and profile configuration. Hermes copies the folder on
   install; the shim imports `research_core` from the release checkout, whose path `prepare.py`
   records.
-- Two Python environments exist: Hermes's own interpreter runs the plugin (the stdlib-only base
-  of `research_core`), and one *workspace environment* under `$IDE_WORKSPACE/tools/venv` runs
+- Two Python environments exist: Hermes's own interpreter runs the plugin (a base of `research_core`
+  that needs only the stdlib and OpenTelemetry), and one *workspace environment* under `$IDE_WORKSPACE/tools/venv` runs
   the `research` CLI, the watcher and every tool that needs the Softmax client. The repository
   root `pyproject.toml` and `uv.lock` define that environment; `prepare.py` builds it.
 - Every profile of one sandbox shares one workspace (`IDE_WORKSPACE`): a workspace store, and one

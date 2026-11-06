@@ -1,8 +1,9 @@
 """Check the prompt text the profiles ship (design D.7, plan task 7.6).
 
 Structural checks always run: word budgets and the leak test (through the prompt builder),
-canonical vocabulary (never "promotion"), no store path, no machinery words, every tool
-named in a SOUL or skill exists for that role, every skill named in a SOUL exists. The model
+canonical vocabulary (never "promotion"), no store path, no machinery words, every dotted
+`tool.action` named in a SOUL or skill exists for that role (a common skill: for either role),
+every skill named in a SOUL exists. The model
 check runs only with ``--model`` and ``OPENROUTER_API_KEY``: it asks a model to find statements that
 contradict each other across a role's SOUL and skills, and fails on a non-NONE answer.
 

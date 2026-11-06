@@ -369,7 +369,7 @@ def _upload_check(
         "route",
         True,
         "\n".join(outputs),
-        command="POST /v2/policy-versions/upload",
+        command="POST /stats/policies/files/upload",
         capability="upload",
         policy_version_id=version.id,
     )

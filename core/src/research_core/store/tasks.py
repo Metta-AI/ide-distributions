@@ -7,9 +7,10 @@ A2.8 (approval and the user's word), A2.10 (``reject``).
 
 Leases. ``claim`` takes the lease inside one ``BEGIN IMMEDIATE`` transaction and re-reads the
 Task there, so of two concurrent claims exactly one wins. A lease is fresh for
-``LEASE_FRESH_SECONDS`` after ``lease_renewed``; a stale lease may be claimed by another
-Session, which raises ``lease_epoch`` and records the new epoch on that Session's
-``task_sessions`` row. Every Task-scoped write by a Researcher goes through ``require_holder``:
+``LEASE_FRESH_SECONDS`` after ``lease_renewed``. A Task stays with its holder, whatever the age of
+the lease, until the holder releases it or the coordinator transfers it (``transfer_attempt``),
+which raises ``lease_epoch`` and records the new epoch on the successor's ``task_sessions`` row.
+Every Task-scoped write by a Researcher goes through ``require_holder``:
 the caller must be the holding Session and its session row's epoch must equal the Task's, so a
 replaced run cannot write (its late commits are never merged either: the merge uses
 ``completed_commit``, which only the current holder can record).
@@ -389,9 +390,9 @@ def claim_result(
 ) -> dict[str, Any] | ClaimRefused:
     """Take the Task's lease: status ``in-progress``, ``held_by`` the session, epoch raised.
 
-    Refused when the Task is not unclaimed, not approved, waits for a dependency, or is held
-    with a fresh lease (``LeaseError``). A stale lease is taken over at a higher epoch; the
-    holder itself may claim again (a resumed run) and only renews. ``kind`` is ``task`` for a
+    Refused when the Task is not unclaimed, not approved, waits for a dependency, or is held by
+    another Session (``LeaseError``). The holder itself may claim again (a resumed run) and only
+    renews. ``kind`` is ``task`` for a
     Researcher's Task Session or ``change`` for an Orchestrator change (A3.6).
     """
     n = _task_number(task_id)
@@ -730,10 +731,11 @@ def complete(
 
     Succeeded: ``checklist`` must satisfy the type's items (``task_types.check``) and every
     record it names must exist (claims, the Experiment, Versions, Tasks this Task proposed for
-    its Goal, whatever has been decided about them); ``commit`` and ``submission_candidate`` are folded into the checklist;
+    its Goal, whatever has been decided about them); ``commit`` and ``submission_candidate`` are
+    folded into the checklist;
     ``merge_request`` ``yes`` needs the commit, ``no`` needs ``merge_reason``; ``result`` says
     what came of it. ``completed_commit`` is what the merge uses, never the branch tip. The
-    lease stays with the holder so a review that reopens resumes the same Session; emits
+    lease stays with the holder so a review that reopens continues the Task; emits
     ``task.completed``, the review wake's trigger. Failed: delegates to ``fail``.
     """
     n = _task_number(task_id)

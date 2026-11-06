@@ -1,6 +1,6 @@
 """The one way a tool talks to the platform: retries, then a wait, then a refusal (C.4, A3.9).
 
-:func:`call_platform` runs a platform call through ``with_retries`` (3 tries: 1 s, 4 s, 16 s).
+:func:`call_platform` runs a platform call through ``with_retries`` (3 tries, 1 s and 4 s apart).
 When a :class:`PlatformError` still escapes, the tool refuses with the error's detail plus
 ``route``, ``status``, ``request_id`` and ``retryable``; a 401 also reports the ``login:<identity>``
 capability as broken (A4.1). When the error is retryable (the platform stayed unreachable) and

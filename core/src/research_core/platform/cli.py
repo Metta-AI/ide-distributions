@@ -123,8 +123,8 @@ def _report_login_failure(env: dict[str, str], identity: str, error: Exception) 
 
 # --- research platform check ---------------------------------------------------------------
 
-# Every read route the tools use (design C.4: the nightly read-only check calls them all on a
-# test Player). One table, shared with the softmax-api-routes skill.
+# A smoke check of the main read routes (design C.4), not all of them. A route that needs an id
+# from an earlier answer (a league's, a division's, a Coworld's) is skipped when there is none.
 READ_ROUTES: tuple[tuple[str, str], ...] = (
     ("whoami", "GET /whoami"),
     ("credits", "GET /usage/me/credits"),
@@ -142,7 +142,7 @@ READ_ROUTES: tuple[tuple[str, str], ...] = (
 
 
 def check_read_routes(platform, *, coworld_id: str | None = None) -> list[dict]:
-    """Call every read route once; never raises. Each entry: name, route, ok, detail."""
+    """Call each of those routes once; never raises. Each entry: name, route, ok, detail."""
     from research_core.platform.errors import PlatformError
 
     results: list[dict] = []
@@ -211,7 +211,7 @@ def add_parser(subparsers: argparse._SubParsersAction) -> None:
     )
     platform_commands = platform_parser.add_subparsers(dest="platform_command", metavar="<command>")
     check = platform_commands.add_parser(
-        "check", help="Call every read route the tools use once and report each result"
+        "check", help="Call the main read routes once and report each result"
     )
     check.add_argument(
         "--read-only", action="store_true", default=True, help="(always; writes are never made)"

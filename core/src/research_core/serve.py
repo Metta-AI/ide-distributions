@@ -340,7 +340,8 @@ class SeamServer:
     def status(self) -> dict:
         """What ``research watcher status`` prints (``watcher/cli.py``): the last heartbeat and
         its age, the has-work signal with its reasons, and the pause state, from the workspace
-        store's meta and the ``paused`` setting. Nothing else is read."""
+        store's meta, settings and admissions and every registered Coworld store's unfinished
+        transitions."""
         with self.stores() as stores:
             wstore = stores.wstore
             heartbeat = wstore.get_meta(HEARTBEAT_KEY)

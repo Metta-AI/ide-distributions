@@ -377,7 +377,7 @@ def test_ask_above_warns_the_orchestrator_and_asks_the_researcher(run, ctx, uplo
 def test_over_the_limit_a_task_experiment_takes_requests_after_the_user_raises_the_setting(
     run, ctx, uploaded, researcher_task
 ):
-    """The one path: the Researcher asks, the Orchestrator cannot send for it, the user raises it."""
+    """The Researcher asks, the Orchestrator cannot send for it, the user's word raises it."""
     make_experiment(ctx, task_id=researcher_task["id"])
     settings.update(ctx.store, ctx.actor, xp_tool.ASK_ABOVE_KEY, 2, cites="the user said so")
     held = {"role": "researcher", "session_id": "r1"}
