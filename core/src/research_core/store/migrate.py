@@ -39,21 +39,23 @@ def _check_kind(kind: str) -> None:
         raise ValueError(f"not a store kind: {kind!r} (one of {', '.join(KINDS)})")
 
 
-def connect_writable(path: Path) -> sqlite3.Connection:
-    """A connection that may write a store: WAL, ``synchronous=FULL`` and a 5 s busy wait.
+def connect_writable(path: Path, busy_timeout_ms: int | None = None) -> sqlite3.Connection:
+    """A connection that may write a store: WAL, ``synchronous=FULL`` and a busy wait, 5 s unless
+    the caller needs longer.
 
     ``FULL`` fsyncs the WAL on every commit, so a committed record survives a power loss when
     the storage honours fsync (``NORMAL`` would only promise consistency, not the last commits).
     Every connection that writes a live store goes through here.
     """
+    busy_timeout_ms = BUSY_TIMEOUT_MS if busy_timeout_ms is None else busy_timeout_ms
     conn = sqlite3.connect(path, isolation_level=None)
-    conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
-    _enable_wal(conn)
+    conn.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
+    _enable_wal(conn, busy_timeout_ms)
     conn.execute("PRAGMA synchronous = FULL")
     return conn
 
 
-def _enable_wal(conn: sqlite3.Connection) -> None:
+def _enable_wal(conn: sqlite3.Connection, busy_timeout_ms: int) -> None:
     """Switch to WAL, waiting out another connection that is making the same switch.
 
     A file not yet in WAL mode (a store's first open, or a restored copy) needs a write lock taken
@@ -63,7 +65,7 @@ def _enable_wal(conn: sqlite3.Connection) -> None:
     file already in WAL mode. SQLite's timeout still applies to its other locks, so each attempt
     gets only what is left of the one wait.
     """
-    deadline = time.monotonic() + BUSY_TIMEOUT_MS / 1000
+    deadline = time.monotonic() + busy_timeout_ms / 1000
     try:
         while True:
             left_ms = max(0, int((deadline - time.monotonic()) * 1000))
@@ -78,7 +80,7 @@ def _enable_wal(conn: sqlite3.Connection) -> None:
                     raise
             time.sleep(min(WAL_SWITCH_POLL_S, left_ms / 1000))
     finally:
-        conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
+        conn.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
 
 
 def migration_files(kind: str) -> list[tuple[int, Path]]:

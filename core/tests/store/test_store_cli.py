@@ -23,7 +23,7 @@ import pytest
 
 from research_core import cli, layout
 from research_core.store import cli as store_cli
-from research_core.store import coworlds, directives, goals, settings, tasks, ui_state
+from research_core.store import coworlds, directives, goals, migrate, settings, tasks, ui_state
 from research_core.store._common import now_iso
 from research_core.store.actors import Actor
 from research_core.store.db import Store, quiesce_busy_timeout_ms
@@ -662,6 +662,31 @@ def test_quiesce_holds_a_writer_until_release_and_empties_the_wal(workspace):
     assert_intact(workspace.store)
     assert_intact(workspace.wstore)
     assert_write_lock_free(workspace.store.path)
+
+
+def test_a_restored_copy_not_yet_in_wal_mode_waits_out_the_hold_to_switch(workspace):
+    workspace.store.close()
+    path = workspace.ws.coworld(COWORLD_ID).store_path
+    restored = sqlite3.connect(path)
+    assert restored.execute("PRAGMA journal_mode = DELETE").fetchone()[0] == "delete"
+    restored.close()
+    proc = start_quiesce("--max-hold", "6.5")
+    try:
+        json.loads(proc.stdout.readline())
+        started = time.monotonic()
+        late = Store.open(path, kind="coworld")
+        took = time.monotonic() - started
+        assert proc.wait() == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+    try:
+        assert took > migrate.BUSY_TIMEOUT_MS / 1000
+        assert late.one("PRAGMA journal_mode")[0] == "wal"
+        assert late.one("PRAGMA busy_timeout")[0] == 6500 + migrate.BUSY_TIMEOUT_MS
+    finally:
+        late.close()
 
 
 def test_quiesce_then_runs_with_every_lock_held_and_reports_its_exit_code(
