@@ -14,23 +14,28 @@ import sys
 
 from research_core import __version__
 
-# Module paths that register subcommands. Each is imported when the parser is built.
-COMMAND_MODULES: tuple[str, ...] = (
-    "research_core.contract.cli",
-    "research_core.tools.cli",
-    "research_core.store.cli",
-    "research_core.platform.cli",
-    "research_core.coworld_cli",
-    "research_core.watcher.cli",
-    "research_core.serve",
-)
+# Load only the requested command; root help still lists every command.
+COMMAND_MODULES: dict[str, str] = {
+    "context-schema": "research_core.contract.cli",
+    "tool": "research_core.tools.cli",
+    "store": "research_core.store.cli",
+    "platform": "research_core.platform.cli",
+    "softmax": "research_core.platform.cli",
+    "coworld": "research_core.coworld_cli",
+    "watcher": "research_core.watcher.cli",
+    "workspace": "research_core.watcher.cli",
+    "serve": "research_core.serve",
+}
 
 
-def build_parser() -> argparse.ArgumentParser:
+def build_parser(command: str | None = None) -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="research", description="Softmax IDE research profiles")
     parser.add_argument("--version", action="version", version=f"research {__version__}")
     subparsers = parser.add_subparsers(dest="command", metavar="<command>")
-    for module_name in COMMAND_MODULES:
+    modules = (
+        (COMMAND_MODULES[command],) if command in COMMAND_MODULES else COMMAND_MODULES.values()
+    )
+    for module_name in dict.fromkeys(modules):
         importlib.import_module(module_name).add_parser(subparsers)
     return parser
 
@@ -39,7 +44,8 @@ def main(argv: list[str] | None = None) -> int:
     from research_core.telemetry import configure_logging
 
     configure_logging()
-    parser = build_parser()
+    argv = sys.argv[1:] if argv is None else argv
+    parser = build_parser(argv[0] if argv else None)
     args = parser.parse_args(argv)
     run = getattr(args, "run", None)
     if run is None:
