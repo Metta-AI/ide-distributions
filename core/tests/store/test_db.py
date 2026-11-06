@@ -68,6 +68,76 @@ def test_writable_connections_use_wal_and_synchronous_full(tmp_path):
         conn.close()
 
 
+def _mid_conversion(path):
+    """A connection in the state a first opener is in: rollback journal, write lock held."""
+    other = sqlite3.connect(path, isolation_level=None, check_same_thread=False)
+    other.execute("CREATE TABLE placeholder(x)")
+    other.execute("BEGIN IMMEDIATE")
+    return other
+
+
+def test_a_first_open_waits_for_another_connection_converting_the_file(tmp_path):
+    """SQLite fails this lock upgrade at once whatever the busy timeout, so a first open that
+    meets another one (a new Coworld's store: the coordinator and a tool) must wait itself."""
+    path = tmp_path / "store.db"
+    other = _mid_conversion(path)
+    release = threading.Timer(0.3, other.execute, ["ROLLBACK"])
+    release.start()
+    started = time.monotonic()
+    conn = migrate.connect_writable(path)
+    waited = time.monotonic() - started
+    release.join()
+    other.close()
+    try:
+        assert waited >= 0.25
+        assert conn.execute("PRAGMA journal_mode").fetchone()[0] == "wal"
+    finally:
+        conn.close()
+
+
+def test_a_first_open_still_fails_when_the_lock_outlasts_the_busy_timeout(tmp_path, monkeypatch):
+    monkeypatch.setattr(migrate, "BUSY_TIMEOUT_MS", 50)
+    path = tmp_path / "store.db"
+    other = _mid_conversion(path)
+    started = time.monotonic()
+    try:
+        with pytest.raises(sqlite3.OperationalError, match="database is locked"):
+            migrate.connect_writable(path)
+    finally:
+        other.close()
+    assert time.monotonic() - started < 2  # one wait: no attempt gets a fresh busy timeout
+
+
+def test_a_first_open_keeps_the_full_busy_timeout_for_later_locks(tmp_path):
+    conn = migrate.connect_writable(tmp_path / "store.db")
+    try:
+        assert conn.execute("PRAGMA busy_timeout").fetchone()[0] == migrate.BUSY_TIMEOUT_MS
+    finally:
+        conn.close()
+
+
+def test_simultaneous_first_opens_all_succeed(tmp_path):
+    """Two bare opens collide often enough here to fail on most runs without the wait."""
+    rounds = 300
+    start = threading.Barrier(2)
+    failures = []
+
+    def open_every_round():
+        for round_number in range(rounds):
+            start.wait()
+            try:
+                migrate.connect_writable(tmp_path / f"{round_number}.db").close()
+            except sqlite3.OperationalError as error:
+                failures.append(str(error))
+
+    threads = [threading.Thread(target=open_every_round) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    assert failures == []
+
+
 def test_open_twice_is_idempotent(tmp_path):
     path = tmp_path / "store.db"
     db.Store.open(path, kind="coworld").close()

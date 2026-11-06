@@ -12,6 +12,7 @@ from __future__ import annotations
 import re
 import secrets
 import sqlite3
+import time
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -22,6 +23,7 @@ from research_core.store.errors import SchemaNewer
 MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 KINDS = ("coworld", "workspace")
 BUSY_TIMEOUT_MS = 5000
+WAL_SWITCH_POLL_S = 0.01
 # The repair renames the tables it keeps rows from to this prefix while it copies them.
 OLD_PREFIX = "old_"
 
@@ -46,9 +48,37 @@ def connect_writable(path: Path) -> sqlite3.Connection:
     """
     conn = sqlite3.connect(path, isolation_level=None)
     conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
-    conn.execute("PRAGMA journal_mode = WAL").fetchone()
+    _enable_wal(conn)
     conn.execute("PRAGMA synchronous = FULL")
     return conn
+
+
+def _enable_wal(conn: sqlite3.Connection) -> None:
+    """Switch to WAL, waiting out another connection that is making the same switch.
+
+    A file not yet in WAL mode (a store's first open, or a restored copy) needs a write lock taken
+    while this statement holds a read lock, and SQLite fails that upgrade at once rather than wait,
+    whatever the busy timeout. Two first opens of a new Coworld's store then raise "database is
+    locked" within milliseconds. Starting the statement again drops the read lock and finds the
+    file already in WAL mode. SQLite's timeout still applies to its other locks, so each attempt
+    gets only what is left of the one wait.
+    """
+    deadline = time.monotonic() + BUSY_TIMEOUT_MS / 1000
+    try:
+        while True:
+            left_ms = max(0, int((deadline - time.monotonic()) * 1000))
+            conn.execute(f"PRAGMA busy_timeout = {left_ms}")
+            try:
+                conn.execute("PRAGMA journal_mode = WAL").fetchone()
+                return
+            except sqlite3.OperationalError as error:
+                # sqlite_errorcode is the extended code; its low byte is the primary one.
+                busy = error.sqlite_errorcode & 0xFF == sqlite3.SQLITE_BUSY
+                if not busy or time.monotonic() >= deadline:
+                    raise
+            time.sleep(min(WAL_SWITCH_POLL_S, left_ms / 1000))
+    finally:
+        conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")
 
 
 def migration_files(kind: str) -> list[tuple[int, Path]]:
