@@ -176,6 +176,7 @@ Merging changes here triggers `.github/workflows/release-hermes.yml` and the hos
 Recovery frequency is available as `runtime_recovery_count` in `/status` and `research watcher status`.
 The image emits a typed `workspace_runtime_recovery` event before recycling, with workspace and boot IDs.
 The packaged fault test records recovery elapsed seconds, container restart count, and validates the event.
+When it fails, the fault container's log is in the startup evidence as `recovery-container.log`.
 
 Standalone local `research serve` does not own the gateway's lifecycle. After stopping that gateway
 and its workers, use `research workspace recover --runtime-stopped` to acknowledge interruption.

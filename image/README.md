@@ -126,7 +126,9 @@ it to the workspace store's `request_events` log through the seam (`POST /messag
 only then pushes it. `chat.events` reads that log alone (`GET /message-events`); the gateway's
 in-memory run buffer only bridges a consumer's restart. Consumers start with the backend and
 resume after their log's last row. A run the gateway lost ends `interrupted` once the seam
-settles it, and its logged events stay readable for as long as the request record.
+settles it, and its logged events stay readable for as long as the request record. A session the
+gateway does not have reads as having no messages, so its requests still close: any other failure
+in a consumer ends the backend, which recycles the whole runtime.
 
 The normal image smoke checks execute the real packaged adapter against its running
 seam, including the previously accepted-by-the-stub invalid actor field. Real model
