@@ -343,6 +343,7 @@ ORCHESTRATOR_CHATS = [
         "Primary metric win_rate, going up, by at least 3 points, with 40 paired seeds.",
         ("experiment.create",),
         ("experiment",),
+        x5="absent",
     ),
     chat(
         "experiment-search",
@@ -1337,6 +1338,7 @@ HARD = [
         ("experiment.create",),
         ("experiment",),
         args={"methods": r'"baseline": "V-7"'},
+        x5="absent",
     ),
     chat(
         "hard-opening-goal",

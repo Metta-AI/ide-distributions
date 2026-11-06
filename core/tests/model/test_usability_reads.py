@@ -295,6 +295,13 @@ def test_offline_read_results_agree_with_what_the_situation_says():
     assert _read("task.read", {"task": "T-21"}, league_question)["record"]["goal_id"] == 2
 
 
+def test_offline_a_situation_that_wants_an_experiment_created_finds_no_such_experiment():
+    for situation in SITUATIONS:
+        if situation.acts == ("experiment.create",):
+            found = _read("experiment.search", {"query": "retreat"}, situation)["records"]
+            assert [row["id"] for row in found] == ["X-3"], situation.id
+
+
 def test_offline_a_version_shows_an_upload_only_once_it_has_one():
     for version, status, uploaded in (("V-12", "built", False), ("V-11", "uploaded", True)):
         started = dataclasses.replace(SITUATION, x5="started")

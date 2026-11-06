@@ -837,7 +837,11 @@ def experiment_read(situation: Situation, args: dict) -> dict:
 
 
 def experiment_search(situation: Situation, args: dict) -> dict:
-    records = [_x3(), _x6()]
+    records = [_x3()]
+    # X-6 is the comparison these situations ask to set up: finding it makes updating it the
+    # sensible act, on any tool text, so a search there would measure the fixture.
+    if situation.acts != ("experiment.create",):
+        records.append(_x6())
     if situation.x5 != "absent":
         records.append(_x5(situation))
     hits = [r for r in records if _matches(args["query"], r["summary"], *r["tags"])]
