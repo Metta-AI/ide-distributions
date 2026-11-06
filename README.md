@@ -1,14 +1,13 @@
 # ide-distributions
 
-Hermes Agent profile distributions for the Softmax IDE. Two research profiles share one package;
-a third, `play/`, stands alone.
+Hermes Agent profile distributions for the Softmax IDE: two research profiles that share one
+package.
 
 | Folder | What it is |
 |---|---|
 | [`core/`](core/) | `research-core`, the shared package: the record store, the record and platform tools, the Hermes plugin wiring, the watcher, the platform client (real and fake), the `research` CLI, the prompt parts and the skills. |
 | [`orchestrator/`](orchestrator/README.md) | The research lead: the profile the user talks to. Plans Goals and Tasks, answers the Researchers, makes and submits policy Versions. |
 | [`researcher/`](researcher/README.md) | A research worker. Each Session does one Task in the background and speaks only to the Orchestrator. |
-| [`play/`](play/README.md) | Play: the user's own program, not hosted now (see its README). Independent of the research profiles; it keeps its own vendored copy of the former shared code. |
 
 The research profiles follow the
 [IDE profile refactor design](docs/designs/ide-profile-refactor-2026-10-28-final.html) (open it
@@ -60,7 +59,7 @@ uv run pytest -q        # unit and scenario tests; the fake platform needs no ne
 HERMES_BIN=/path/to/hermes uv run pytest -q -m hermes core/tests/hermes   # against a real Hermes
 ```
 
-CI runs the same inside the hosted Hermes image, and `play/` separately. A daily workflow
+CI runs the same inside the hosted Hermes image. A daily workflow
 refreshes the `coworld` and `softmax-cli` pins in `uv.lock`.
 
 The model tool-call tests in `core/tests/model` call models through OpenRouter and spend real
