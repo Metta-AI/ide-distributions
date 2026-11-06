@@ -1023,6 +1023,162 @@ def test_scope_mismatches_are_forbidden_and_unscoped_sessions_are_hidden(system)
     run(system, scenario)
 
 
+def test_a_wrong_scope_is_refused_to_that_request_alone_and_is_not_recorded(system):
+    """A wrong scope on a session no frontend subscribed to yet must not become the scope the
+    event watcher reads with: its refusal there would end the backend and recycle the runtime."""
+
+    async def scenario(backend, gateway, ctx, hermes):
+        request_id = str(uuid4())
+        wrong_scope_requests = (
+            ("chat.send", {"messages": say("x")}),
+            ("chat.history", {}),
+            ("chat.events", {"request_id": request_id, "after": {"attempt": 0, "seq": 0}}),
+            ("chat.cancel", {"request_id": request_id}),
+            ("state.list", {"resource": "requests"}),
+            (
+                "input.respond",
+                {"request_id": request_id, "response": {"kind": "clarification", "answer": "x"}},
+            ),
+        )
+        ids = [await opened(backend) for _ in wrong_scope_requests]
+        read_only_by_get = await opened(backend)
+        backend = backend.restart()  # nothing is subscribed to any of them now
+        for session_id, (method, params) in zip(ids, wrong_scope_requests, strict=True):
+            reply = await call(
+                backend, method, {"session_id": session_id, "scope": LEAGUE, **params}
+            )
+            assert code(reply) == "forbidden", method
+        get = {"resource": "sessions", "id": read_only_by_get, "scope": LEAGUE}
+        assert code(await call(backend, "state.get", get)) == "forbidden"
+        assert not ctx.wstore.q("SELECT 1 FROM client_admissions WHERE kind='message'")
+
+        witness = await opened(backend)
+        for session_id in [*ids, read_only_by_get, witness]:
+            sessions.end(ctx.wstore, HARNESS, session_id)
+
+        # Events arrive in order, so once the last one is pushed the watcher got past the others.
+        def witness_ended():
+            return any(
+                n["item"]["id"] == witness and n["item"]["ended_at"]
+                for n in backend.socket.notes("state.changed")
+            )
+
+        await until(witness_ended)
+        assert {n["item"]["id"] for n in backend.socket.notes("state.changed")} == {witness}
+
+    run(system, scenario)
+
+
+def test_a_refused_frontend_gets_no_pushes_and_a_missing_session_is_not_recorded(system):
+    async def scenario(backend, gateway, ctx, hermes):
+        session_id = await opened(backend)
+        wrong = {"resource": "sessions", "id": session_id, "scope": LEAGUE}
+        assert code(await call(backend, "state.get", wrong, frontend=OTHER)) == "forbidden"
+        missing = {"resource": "sessions", "id": "nope", "scope": WORKSPACE}
+        assert code(await call(backend, "state.get", missing)) == "not_found"
+        assert "nope" not in backend.subscribers
+
+        sessions.end(ctx.wstore, HARNESS, session_id)
+        await until(lambda: backend.socket.notes("state.changed"))
+        assert not backend.socket.notes("state.changed", OTHER)
+
+    run(system, scenario)
+
+
+def test_a_scope_with_no_league_is_refused_where_the_seam_would_accept_it(system):
+    """The seam compares Coworld and league only, and a Coworld session without a league has no
+    AIDE scope: projecting one fails validation, which would end the backend."""
+    no_league = {"scope": "coworld", "coworld": COWORLD_ID, "league": None}
+
+    async def scenario(backend, gateway, ctx, hermes):
+        hidden = await backend.seam.post(
+            "/session-open",
+            json={
+                "op_id": str(uuid4()),
+                "client": {"id": "legacy", "kind": "ide"},
+                "session_context": {
+                    "contract_version": 1,
+                    "scope": "coworld",
+                    "coworld": COWORLD_ID,
+                },
+            },
+        )
+        hidden_id = hidden.json()["session_id"]
+        session_id = await opened(backend)
+        for method, params in (
+            ("state.get", {"resource": "sessions", "id": hidden_id, "scope": no_league}),
+            ("chat.history", {"session_id": hidden_id, "scope": no_league}),
+            (
+                "state.get",
+                {
+                    "resource": "sessions",
+                    "id": session_id,
+                    "scope": {"scope": "coworld", "coworld": None, "league": None},
+                },
+            ),
+        ):
+            assert code(await call(backend, method, params)) == "forbidden", method
+        assert hidden_id not in backend.subscribers
+
+    run(system, scenario)
+
+
+class BeforeSessionRead(httpx.AsyncBaseTransport):
+    """The real seam, except that ``hook`` runs once before the next read selecting a session."""
+
+    def __init__(self):
+        self.real = httpx.AsyncHTTPTransport()
+        self.hook = None
+
+    async def handle_async_request(self, request):
+        if self.hook and request.url.path == "/snapshot" and "session_id" in request.url.params:
+            hook, self.hook = self.hook, None
+            await hook()
+        return await self.real.handle_async_request(request)
+
+
+def test_a_change_made_while_a_request_read_subscribes_is_in_its_reply(system):
+    """A change the watcher consumes before the subscription begins gets no push, so the reply
+    has to hold it."""
+    transport = BeforeSessionRead()
+
+    async def scenario(backend, gateway, ctx, hermes):
+        session_id = await opened(backend)
+        settings.update(ctx.wstore, HARNESS, "paused", True, cites="hold dispatch")
+        request_id = str(uuid4())
+        params = {"session_id": session_id, "messages": say("later"), "scope": WORKSPACE}
+        await call(backend, "chat.send", params, request_id=request_id)
+        backend = backend.restart()  # nothing is subscribed to the session now
+
+        async def cancel_and_let_the_watcher_consume_it():
+            body = {"op_id": request_id, "actor": "user:aide"}
+            assert (await backend.seam.post("/message-cancel", json=body)).is_success
+            await asyncio.sleep(0.5)
+
+        transport.hook = cancel_and_let_the_watcher_consume_it
+        reply = await call(
+            backend, "state.get", {"resource": "requests", "id": request_id, "scope": WORKSPACE}
+        )
+        assert transport.hook is None
+        assert reply["result"]["item"]["status"] == "cancelled"
+
+    run(system, scenario, seam_transport=transport)
+
+
+def test_a_session_open_with_no_league_is_refused_before_anything_is_stored(system):
+    no_league = {"scope": "coworld", "coworld": "cow-a", "league": None}
+
+    async def scenario(backend, gateway, ctx, hermes):
+        await backend.snapshot()
+        before = ctx.wstore.one("SELECT COUNT(*) FROM sessions")[0]
+        assert code(await call(backend, "session.open", {"scope": no_league})) == "forbidden"
+        assert ctx.wstore.one("SELECT COUNT(*) FROM sessions")[0] == before
+        assert not ctx.wstore.q("SELECT 1 FROM client_admissions WHERE kind='open'")
+        assert not ctx.wstore.q("SELECT 1 FROM coworlds WHERE coworld_id='cow-a'")
+
+    run(system, scenario)
+
+
 def test_a_request_whose_session_the_gateway_does_not_have_closes_its_log(system):
     """The packaged lost-receipt fixture: a store session with no native one must not end the
     backend, or the workspace crash-loops on every boot that recovers this request's consumer."""

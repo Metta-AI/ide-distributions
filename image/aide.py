@@ -912,10 +912,21 @@ class Backend:
 
     # --- notifications ----------------------------------------------------------------------
 
-    def touch(self, session_id: str, scope: Scope, frontend_id: UUID) -> None:
-        if session_id not in self.subscribers:
-            self.subscribers[session_id] = Subscription(scope)
-        self.subscribers[session_id].frontends.add(frontend_id)
+    async def touch(self, session_id: str, scope: Scope, frontend_id: UUID) -> None:
+        """Subscribe a frontend to a session, once this is the session's own scope.
+
+        ``changed`` reads with the recorded scope, and a failure there ends the backend, so a
+        wrong scope is refused to its request and leaves nothing behind. Every caller reads what
+        it returns after this, so its reply holds any change made before the subscription began.
+        """
+        subscription = self.subscribers.get(session_id)
+        if subscription is None or subscription.scope != scope:
+            (row,) = (await self.scoped(scope, session_id=session_id)).records.sessions
+            # The seam compares only Coworld and league; a Coworld session with no league has no
+            # scope, and projecting one fails validation.
+            if row.scope() != scope:
+                raise Refusal("forbidden", "This session does not have that scope")
+        self.subscribers.setdefault(session_id, Subscription(scope)).frontends.add(frontend_id)
 
     async def send(self, socket: ClientConnection, frontend_id: UUID, message: dict) -> None:
         body = json.dumps(message, ensure_ascii=False, separators=(",", ":"))
@@ -1208,6 +1219,9 @@ class Backend:
     # --- methods ------------------------------------------------------------------------------
 
     async def open(self, frontend_id: UUID, request_id: str, params: Open) -> dict:
+        if params.scope.scope == "coworld" and params.scope.league is None:
+            # The seam would store this as a session with no AIDE scope, and start its opening.
+            raise Refusal("forbidden", "A Coworld session needs a league")
         client = (
             DEFAULT_CLIENT if params.client is None else params.client.model_dump(exclude_none=True)
         )
@@ -1220,14 +1234,14 @@ class Backend:
         opened = Opened.model_validate_json(
             await self.call(self.seam, "POST", "/session-open", command=True, json=body)
         )
-        self.touch(opened.session_id, params.scope, frontend_id)
+        await self.touch(opened.session_id, params.scope, frontend_id)
         snapshot = await self.scoped(params.scope, session_id=opened.session_id)
         (row,) = snapshot.records.sessions
         session = await self.project(row, snapshot.records.requests)
         return {"session": session.model_dump(mode="json")}
 
     async def send_chat(self, frontend_id: UUID, request_id: str, params: Send) -> dict:
-        self.touch(params.session_id, params.scope, frontend_id)
+        await self.touch(params.session_id, params.scope, frontend_id)
         if len(params.messages) != 1 or params.messages[0]["role"] != "user":
             raise Refusal("unsupported", "Send exactly one user message")
         snapshot = await self.scoped(params.scope, session_id=params.session_id)
@@ -1254,7 +1268,7 @@ class Backend:
         return {"accepted": True, "session_id": params.session_id, "request_id": request_id}
 
     async def read_events(self, frontend_id: UUID, request_id: str, params: Events) -> dict:
-        self.touch(params.session_id, params.scope, frontend_id)
+        await self.touch(params.session_id, params.scope, frontend_id)
         await self.request(params.session_id, params.scope, str(params.request_id))
         query = {
             "op_id": str(params.request_id),
@@ -1284,7 +1298,7 @@ class Backend:
         newest sat at native ``offset`` when it was issued. Newer messages only push it further
         down, so the offset is a starting hint and the sequence the boundary.
         """
-        self.touch(params.session_id, params.scope, frontend_id)
+        await self.touch(params.session_id, params.scope, frontend_id)
         await self.scoped(params.scope, session_id=params.session_id)
         if params.cursor is not None and params.after_sequence is not None:
             raise Refusal("invalid", "cursor and after_sequence exclude each other")
@@ -1323,7 +1337,7 @@ class Backend:
         }
 
     async def cancel_chat(self, frontend_id: UUID, request_id: str, params: ChatCancel) -> dict:
-        self.touch(params.session_id, params.scope, frontend_id)
+        await self.touch(params.session_id, params.scope, frontend_id)
         target = await self.request(params.session_id, params.scope, str(params.request_id))
         body = {"op_id": str(params.request_id), "actor": "user:aide"}
         await self.call(self.seam, "POST", "/message-cancel", command=True, json=body)
@@ -1334,7 +1348,7 @@ class Backend:
         if params.resource == "requests":
             if params.session_id is None or params.scope is None:
                 raise Refusal("invalid", "Requests are listed per session and scope")
-            self.touch(params.session_id, params.scope, frontend_id)
+            await self.touch(params.session_id, params.scope, frontend_id)
             snapshot = await self.scoped(params.scope, session_id=params.session_id)
             revision = snapshot.seq
             rows = [chat_request(r, params.scope) for r in reversed(snapshot.records.requests)]
@@ -1377,17 +1391,16 @@ class Backend:
     async def get_state(self, frontend_id: UUID, request_id: str, params: StateGet) -> dict:
         epoch = {"sessions": self.epoch, "requests": "workspace"}.get(params.resource, "coworld")
         if params.resource == "sessions":
-            self.touch(params.id, params.scope, frontend_id)
+            await self.touch(params.id, params.scope, frontend_id)
             snapshot = await self.scoped(params.scope, session_id=params.id)
             (row,) = snapshot.records.sessions
             item, revision = await self.project(row, snapshot.records.requests), self.revision
         elif params.resource == "requests":
+            found = await self.scoped(params.scope, request_id=params.id)
+            (session,) = found.records.sessions
+            await self.touch(session.id, params.scope, frontend_id)
             snapshot = await self.scoped(params.scope, request_id=params.id)
-            ((row,), (session,)) = (
-                [r for r in snapshot.records.requests if r.op_id == params.id],
-                snapshot.records.sessions,
-            )
-            self.touch(session.id, params.scope, frontend_id)
+            (row,) = [r for r in snapshot.records.requests if r.op_id == params.id]
             item = chat_request(row, params.scope)
             if row.input is not None and not item.in_history:
                 item.messages = [row.input]
@@ -1429,7 +1442,7 @@ class Backend:
         return {"requested": True}
 
     async def respond(self, frontend_id: UUID, request_id: str, params: Respond) -> dict:
-        self.touch(params.session_id, params.scope, frontend_id)
+        await self.touch(params.session_id, params.scope, frontend_id)
         # The gateway forgets a prompt once it is resolved, so the seam keeps the replay record.
         request = params.model_dump(mode="json")
         applied = Applied.model_validate_json(

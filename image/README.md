@@ -139,6 +139,11 @@ the log, so an append that committed before the timeout is not pushed again and 
 returns it. Nothing retries the failed call, so a failure that lasts across boots can crash-loop
 the workspace.
 
+A frontend subscribes to a session's pushes through any request naming that session, once the
+backend has read the session and its scope is that session's own. A wrong scope is refused
+(`forbidden`) to that request alone and is not recorded, because the event watcher reads with the
+recorded scope and a refusal there would end the backend.
+
 The backend's seam calls time out after 40 s (`SEAM_TIMEOUT_S`), which a write waiting out a default
 `research store quiesce` stays inside. A write that had already begun waiting when the hold began
 keeps its usual five seconds, and its `database is locked` answer recycles the runtime as above: 1 of
