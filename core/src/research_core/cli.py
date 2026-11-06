@@ -36,6 +36,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main(argv: list[str] | None = None) -> int:
+    from research_core.telemetry import configure_logging
+
+    configure_logging()
     parser = build_parser()
     args = parser.parse_args(argv)
     run = getattr(args, "run", None)
