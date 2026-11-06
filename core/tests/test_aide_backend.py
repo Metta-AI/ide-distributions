@@ -1232,14 +1232,20 @@ def test_a_scope_with_no_league_is_refused_where_the_seam_would_accept_it(system
 
 
 class BeforeSessionRead(httpx.AsyncBaseTransport):
-    """The real seam, except that ``hook`` runs once before the next read selecting a session."""
+    """Run ``hook`` once before the selected reader's next session read."""
 
     def __init__(self):
         self.real = httpx.AsyncHTTPTransport()
         self.hook = None
+        self.reader = None
 
     async def handle_async_request(self, request):
-        if self.hook and request.url.path == "/snapshot" and "session_id" in request.url.params:
+        if (
+            self.hook
+            and asyncio.current_task() is self.reader
+            and request.url.path == "/snapshot"
+            and "session_id" in request.url.params
+        ):
             hook, self.hook = self.hook, None
             await hook()
         return await self.real.handle_async_request(request)
@@ -1263,7 +1269,13 @@ def test_a_change_made_while_a_request_read_subscribes_is_in_its_reply(system):
             assert (await backend.seam.post("/message-cancel", json=body)).is_success
             await asyncio.sleep(0.5)
 
+        transport.reader = asyncio.current_task()
         transport.hook = cancel_and_let_the_watcher_consume_it
+        # A recovered request consumer reads the same session concurrently.
+        await asyncio.create_task(
+            backend.scoped(aide.Scope.model_validate(WORKSPACE), session_id=session_id)
+        )
+        assert transport.hook is cancel_and_let_the_watcher_consume_it
         reply = await call(
             backend, "state.get", {"resource": "requests", "id": request_id, "scope": WORKSPACE}
         )
