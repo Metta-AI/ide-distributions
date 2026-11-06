@@ -94,6 +94,80 @@ def snapshot(store: Store, session_id: str | None = None) -> list[dict]:
     ]
 
 
+def requests(store: Store, session_ids: list[str]) -> list[dict]:
+    """Every message admission of these sessions as AIDE's request records read it.
+
+    Beside :func:`snapshot`'s fields: ``origin``; ``resumes``; ``revision`` and ``updated_at``,
+    the seq and time of the latest event about it; ``runs``, each run it started with its
+    ``attempt`` (the resumes before that run, from ``client.resumed``); and ``finished``, the
+    progress position AIDE placed its outcome at (``aide.finished``), once placed. ``input`` is
+    the user's message, or ``None`` for runtime work.
+    """
+    rows = store.q(
+        "SELECT op_id,session_id,origin,resumes,created_at,error,error_class,resume_after,"
+        " CASE WHEN origin='answer' THEN json_object('role','user','content',message)"
+        " WHEN origin='client' THEN json_extract(request, '$.message') END AS input,"
+        " CASE WHEN status='queued' AND resume_after IS NOT NULL THEN 'waiting'"
+        " ELSE status END AS status,"
+        " (SELECT seq FROM events WHERE subject=op_id ORDER BY seq DESC LIMIT 1) AS revision,"
+        " (SELECT at FROM events WHERE subject=op_id ORDER BY seq DESC LIMIT 1) AS updated_at"
+        " FROM client_admissions WHERE kind='message'"
+        " AND session_id IN (SELECT value FROM json_each(?)) ORDER BY created_at, rowid",
+        (json.dumps(session_ids),),
+    )
+    runs: dict[str, list[dict]] = {row["op_id"]: [] for row in rows}
+    attempts = dict.fromkeys(runs, 0)
+    finished: dict[str, dict | None] = dict.fromkeys(runs)
+    for event in store.q(
+        "SELECT subject,kind,payload,at FROM events"
+        " WHERE kind IN ('client.started','client.resumed','aide.finished')"
+        " AND subject IN (SELECT op_id FROM client_admissions WHERE kind='message'"
+        " AND session_id IN (SELECT value FROM json_each(?))) ORDER BY seq",
+        (json.dumps(session_ids),),
+    ):
+        payload = json.loads(event["payload"])
+        if event["kind"] == "client.resumed":
+            attempts[event["subject"]] = payload["resume"]
+        elif event["kind"] == "aide.finished":
+            finished[event["subject"]] = finished[event["subject"]] or payload | {"at": event["at"]}
+        elif payload["run_id"] not in {run["run_id"] for run in runs[event["subject"]]}:
+            runs[event["subject"]].append(
+                {"attempt": attempts[event["subject"]], "run_id": payload["run_id"]}
+            )
+    return [
+        {
+            **dict(row),
+            "input": None if row["input"] is None else json.loads(row["input"]),
+            "runs": runs[row["op_id"]],
+            "finished": finished[row["op_id"]],
+        }
+        for row in rows
+    ]
+
+
+def place_finished(tx: Tx, op_id: str, attempt: int, seq: int) -> dict:
+    """Record where AIDE placed a terminal admission's outcome; the first placement stands."""
+    row = tx.one(
+        "SELECT payload,at FROM events WHERE kind='aide.finished' AND subject=?"
+        " ORDER BY seq LIMIT 1",
+        (op_id,),
+    )
+    if row is not None:
+        return json.loads(row["payload"]) | {"at": row["at"]}
+    status = tx.one(
+        "SELECT status FROM client_admissions WHERE op_id=? AND kind='message'", (op_id,)
+    )
+    if status is None or status["status"] not in {
+        "completed",
+        "cancelled",
+        "failed",
+        "interrupted",
+    }:
+        raise StoreError(["only a finished message admission has an outcome to place"])
+    tx.event("aide.finished", op_id, {"attempt": attempt, "seq": seq})
+    return {"attempt": attempt, "seq": seq, "at": tx.at}
+
+
 def enqueue(
     store: Store,
     actor: Actor,

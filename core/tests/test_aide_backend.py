@@ -5,12 +5,14 @@ import json
 import sys
 import threading
 import types
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import NAMESPACE_URL, uuid4, uuid5
 
 import httpx
 import pytest
 
+from research_core import run_failures
 from research_core.serve import SeamServer
 from research_core.store import goals, settings, tasks
 from research_core.watcher.hermes_api import FakeHermesRuns
@@ -59,7 +61,12 @@ class Socket:
 
 
 class Gateway:
-    """The gateway routes the backend reads: transcripts, run state and run event streams."""
+    """The gateway routes the backend reads: transcripts, run state and run event streams.
+
+    Each run's events come from ``script`` once and are retained, as the gateway's backlog is,
+    so every read of a run sees the same events; their ``say`` messages join the transcript
+    when the run first reaches them. A ``gate`` entry holds the run open until it is set.
+    """
 
     def __init__(self, hermes: FakeHermesRuns):
         self.hermes = hermes
@@ -68,22 +75,38 @@ class Gateway:
         self.event_requests: list[tuple[str, str]] = []
         self.drop_after: int | None = None
         self.answers: list[tuple[str, dict]] = []
+        self.runs: dict[str, list[dict]] = {}
+        self.retired: set[str] = set()
+        self.gate = asyncio.Event()
 
     def say(self, session_id: str, **message) -> None:
         rows = self.transcripts.setdefault(session_id, [])
-        rows.append({"id": 100 + sum(len(t) for t in self.transcripts.values()), **message})
+        number = 100 + sum(len(t) for t in self.transcripts.values())
+        rows.append({"id": number, "timestamp": 1793980800.0 + number, **message})
 
     def script(self, run_id: str) -> list[dict]:
-        session_id = self.hermes.runs[run_id].session_id
         call = {"id": "call_1", "type": "function", "function": {"name": "ls", "arguments": "{}"}}
+        done = {"role": "assistant", "content": "Done", "reasoning": "Listing first."}
         return [
             {"event": "run.started"},
+            {"event": "reasoning.available", "text": "Listing first."},
             {"event": "message.delta", "delta": "Hel"},
             {"event": "message.delta", "delta": "lo"},
-            {"event": "tool.started", "say": [(session_id, "assistant", None, [call], None)]},
-            {"event": "tool.completed", "say": [(session_id, "tool", "files", None, "call_1")]},
+            {
+                "event": "tool.started",
+                "tool": "ls",
+                "preview": "ls",
+                "tool_call_id": "call_1",
+                "say": [{"role": "assistant", "content": None, "tool_calls": [call]}],
+            },
+            {
+                "event": "tool.completed",
+                "tool": "ls",
+                "tool_call_id": "call_1",
+                "say": [{"role": "tool", "content": "files", "tool_call_id": "call_1"}],
+            },
             {"event": "message.delta", "delta": "Done"},
-            {"event": "run.completed", "say": [(session_id, "assistant", "Done", None, None)]},
+            {"event": "run.completed", "say": [done]},
         ]
 
     async def handle(self, request: httpx.Request) -> httpx.Response:
@@ -96,6 +119,8 @@ class Gateway:
             offset, limit = int(request.url.params["offset"]), int(request.url.params["limit"])
             return httpx.Response(200, json={"data": rows[offset : offset + limit]})
         run_id = path.split("/")[2]
+        if run_id in self.retired:
+            return httpx.Response(404, json={"error": "Run not found"})
         if path.endswith("/events"):
             last_seq = int(request.url.params["last_seq"])
             self.event_requests.append((run_id, request.url.params["last_seq"]))
@@ -107,30 +132,43 @@ class Gateway:
         return httpx.Response(200, json={"pending_controls": self.controls.get(run_id, [])})
 
     async def stream(self, run_id: str, last_seq: int):
-        for seq, event in enumerate(self.script(run_id)):
+        if run_id not in self.runs:
+            self.runs[run_id] = self.script(run_id)
+        yield b": open\n\n"
+        for seq, event in enumerate(self.runs[run_id]):
             if seq <= last_seq:
+                continue
+            if event.get("gate"):
+                await self.gate.wait()
                 continue
             if self.drop_after is not None and seq > self.drop_after:
                 self.drop_after = None
                 raise httpx.ReadError("gateway stream dropped")
-            for session_id, role, content, calls, call_id in event.pop("say", []):
-                message = {"role": role, "content": content}
-                message |= {"tool_calls": calls} if calls else {}
-                message |= {"tool_call_id": call_id} if call_id else {}
-                self.say(session_id, **message)
-            if event["event"] == "run.completed":
+            for message in event.pop("say", []):
+                self.say(self.hermes.runs[run_id].session_id, **message)
+            if event["event"] == "run.completed" and self.hermes.runs[run_id].status == "running":
                 self.hermes.complete(run_id, "Done")
-            payload = {**event, "run_id": run_id, "seq": seq, "timestamp": 1.0}
+            payload = {**event, "run_id": run_id, "seq": seq, "timestamp": 1793980800.0 + seq}
             yield f"id: {seq}\ndata: {json.dumps(payload)}\n\n".encode()
             await asyncio.sleep(0)
         yield b": stream closed\n\n"
+
+
+class Clock:
+    def __init__(self):
+        self.now = datetime.now(UTC)
+
+    def __call__(self):
+        return self.now
 
 
 @pytest.fixture
 def system(tmp_path):
     ctx = make_ctx(tmp_path, coworld=True)
     hermes = FakeHermesRuns()
-    server = SeamServer(ws=ctx.workspace, hermes=hermes, env=dict(ctx.env))
+    clock = Clock()
+    server = SeamServer(ws=ctx.workspace, hermes=hermes, env=dict(ctx.env), clock=clock)
+    server.test_clock = clock
     worker = threading.Thread(target=server.serve_forever, daemon=True)
     worker.start()
     yield ctx, hermes, server
@@ -138,7 +176,7 @@ def system(tmp_path):
     worker.join(timeout=10)
 
 
-def run(system, scenario):
+def run(system, scenario, inference=None):
     ctx, hermes, server = system
     gateway = Gateway(hermes)
 
@@ -151,19 +189,35 @@ def run(system, scenario):
             ) as native,
             asyncio.TaskGroup() as work,
         ):
-            backend = aide.Backend(seam, native, Availability(), work)
-            backend.socket = Socket()
-            watcher = work.create_task(backend.watch())
+            backends, watchers = [], []
+
+            def stop():
+                for watcher in watchers:
+                    watcher.cancel()
+                for old in backends:
+                    for bridge in list(old.bridges.values()):
+                        bridge.cancel()
+
+            def restart():
+                """A new backend process: nothing of the last one's memory survives."""
+                stop()
+                backend = aide.Backend(seam, native, inference or Availability(), work)
+                backend.socket = Socket()
+                backend.restart = restart
+                backends.append(backend)
+                watchers.append(work.create_task(backend.watch()))
+                return backend
+
             try:
                 async with asyncio.timeout(30):
-                    await scenario(backend, gateway, ctx, hermes)
+                    await scenario(restart(), gateway, ctx, hermes)
             finally:
-                for bridge in list(backend.bridges.values()):
-                    bridge.cancel()
-                # A cancel can be lost while the watcher reads the seam stream (cause not yet
+                stop()
+                # A cancel can be lost while a watcher reads the seam stream (cause not yet
                 # known), and the task group would then wait forever. Repeat it until it lands.
-                while not watcher.done():
-                    watcher.cancel()
+                while not all(watcher.done() for watcher in watchers):
+                    for watcher in watchers:
+                        watcher.cancel()
                     await asyncio.sleep(0.05)
 
     asyncio.run(main())
@@ -215,7 +269,21 @@ def test_session_open_replays_its_session_and_refuses_reused_ids(system):
     assert ctx.wstore.one("SELECT COUNT(*) FROM client_admissions WHERE kind='open'")[0] == 1
 
 
-def test_chat_round_trip_streams_chunks_messages_and_outcome_to_every_subscriber(system):
+def events_read(backend, session_id, request_id, after=None, **extra):
+    params = {
+        "session_id": session_id,
+        "request_id": request_id,
+        "after": after or {"attempt": 0, "seq": 0},
+        "scope": WORKSPACE,
+    }
+    return call(backend, "chat.events", params | extra)
+
+
+def cursor(event):
+    return (event["attempt"], event["seq"])
+
+
+def test_chat_round_trip_pushes_what_the_reads_return_to_every_subscriber(system):
     async def scenario(backend, gateway, ctx, hermes):
         session_id = await opened(backend)
         watching = await call(
@@ -235,25 +303,69 @@ def test_chat_round_trip_streams_chunks_messages_and_outcome_to_every_subscriber
         }
         socket = backend.socket
         await until(lambda: socket.notes("chat.finished") and socket.notes("chat.finished", OTHER))
+        (run_id,) = hermes.runs
+        pushed = [n["event"] for n in socket.notes("chat.event")]
+        assert [e["kind"] for e in pushed] == [
+            "reasoning",
+            "text.delta",
+            "text.delta",
+            "tool.started",
+            "tool.completed",
+            "text.delta",
+            "finished",
+        ]
+        # Every placed event takes the next seq of its attempt.
+        assert [cursor(e) for e in pushed] == [(0, n) for n in range(1, 8)]
+        assert pushed[3] | {"at": None} == {
+            "attempt": 0,
+            "seq": 4,
+            "at": None,
+            "kind": "tool.started",
+            "call_id": "call_1",
+            "name": "ls",
+            "arguments": "ls",
+            "truncated": True,
+        }
         for frontend in (FRONTEND, OTHER):
             chunks = socket.notes("chat.chunk", frontend)
-            assert [(c["completion_id"].rsplit(":", 1)[1], c["seq"]) for c in chunks] == [
-                ("0", 1),
-                ("0", 2),
-                ("1", 1),
+            assert [(c["completion_id"], c["seq"]) for c in chunks] == [
+                (f"{run_id}:2", 1),
+                (f"{run_id}:2", 2),
+                (f"{run_id}:6", 1),
             ]
-            assert "".join(c["chunk"]["choices"][0]["delta"]["content"] for c in chunks) == (
-                "HelloDone"
-            )
+            # A chunk mirrors the text.delta at its cursor.
+            assert [
+                (c["cursor"]["seq"], c["chunk"]["choices"][0]["delta"]["content"]) for c in chunks
+            ] == [(e["seq"], e["delta"]) for e in pushed if e["kind"] == "text.delta"]
             messages = socket.notes("chat.message", frontend)
             assert [m["message"]["role"] for m in messages] == ["assistant", "tool", "assistant"]
-            assert all(m["request_id"] == request_id for m in messages)
-            assert socket.notes("chat.finished", frontend) == [
-                {"session_id": session_id, "request_id": request_id, "status": "completed"}
-            ]
+            assert all(m["request_id"] == request_id and m["kind"] == "message" for m in messages)
+            assert messages[-1]["reasoning"] == "Listing first." and messages[-1]["created_at"]
+            (finished,) = socket.notes("chat.finished", frontend)
+            assert finished["status"] == "completed"
+            assert finished["cursor"] == {"attempt": 0, "seq": 7}
             changes = socket.notes("state.changed", frontend)
             assert any(request_id in c["item"]["active_request_ids"] for c in changes)
             assert all(c["previous_revision"] + 1 == c["revision"] for c in changes)
+        read = (await events_read(backend, session_id, request_id))["result"]
+        assert read["events"] == pushed and read["done"] is True
+        assert read["next"] == {"attempt": 0, "seq": 7}
+        assert (await events_read(backend, session_id, request_id))["result"] == read
+        tail = await events_read(backend, session_id, request_id, {"attempt": 0, "seq": 5})
+        assert tail["result"]["events"] == pushed[5:]
+        paged = (await events_read(backend, session_id, request_id, limit=2))["result"]
+        assert paged["events"] == pushed[:2] and paged["done"] is False
+        assert paged["next"] == {"attempt": 0, "seq": 2}
+        past = (await events_read(backend, session_id, request_id, read["next"]))["result"]
+        assert past == read | {"events": [], "next": read["next"], "done": True}
+        record = (
+            await call(
+                backend, "state.get", {"resource": "requests", "id": request_id, "scope": WORKSPACE}
+            )
+        )["result"]
+        assert record["item"]["revision"] == finished["revision"] == record["revision"]
+        assert record["item"]["status"] == "completed" and record["item"]["in_history"] is True
+        assert "messages" not in record["item"]
         history = await call(
             backend, "chat.history", {"session_id": session_id, "scope": WORKSPACE}
         )
@@ -261,11 +373,36 @@ def test_chat_round_trip_streams_chunks_messages_and_outcome_to_every_subscriber
         assert [i["message"]["role"] for i in items] == ["assistant", "tool", "assistant"]
         assert [i["sequence"] for i in items] == sorted(i["sequence"] for i in items)
         assert history["result"]["next_cursor"] is None
-        # A retry of the accepted request returns the original acceptance and starts nothing.
+        # A retry of the accepted request returns the original acceptance and pushes nothing.
+        frames = len(socket.frames)
         again = await call(backend, "chat.send", params, request_id=request_id)
         assert again["result"] == accepted["result"]
+        assert all("id" in f["message"] for f in socket.frames[frames:])
         changed = {**params, "messages": say("other")}
         assert code(await call(backend, "chat.send", changed, request_id=request_id)) == "id_reused"
+
+        # A new backend process reads the same records, events and seqs from durable state.
+        restarted = backend.restart()
+        assert (await events_read(restarted, session_id, request_id))["result"] == read
+        reread = await call(
+            restarted, "state.get", {"resource": "requests", "id": request_id, "scope": WORKSPACE}
+        )
+        assert reread["result"] == record
+        session = (
+            await call(
+                restarted,
+                "state.get",
+                {"resource": "sessions", "id": session_id, "scope": WORKSPACE},
+            )
+        )["result"]["item"]
+        assert [r["request_id"] for r in session["requests"]] == [request_id]
+        assert session["active_request_ids"] == []
+        # After the gateway retires the run, its outcome still reads after the last applied
+        # cursor, and a read of the lost events says they are gone.
+        gateway.retired.add(run_id)
+        retired = await events_read(restarted, session_id, request_id, {"attempt": 0, "seq": 6})
+        assert retired["result"]["events"] == pushed[-1:] and retired["result"]["done"] is True
+        assert code(await events_read(restarted, session_id, request_id)) == "history_unavailable"
 
     run(system, scenario)
     ctx, hermes, _ = system
@@ -275,15 +412,213 @@ def test_chat_round_trip_streams_chunks_messages_and_outcome_to_every_subscriber
 def test_a_dropped_run_stream_resumes_from_its_last_sequence_without_duplicates(system):
     async def scenario(backend, gateway, ctx, hermes):
         session_id = await opened(backend)
-        gateway.drop_after = 1
+        gateway.drop_after = 2
         params = {"session_id": session_id, "messages": say("hi"), "scope": WORKSPACE}
         await call(backend, "chat.send", params)
         await until(lambda: backend.socket.notes("chat.finished"))
-        assert [last for _, last in gateway.event_requests] == ["-1", "1"]
+        # The bridge resumes after the drop; placing the outcome reads the run once more.
+        assert [last for _, last in gateway.event_requests] == ["-1", "2", "-1"]
         deltas = [
             c["chunk"]["choices"][0]["delta"]["content"] for c in backend.socket.notes("chat.chunk")
         ]
         assert deltas == ["Hel", "lo", "Done"]
+        seqs = [n["event"]["seq"] for n in backend.socket.notes("chat.event")]
+        assert seqs == list(range(1, 8))
+
+    run(system, scenario)
+
+
+def test_a_rebuilt_backend_resumes_pushes_for_an_open_request_without_a_new_send(system):
+    async def scenario(backend, gateway, ctx, hermes):
+        session_id = await opened(backend)
+        gateway.script = lambda run_id: [
+            {"event": "run.started"},
+            {"event": "message.delta", "delta": "Hel"},
+            {"gate": True},
+            {"event": "message.delta", "delta": "lo"},
+            {"event": "run.completed"},
+        ]
+        request_id = str(uuid4())
+        params = {"session_id": session_id, "messages": say("hi"), "scope": WORKSPACE}
+        await call(backend, "chat.send", params, request_id=request_id)
+        await until(lambda: backend.socket.notes("chat.chunk"))
+        # The live run's stream stays open: a read returns what is retained so far.
+        live = (await events_read(backend, session_id, request_id))["result"]
+        assert [(e["seq"], e["delta"]) for e in live["events"]] == [(1, "Hel")]
+        assert live["done"] is False
+
+        restarted = backend.restart()
+        await call(
+            restarted, "state.get", {"resource": "sessions", "id": session_id, "scope": WORKSPACE}
+        )
+        await restarted.rebuild()
+        assert list(restarted.bridges) == [request_id]
+        # A replayed send attaches to the open request and starts nothing.
+        await call(restarted, "chat.send", params, request_id=request_id)
+        await asyncio.sleep(0.5)  # the rebuilt bridge has placed what was already streamed
+        gateway.gate.set()
+        await until(lambda: restarted.socket.notes("chat.finished"))
+        chunks = restarted.socket.notes("chat.chunk")
+        assert [(c["cursor"], c["chunk"]["choices"][0]["delta"]["content"]) for c in chunks] == [
+            ({"attempt": 0, "seq": 2}, "lo")
+        ]
+        assert [n["event"]["seq"] for n in restarted.socket.notes("chat.event")] == [2, 3]
+        assert restarted.socket.notes("chat.finished")[0]["cursor"] == {"attempt": 0, "seq": 3}
+
+    run(system, scenario)
+    assert [name for name, _ in system[1].calls].count("start") == 1
+
+
+def test_a_held_request_reads_waiting_then_stitches_its_next_attempt(system):
+    ctx, hermes, server = system
+
+    def fail_first(run):
+        if len(hermes.runs) == 1:
+            hermes.fail(run.run_id, "HTTP 429: slow down")
+
+    async def scenario(backend, gateway, ctx, hermes):
+        hermes.script = fail_first
+        session_id = await opened(backend)
+
+        def script(run_id):
+            if run_id == next(iter(hermes.runs)):
+                return [
+                    {"event": "run.started"},
+                    {"event": "message.delta", "delta": "Wor"},
+                    {"event": "run.failed", "error": "HTTP 429: slow down"},
+                ]
+            return [
+                {"event": "run.started"},
+                {"event": "message.delta", "delta": "Back"},
+                {"event": "run.completed"},
+            ]
+
+        gateway.script = script
+        request_id = str(uuid4())
+        params = {"session_id": session_id, "messages": say("hi"), "scope": WORKSPACE}
+        await call(backend, "chat.send", params, request_id=request_id)
+        get = {"resource": "requests", "id": request_id, "scope": WORKSPACE}
+
+        async def status():
+            return (await call(backend, "state.get", get))["result"]["item"]
+
+        while (await status())["status"] != "waiting":
+            await asyncio.sleep(0.05)
+        # A new backend reads the hold, its reason and its resume time from the store.
+        restarted = backend.restart()
+        held = (await call(restarted, "state.get", get))["result"]["item"]
+        assert held["waiting"]["reason"] == "rate_limited" and held["waiting"]["until"]
+        assert (held["error"], held["attempt"], held["in_history"]) == (None, 0, True)
+        await restarted.rebuild()
+        server.test_clock.now += timedelta(minutes=2)
+        await until(lambda: restarted.socket.notes("chat.finished"))
+        read = (await events_read(restarted, session_id, request_id))["result"]
+        assert [(cursor(e), e["kind"]) for e in read["events"]] == [
+            ((0, 1), "text.delta"),
+            ((1, 1), "text.delta"),
+            ((1, 2), "finished"),
+        ]
+        (chunk,) = restarted.socket.notes("chat.chunk")
+        assert chunk["cursor"] == {"attempt": 1, "seq": 1}
+        assert (await call(restarted, "state.get", get))["result"]["item"]["attempt"] == 1
+        # Once the gateway retires the first attempt, a read from it reports the gap.
+        gateway.retired.add(next(iter(hermes.runs)))
+        gap = await events_read(restarted, session_id, request_id)
+        assert code(gap) == "history_unavailable"
+        current = await events_read(restarted, session_id, request_id, {"attempt": 1, "seq": 0})
+        assert current["result"]["events"] == read["events"][1:]
+
+    run(system, scenario)
+
+
+def test_failed_and_unstarted_requests_stay_readable_after_a_restart(system):
+    async def scenario(backend, gateway, ctx, hermes):
+        hermes.script = lambda run: hermes.fail(run.run_id, "agent run failed")
+        gateway.script = lambda run_id: [{"event": "run.started"}, {"event": "run.failed"}]
+        session_id = await opened(backend)
+        failed_id = str(uuid4())
+        params = {"session_id": session_id, "messages": say("hi"), "scope": WORKSPACE}
+        await call(backend, "chat.send", params, request_id=failed_id)
+        await until(lambda: backend.socket.notes("chat.finished"))
+        settings.update(ctx.wstore, HARNESS, "paused", True, cites="hold dispatch")
+        queued_id = str(uuid4())
+        queued = {"session_id": session_id, "messages": say("later"), "scope": WORKSPACE}
+        await call(backend, "chat.send", queued, request_id=queued_id)
+        cancel = {"session_id": session_id, "request_id": queued_id, "scope": WORKSPACE}
+        assert (await call(backend, "chat.cancel", cancel))["result"] == {"requested": True}
+        await until(lambda: len(backend.socket.notes("chat.finished")) == 2)
+
+        restarted = backend.restart()
+        listing = (
+            await call(
+                restarted,
+                "state.list",
+                {"resource": "requests", "session_id": session_id, "scope": WORKSPACE},
+            )
+        )["result"]
+        assert [(i["request_id"], i["status"]) for i in listing["items"]] == [
+            (queued_id, "cancelled"),
+            (failed_id, "failed"),
+        ]
+        failed, cancelled = listing["items"][1], listing["items"][0]
+        assert failed["error"] == {"class": None, "code": "failed", "message": "agent run failed"}
+        assert (cancelled["error"], cancelled["in_history"]) == (None, False)
+        assert "messages" not in cancelled
+        got = await call(
+            restarted, "state.get", {"resource": "requests", "id": queued_id, "scope": WORKSPACE}
+        )
+        assert got["result"]["item"]["messages"] == say("later")
+        outcome = (await events_read(restarted, session_id, failed_id))["result"]["events"]
+        assert [(e["kind"], e["status"], e["error"]["code"]) for e in outcome] == [
+            ("finished", "failed", "failed")
+        ]
+        never = (await events_read(restarted, session_id, queued_id))["result"]
+        assert [(cursor(e), e["status"]) for e in never["events"]] == [((0, 1), "cancelled")]
+        assert (
+            code(
+                await call(
+                    restarted,
+                    "state.get",
+                    {"resource": "requests", "id": queued_id, "scope": LEAGUE},
+                )
+            )
+            == "forbidden"
+        )
+
+    run(system, scenario)
+
+
+def test_an_interrupted_request_places_its_outcome_once_after_what_was_retained(system):
+    async def scenario(backend, gateway, ctx, hermes):
+        session_id = await opened(backend)
+        gateway.script = lambda run_id: [
+            {"event": "run.started"},
+            {"event": "message.delta", "delta": "Hel"},
+            {"gate": True},
+        ]
+        request_id = str(uuid4())
+        params = {"session_id": session_id, "messages": say("hi"), "scope": WORKSPACE}
+        await call(backend, "chat.send", params, request_id=request_id)
+        await until(lambda: backend.socket.notes("chat.chunk"))
+        # The gateway restarts under the run: its events are gone with it.
+        (run_id,) = hermes.runs
+        hermes.crash(run_id)
+        gateway.retired.add(run_id)
+        gateway.gate.set()
+        await until(lambda: backend.socket.notes("chat.finished"))
+        (finished,) = backend.socket.notes("chat.finished")
+        assert finished["status"] == "interrupted" and finished["error"]["code"] == "interrupted"
+        assert finished["cursor"] == {"attempt": 0, "seq": 2}
+        restarted = backend.restart()
+        # The frontend that applied the pushed delta reads the outcome right after it.
+        read = await events_read(restarted, session_id, request_id, {"attempt": 0, "seq": 1})
+        assert [(cursor(e), e["kind"], e["status"]) for e in read["result"]["events"]] == [
+            ((0, 2), "finished", "interrupted")
+        ]
+        assert read["result"]["next"] == finished["cursor"] and read["result"]["done"] is True
+        # From the start, the lost delta is a gap the read reports instead of skipping.
+        gap = await events_read(restarted, session_id, request_id)
+        assert code(gap) == "history_unavailable"
 
     run(system, scenario)
 
@@ -314,6 +649,40 @@ def test_chat_send_forwards_optional_context_and_instructions_to_the_admission(s
     plain, rich = payload(sent["plain"]), payload(sent["rich"])
     assert "view" not in plain["context"] and plain["instructions"] is None
     assert rich["context"]["view"] == view and rich["instructions"] == "Answer briefly."
+
+
+def test_session_open_stamps_the_named_client_and_send_refuses_typed_inference(system):
+    class Blocked:
+        blocked, until = "budget_exhausted", datetime(2026, 11, 6, tzinfo=UTC)
+
+    class Closed(Availability):
+        def available(self):
+            return False
+
+        def blocking(self):
+            return Blocked()
+
+    async def scenario(backend, gateway, ctx, hermes):
+        client = {"id": "softmax-play", "kind": "web", "guide": "client-play"}
+        reply = await call(backend, "session.open", {"scope": WORKSPACE, "client": client})
+        session_id = reply["result"]["session"]["id"]
+        assert system[2]._clients[session_id] == client
+        default = await opened(backend)
+        assert system[2]._clients[default] == {"id": "aide", "kind": "ide"}
+        refused = await call(
+            backend,
+            "chat.send",
+            {"session_id": session_id, "messages": say("hi"), "scope": WORKSPACE},
+        )
+        assert refused["error"]["data"] == {
+            "code": "inference_unavailable",
+            "reason": "budget_exhausted",
+            "until": "2026-11-06T00:00:00+00:00",
+        }
+        reads = {"session_id": session_id, "scope": WORKSPACE, "wake": False}
+        assert "result" in await call(backend, "chat.history", reads)
+
+    run(system, scenario, inference=Closed())
 
 
 def test_scope_mismatches_are_forbidden_and_unscoped_sessions_are_hidden(system):
@@ -347,60 +716,85 @@ def test_scope_mismatches_are_forbidden_and_unscoped_sessions_are_hidden(system)
         assert [s["id"] for s in scoped["result"]["items"]] == [coworld_id]
         bad = {"session_id": session_id, "messages": say("a") + say("b"), "scope": WORKSPACE}
         assert code(await call(backend, "chat.send", bad)) == "unsupported"
+        unscoped = await call(
+            backend, "state.list", {"resource": "requests", "session_id": session_id}
+        )
+        assert unscoped["error"]["code"] == -32602
 
     run(system, scenario)
 
 
-def test_history_pages_newest_first_and_bounds_each_reply_to_one_mebibyte(system):
+def test_history_pages_by_a_stable_boundary_reads_forward_and_bounds_each_reply(system):
     async def scenario(backend, gateway, ctx, hermes):
         session_id = await opened(backend)
         await until(lambda: session_id in hermes.sessions)
         for text in ("a", "b", "c", "d", "e"):
             gateway.say(session_id, role="assistant", content=text)
         params = {"session_id": session_id, "scope": WORKSPACE, "limit": 2}
-        seen, cursor = [], None
+        seen, cursor_, arrived = [], None, False
         while True:
             page = (
-                await call(backend, "chat.history", params | ({"cursor": cursor} if cursor else {}))
+                await call(
+                    backend, "chat.history", params | ({"cursor": cursor_} if cursor_ else {})
+                )
             )["result"]
             seen = [i["message"]["content"] for i in page["items"]] + seen
-            cursor = page["next_cursor"]
-            if cursor is None:
+            cursor_ = page["next_cursor"]
+            if not arrived:
+                # New messages do not move a boundary already issued.
+                gateway.say(session_id, role="assistant", content="new")
+                arrived = True
+            if cursor_ is None:
                 break
         assert seen == ["a", "b", "c", "d", "e"]
+        first = await call(backend, "chat.history", {"session_id": session_id, "scope": WORKSPACE})
+        sequences = [i["sequence"] for i in first["result"]["items"]]
+        forward = await call(
+            backend,
+            "chat.history",
+            {"session_id": session_id, "scope": WORKSPACE, "after_sequence": sequences[-3]},
+        )
+        assert [i["sequence"] for i in forward["result"]["items"]] == sequences[-2:]
+        assert forward["result"]["next_cursor"] is None
         for _ in range(3):
             gateway.say(session_id, role="assistant", content="x" * 400_000)
         page = (
             await call(backend, "chat.history", {"session_id": session_id, "scope": WORKSPACE})
         )["result"]
-        assert len(page["items"]) == 2 and page["next_cursor"] == "2"
+        assert len(page["items"]) == 2 and page["next_cursor"] is not None
         gateway.say(session_id, role="assistant", content="y" * 1_100_000)
         huge = await call(backend, "chat.history", {"session_id": session_id, "scope": WORKSPACE})
         assert code(huge) == "too_large"
-        # An accepted message shows before the dispatcher hands it to the gateway.
-        settings.update(ctx.wstore, HARNESS, "paused", True, cites="hold dispatch")
-        request_id = str(uuid4())
-        sent = {"session_id": session_id, "messages": say("queued"), "scope": WORKSPACE}
-        await call(backend, "chat.send", sent, request_id=request_id)
-        page = (
-            await call(
-                backend, "chat.history", {"session_id": session_id, "scope": WORKSPACE, "limit": 1}
-            )
-        )["result"]
-        assert page["items"][-1]["request_id"] == request_id
-        assert page["items"][-1]["message"] == {"role": "user", "content": "queued"}
-        cancelled = await call(
-            backend,
-            "chat.cancel",
-            {"session_id": session_id, "request_id": request_id, "scope": WORKSPACE},
-        )
-        assert cancelled["result"] == {"requested": True}
         unknown = {"session_id": session_id, "request_id": str(uuid4()), "scope": WORKSPACE}
         assert code(await call(backend, "chat.cancel", unknown)) == "not_found"
-        await until(lambda: backend.socket.notes("chat.finished"))
-        assert backend.socket.notes("chat.finished")[0]["status"] == "cancelled"
 
     run(system, scenario)
+
+
+def test_history_marks_continuations_failed_turns_and_reasoning():
+    rows = [
+        aide.NativeMessage(id=1, role="user", content="hi", client_context={"view": "x"}),
+        aide.NativeMessage(id=2, role="user", content=run_failures.continuation("rate_limited")),
+        aide.NativeMessage(id=3, role="assistant", content="Sorry", display_kind="failed_turn"),
+        aide.NativeMessage(id=4, role="assistant", content="Ok", reasoning_content="Because"),
+        aide.NativeMessage(id=5, role="assistant", content="", display_kind="hidden"),
+    ]
+    records = [aide.record(row, "s") for row in rows]
+    assert [r and r.kind for r in records] == [
+        "message",
+        "continuation",
+        "failed_turn",
+        "message",
+        None,
+    ]
+    assert records[3].model_dump(mode="json") == {
+        "id": "4",
+        "session_id": "s",
+        "sequence": 4,
+        "message": {"role": "assistant", "content": "Ok"},
+        "kind": "message",
+        "reasoning": "Because",
+    }
 
 
 def test_tasks_goals_cancellation_and_pending_input(system):
@@ -440,12 +834,13 @@ def test_tasks_goals_cancellation_and_pending_input(system):
                     "kind": "approval",
                     "prompt_id": "p1",
                     "execution_generation": 3,
-                    "description": "rm -rf",
+                    "description": "Delete the scratch folder",
+                    "command": "rm -rf scratch",
                     "choices": ["once", "session", "always", "deny"],
                 }
             ],
         )
-        gateway.script = lambda run_id: [{"event": "run.started"}]
+        gateway.script = lambda run_id: [{"event": "run.started"}, {"gate": True}]
         params = {"session_id": session_id, "messages": say("go"), "scope": WORKSPACE}
         await call(backend, "chat.send", params)
         state = {"resource": "sessions", "id": session_id, "scope": WORKSPACE}
@@ -457,9 +852,11 @@ def test_tasks_goals_cancellation_and_pending_input(system):
         expected = uuid5(NAMESPACE_URL, f"aide-input:{session_id}:{run_id}:3:p1")
         assert pending == {
             "request_id": str(expected),
-            "prompt": "rm -rf",
+            "prompt": "Delete the scratch folder",
             "kind": "approval",
             "choices": ["once", "deny"],
+            "description": "Delete the scratch folder",
+            "command": "rm -rf scratch",
         }
         answer = {"session_id": session_id, "request_id": pending["request_id"], "scope": WORKSPACE}
         wrong = await call(
@@ -479,6 +876,7 @@ def test_tasks_goals_cancellation_and_pending_input(system):
             backend, "input.respond", answer | {"response": {"kind": "approval", "choice": "deny"}}
         )
         assert code(stale) == "conflict"
+        gateway.gate.set()
 
     run(system, scenario)
 
@@ -497,7 +895,7 @@ def test_pending_clarification_has_no_choices_field(system):
                 }
             ],
         )
-        gateway.script = lambda run_id: [{"event": "run.started"}]
+        gateway.script = lambda run_id: [{"event": "run.started"}, {"gate": True}]
         params = {"session_id": session_id, "messages": say("go"), "scope": WORKSPACE}
         await call(backend, "chat.send", params)
         state = {"resource": "sessions", "id": session_id, "scope": WORKSPACE}
@@ -512,6 +910,22 @@ def test_pending_clarification_has_no_choices_field(system):
             "prompt": "Which league?",
             "kind": "clarification",
         }
+        gateway.gate.set()
+
+    run(system, scenario)
+
+
+def test_frontend_closed_ends_its_subscriptions(system):
+    async def scenario(backend, gateway, ctx, hermes):
+        session_id = await opened(backend)
+        await call(
+            backend,
+            "state.get",
+            {"resource": "sessions", "id": session_id, "scope": WORKSPACE},
+            frontend=OTHER,
+        )
+        backend.closed(OTHER)
+        assert backend.subscribers[session_id].frontends == {FRONTEND}
 
     run(system, scenario)
 
