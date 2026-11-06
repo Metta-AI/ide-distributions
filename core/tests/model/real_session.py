@@ -4,10 +4,11 @@ The direct tests (``write_actions.py``) ask OpenRouter themselves. Here the mode
 Hermes, so the request is the real one: the stored system prompt, the frozen tool list, Hermes's
 own request shaping, the plugin's hooks, the real tools answering on the fake platform. The
 judging is the same (``write_actions.is_judged`` and ``judge``), read from the Session's stored
-messages. A run is stopped as soon as the judged call is seen, so a case costs what it took to
-get there, and what is judged is the call a model composes, not what the real tool then answered:
-that also depends on the seeded records (a Researcher's Session holds its Task but has no worker
-execution, so the real ``task_ask`` refuses it). ``test_real_session.py`` runs the cases.
+messages. A run is stopped as soon as the judged call is seen, except that a forced turn goes on
+after an invalid one (``MAX_LATER_ATTEMPTS``). What is judged is the call a model composes, not
+what the real tool then answered: that also depends on the seeded records (a Researcher's Session
+holds its Task but has no worker execution, so the real ``task_ask`` refuses it).
+``test_real_session.py`` runs the cases.
 
 A recovery case needs refused calls already in the history, and the runs API takes only text
 history, so those rows are written into the profile's ``state.db`` before the first run, in the
@@ -62,7 +63,9 @@ RUN_NUMBERS = itertools.count(100)
 # Calls before the judged one, as a Session makes them: reading a skill or the record first is
 # normal here, so this is wider than the direct tests' limit.
 MAX_DETOURS = 12
-# How many more calls of the judged action a forced turn may make after a bad first one.
+# How many more judged calls (``write_actions.is_judged``: any call to the tool that is not a read)
+# a forced turn may make after a bad first one. Its other calls do not count, and Hermes's loop
+# guard can end the turn first.
 MAX_LATER_ATTEMPTS = 3
 FAKE_PLAYER_ID = "ply_model_tests"
 # How a run's error text gives a host's refusal: the SDK's "Error code: 400", or "HTTP 400".
@@ -396,7 +399,9 @@ class RealGateway:
             return
 
     def _judge_new_calls(self, case: Case, stored: list[dict], result: harness.Result) -> bool:
-        """True when the judged call was found or there were too many other calls first."""
+        """True when the run can stop: the judged call settled it, or there were too many other
+        calls first. After an invalid call, a forced turn stops at a later valid one or at
+        ``MAX_LATER_ATTEMPTS``."""
         detours: list[str] = []
         judged = False
         later: list[str] = []

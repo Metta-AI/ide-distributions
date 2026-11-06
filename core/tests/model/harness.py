@@ -1,7 +1,8 @@
 """What the model tool-call tests share: the OpenRouter request, host pins, tool lists, results.
 
-The tests call OpenRouter directly, never through Hermes, so they measure what a model and an
-OpenRouter host make of the tool schemas, not Hermes's own parsing of the reply. The request is
+The direct tests call OpenRouter themselves, not through Hermes, so they measure what a model and
+an OpenRouter host make of the tool schemas, not Hermes's own parsing of the reply
+(``real_session.py`` goes through Hermes). The request is
 shaped as the pinned Hermes (v0.22.6) shapes it on its OpenRouter provider profile: no
 ``temperature``
 (``agent/transports/chat_completions.py`` ``_base_kwargs`` sends one only for a profile's fixed
@@ -365,7 +366,7 @@ class Result:
     detours: list[str] = field(default_factory=list)  # other calls made before the judged one
     # Fields the judged call's reasoning names but its arguments omit (see ``reasoning_gaps``).
     reasoning_gaps: list[str] = field(default_factory=list)
-    # Outcomes of the later calls of the judged action, after an invalid one in a forced turn.
+    # Outcomes of the later judged calls, after an invalid one in a forced turn.
     later_attempts: list[str] = field(default_factory=list)
 
 
@@ -405,7 +406,8 @@ def started_calls(
     """Start the model calls of every collected test of ``test_function`` at once, keyed by test
     id, ``IDE_TOOL_CALL_PARALLEL`` at a time (default 4): with repeats a run is hundreds of calls
     that spend most of their time waiting for the host. Each test then waits for its own. Calls
-    not yet started are dropped on exit, so stopping pytest early stops the spending."""
+    not yet started are dropped on exit, so stopping pytest early stops the spending once the
+    calls under way end."""
     pool = ThreadPoolExecutor(int(os.environ.get("IDE_TOOL_CALL_PARALLEL") or 4))
     try:
         yield {
@@ -553,8 +555,11 @@ def summary() -> list[str]:
         "(any call to the tool without an action, or with a write action). ok = it passes the "
         "tools' argument and record checks; BAD = it does not; TOOL = never within the request "
         "limit; TEXT = a text answer at once; STOP = a text answer after other calls; REJ = the "
-        "host refused the request (4xx); ERR = transport error or 5xx (not counted). +N = N "
+        "host refused the request (4xx); ERR = transport error, 5xx or account limit, or through "
+        "a real Session a time limit or a gateway that stopped (not counted). +N = N "
         "other calls first, answered as the tools would (refusal or plausible result). "
+        "Invalid, valid later: invalid calls followed by a valid one; only a forced turn goes "
+        "on after one, so elsewhere 0/N means not measured. "
         "Prompt tokens: mean of each case's first request (through a real Session, of its "
         "requests: Hermes stores totals). With repeats a cell is valid/judged "
         "and a rate is valid/judged, percent and [95% Wilson interval]. Intervals that do not "
