@@ -1,13 +1,13 @@
 """The AIDE 1.0.0 backend: the platform relay's JSON-RPC methods over the seam and the gateway.
 
-It runs beside the legacy control connection in every workspace and stays dormant until the
-platform points a frontend at it. Reads are authoritative and come from durable workspace
-state: request records from the seam's admissions and their events, progress from the
-gateway's retained run events, messages from the gateway's history. Notifications are a fast
-path that carries the cursor of the read returning the same information; the bridges that push
-them are rebuilt from those reads whenever the backend (re)connects, so losing them loses
-nothing. A frontend is subscribed to a session from its first request naming it until the relay
-reports ``frontend.closed``.
+It runs beside the legacy control connection in every workspace. Reads are authoritative and
+come from durable workspace state: request records from the seam's admissions and their events,
+progress from each request's event log in the workspace store, messages from the gateway's
+history. One consumer per open request is that log's only writer: it translates the gateway's
+run events, appends each, and only then pushes it, so a push carries the cursor of the read
+returning the same event. Consumers start with the backend and resume from their log's last
+row, so a restart loses nothing the log holds. A frontend is subscribed to a session from its
+first request naming it until the relay reports ``frontend.closed``.
 """
 
 import asyncio
@@ -48,7 +48,7 @@ RECENT_TERMINAL = 10  # terminal requests a Session embeds beside its open ones
 EMBEDDED_ACTIVE = 1000  # open requests a Session embeds at most
 ERROR_CHARS = 4000  # RequestError.message
 TEXT_CHARS = 65536  # reasoning, interim text and tool arguments in one event
-REPLAY_IDLE_SECONDS = 0.25  # a live run's stream has sent its retained events by then
+MERGE_SECONDS = 0.25  # consecutive text deltas share one logged event for this long
 DEFAULT_CLIENT = {"id": "aide", "kind": "ide"}
 TASK_STATUSES = {
     "proposed": "proposed",
@@ -205,10 +205,14 @@ class Run(BaseModel):
     run_id: str
 
 
-class Placed(BaseModel):
+class Logged(BaseModel):
+    """The last row of a request's event log, with the gateway position folded into it."""
+
     attempt: int
     seq: int
-    at: str
+    run_id: str | None
+    source_seq: int | None
+    event: dict[str, JsonValue]
 
 
 class Admission(BaseModel):
@@ -226,7 +230,7 @@ class Admission(BaseModel):
     revision: int
     resumes: int
     runs: list[Run]
-    finished: Placed | None
+    logged: Logged | None
 
 
 class Records(BaseModel):
@@ -368,9 +372,9 @@ Pending = ApprovalInput | ClarificationInput
 
 
 class RequestError(Wire):
-    model_config = ConfigDict(serialize_by_alias=True)
+    model_config = ConfigDict(serialize_by_alias=True, validate_by_name=True)
 
-    error_class: str | None = Field(serialization_alias="class")
+    error_class: str | None = Field(alias="class")
     code: str
     message: str
 
@@ -488,6 +492,14 @@ class Finished(Event):
 
 
 ChatEvent = TextDelta | TextInterim | Reasoning | ToolStarted | ToolCompleted | Finished
+
+
+class Log(BaseModel):
+    """A page of one request's event log; ``closed`` once it holds ``finished``."""
+
+    events: list[Annotated[ChatEvent, Field(discriminator="kind")]]
+    more: bool
+    closed: bool
 
 
 class Binding(BaseModel):
@@ -621,28 +633,59 @@ def chat_request(row: Admission, scope: Scope) -> ChatRequest:
 
 
 class Progress:
-    """One attempt's events, placed from its runs' gateway events in order.
+    """One attempt's log position as its consumer places the gateway events of its runs.
 
-    Each placed event takes the next ``seq``, so seqs are contiguous within the attempt and every
-    reader of the same retained events places them alike. Text deltas between boundaries (a tool
-    call, interim text) share one completion; ``chunks`` counts its deltas for ``chat.chunk``.
+    Each placed event takes the next ``seq``, so seqs are contiguous within the attempt. Text
+    deltas between boundaries (a tool call, interim text) share one completion, and consecutive
+    deltas merge into one event until another kind arrives or ``MERGE_SECONDS`` pass, which
+    bounds the log's writes. ``consumed`` is the last gateway seq read from each run, where a
+    reconnected stream resumes; a pending merge holds the gateway seq it has folded in.
     """
 
-    def __init__(self, attempt: int):
-        self.attempt, self.seq = attempt, 0
-        self.completion: str | None = None
-        self.chunks = 0
-        self.consumed: dict[str, int] = {}  # run id -> the last gateway seq placed from it
+    def __init__(self, attempt: int, seq: int = 0, completion: str | None = None):
+        self.attempt, self.seq, self.completion = attempt, seq, completion
+        self.consumed: dict[str, int] = {}  # run id -> the last gateway seq read from it
+        self.pending: tuple[TextDelta, int] | None = None
+        self.deadline = 0.0
 
-    def place(self, run_id: str, event: RunEvent) -> ChatEvent | None:
+    @classmethod
+    def resumed(cls, logged: Logged) -> "Progress":
+        """The attempt's position after its last logged event, as a restarted consumer resumes."""
+        completion = logged.event["completion_id"] if logged.event["kind"] == "text.delta" else None
+        progress = cls(logged.attempt, logged.seq, completion)
+        progress.consumed[logged.run_id] = logged.source_seq
+        return progress
+
+    def patience(self) -> float | None:
+        """Seconds until a pending merge is due, or ``None`` with nothing pending."""
+        return None if self.pending is None else max(0.0, self.deadline - time.monotonic())
+
+    def flush(self) -> list[tuple[ChatEvent, int]]:
+        pending, self.pending = self.pending, None
+        return [] if pending is None else [pending]
+
+    def place(self, run_id: str, event: RunEvent) -> list[tuple[ChatEvent, int]]:
+        """The events due for the log after ``event``, each with its last gateway seq."""
+        if event.event == "message.delta" and event.delta:
+            if self.pending is not None:
+                self.pending[0].delta += event.delta
+                self.pending = (self.pending[0], event.seq)
+                return []
+            if self.completion is None:
+                self.completion = f"{run_id}:{self.seq + 1}"
+            self.seq += 1
+            delta = TextDelta(
+                attempt=self.attempt,
+                seq=self.seq,
+                at=moment(event.timestamp),
+                completion_id=self.completion,
+                delta=event.delta,
+            )
+            self.pending, self.deadline = (delta, event.seq), time.monotonic() + MERGE_SECONDS
+            return []
         at = {"attempt": self.attempt, "seq": self.seq + 1, "at": moment(event.timestamp)}
         placed: ChatEvent | None = None
-        if event.event == "message.delta" and event.delta:
-            if self.completion is None:
-                self.completion, self.chunks = f"{run_id}:{self.seq + 1}", 0
-            self.chunks += 1
-            placed = TextDelta(**at, completion_id=self.completion, delta=event.delta)
-        elif event.event == "message.interim" and event.text:
+        if event.event == "message.interim" and event.text:
             placed = TextInterim(
                 **at, **capped(event.text), already_streamed=event.already_streamed
             )
@@ -660,11 +703,10 @@ class Progress:
                 else ToolCompleted(**at, **call)
             )
         if placed is None:
-            return None
-        if not isinstance(placed, TextDelta):
-            self.completion = None
+            return []
+        self.completion = None
         self.seq += 1
-        return placed
+        return self.flush() + [(placed, event.seq)]
 
 
 class Subscription:
@@ -687,7 +729,8 @@ class Backend:
         self.subscribers: dict[str, Subscription] = {}
         self.requests: dict[str, str] = {}  # admission op id -> session id
         self.wakes: dict[str, asyncio.Event] = {}
-        self.bridges: dict[str, asyncio.Task[None]] = {}
+        self.consumers: dict[str, asyncio.Task[None]] = {}
+        self.finished: set[str] = set()  # requests whose log this backend closed
         self.start: asyncio.Future[int] = asyncio.get_running_loop().create_future()
 
     # --- native calls -----------------------------------------------------------------------
@@ -852,71 +895,6 @@ class Backend:
             for row in board.records.tasks
         ]
 
-    # --- progress -----------------------------------------------------------------------------
-
-    async def retained(self, run_id: str) -> list[RunEvent] | None:
-        """The gateway's retained events of one run, oldest first, as far as they reach now;
-        ``None`` once the gateway no longer holds all of them (retired, or its backlog cut)."""
-        found: list[RunEvent] = []
-        async with self.gateway.stream(
-            "GET",
-            f"v1/runs/{quote(run_id, safe='')}/events",
-            params={"last_seq": -1},
-            timeout=httpx.Timeout(30, read=None),
-        ) as response:
-            if response.status_code == 404:
-                return None
-            response.raise_for_status()
-            lines = events(response)
-            while True:
-                try:
-                    data = await asyncio.wait_for(anext(lines, None), REPLAY_IDLE_SECONDS)
-                except TimeoutError:  # a live run's stream stays open after its retained events
-                    return found
-                if data is None:
-                    return found
-                event = RunEvent.model_validate_json(data)
-                if event.event == "replay.truncated":
-                    return None
-                found.append(event)
-
-    async def attempt(self, request: Admission, attempt: int) -> list[ChatEvent] | None:
-        """One attempt's placed events, or ``None`` when a run of it is no longer retained."""
-        progress, placed = Progress(attempt), []
-        for run in (r for r in request.runs if r.attempt == attempt):
-            found = await self.retained(run.run_id)
-            if found is None:
-                return None
-            for event in found:
-                event = progress.place(run.run_id, event)
-                if event is not None:
-                    placed.append(event)
-        return placed
-
-    async def finish(self, request: Admission, pushed: int = 0) -> Finished:
-        """A terminal request's outcome at its durably recorded position: the first time it is
-        placed, after its last attempt's retained events and the ``pushed`` events a bridge
-        already sent of that attempt (a gateway restart loses the retained ones); the same
-        position ever after."""
-        placed = request.finished
-        if placed is None:
-            final = await self.attempt(request, request.resumes)
-            body = {
-                "op_id": request.op_id,
-                "attempt": request.resumes,
-                "seq": max(final[-1].seq if final else 0, pushed) + 1,
-                "actor": "user:aide",
-            }
-            reply = await self.call(self.seam, "POST", "/message-finished", json=body)
-            placed = Placed.model_validate_json(reply)
-        return Finished(
-            attempt=placed.attempt,
-            seq=placed.seq,
-            at=placed.at,
-            status=request.status,
-            error=request_error(request),
-        )
-
     # --- notifications ----------------------------------------------------------------------
 
     def touch(self, session_id: str, scope: Scope, frontend_id: UUID) -> None:
@@ -964,10 +942,14 @@ class Backend:
         await self.notify(session_id, "state.changed", change)
 
     async def watch(self) -> None:
-        """Follow the workspace store's events from the first snapshot this backend served."""
-        after = await self.start
+        """Recover every open event log's consumer, then follow the workspace store's events from
+        the first snapshot this backend served; a new message admission gets its consumer."""
+        after: int | None = None
         while True:
             try:
+                if after is None:  # recover once the seam answers
+                    await self.recover()
+                    after = await self.start
                 async with self.seam.stream(
                     "GET",
                     "/stream",
@@ -983,6 +965,11 @@ class Backend:
                             after = event.seq
                             if event.kind == "client.accepted":
                                 self.requests[event.subject] = str(event.payload["session_id"])
+                            if (
+                                event.kind == "client.accepted"
+                                and event.payload["kind"] == "message"
+                            ) or event.kind == "execution.queued":
+                                await self.recover()
                             if event.subject in self.wakes:
                                 self.wakes[event.subject].set()
                             if event.kind.startswith("session."):
@@ -1014,14 +1001,48 @@ class Backend:
             after = native.id
         return after
 
-    async def follow(
-        self, request: Admission, run: Run, progress: Progress, start: tuple[int, int], after: int
-    ) -> tuple[bool, int]:
-        """Push one run's events placed after ``start`` until its stream ends.
+    async def record(
+        self, request: Admission, run_id: str | None, placed: list[tuple[ChatEvent, int | None]]
+    ) -> None:
+        """Append each event to the request's log, then push it at the cursor it was stored at."""
+        note = {"session_id": request.session_id, "request_id": request.op_id}
+        for event, source_seq in placed:
+            body = {
+                "op_id": request.op_id,
+                "event": event.model_dump(mode="json"),
+                "run_id": run_id,
+                "source_seq": source_seq,
+                "actor": "user:aide",
+            }
+            await self.call(self.seam, "POST", "/message-events", json=body)
+            await self.notify(request.session_id, "chat.event", note | {"event": body["event"]})
+            if isinstance(event, TextDelta):
+                chunk = {
+                    "id": event.completion_id,
+                    "object": "chat.completion.chunk",
+                    "created": int(datetime.fromisoformat(event.at).timestamp()),
+                    "model": "",
+                    "choices": [{"index": 0, "delta": {"content": event.delta}}],
+                }
+                # A completion's deltas are consecutive events and its id names the first one's
+                # seq, so this is the chunk's place in its completion, counted from one.
+                first = int(event.completion_id.rsplit(":", 1)[1])
+                params = note | {
+                    "completion_id": event.completion_id,
+                    "seq": event.seq - first + 1,
+                    "cursor": {"attempt": event.attempt, "seq": event.seq},
+                    "chunk": chunk,
+                }
+                await self.notify(request.session_id, "chat.chunk", params)
 
-        Returns whether the run is done here (terminal, retired, or no longer placeable) and
-        the newest announced message id. ``progress`` carries the attempt's placement across
-        reconnections, which resume after the last gateway event it consumed.
+    async def follow(
+        self, request: Admission, run: Run, progress: Progress, after: int
+    ) -> tuple[bool, int]:
+        """Log and push one run's events after those already consumed, until its stream ends.
+
+        Returns whether the run is done here (terminal, or gone from the gateway) and the newest
+        announced message id. A pending text merge is logged when it is due and whenever the
+        stream ends, so nothing read stays unlogged.
         """
         session_id, request_id = request.session_id, request.op_id
         last_seq = progress.consumed.setdefault(run.run_id, -1)
@@ -1034,78 +1055,80 @@ class Backend:
                     timeout=httpx.Timeout(30, read=None),
                 ) as response:
                     if response.status_code == 404:
-                        return True, after  # retired: its messages are in history
+                        # Gone with its gateway: the seam settles the request as interrupted.
+                        await self.record(request, run.run_id, progress.flush())
+                        return True, after
                     response.raise_for_status()
                     progressed = False
-                    async for data in events(response):
-                        event = RunEvent.model_validate_json(data)
-                        if event.event == "replay.truncated":
-                            return True, after  # unplaceable now; reads report the gap
-                        if event.seq is None or event.seq <= last_seq:
-                            continue
-                        last_seq, progressed = event.seq, True
-                        progress.consumed[run.run_id] = last_seq
-                        placed = progress.place(run.run_id, event)
-                        if placed is not None and (placed.attempt, placed.seq) > start:
-                            cursor = {"attempt": placed.attempt, "seq": placed.seq}
-                            note = {"session_id": session_id, "request_id": request_id}
-                            event_note = note | {"event": placed.model_dump(mode="json")}
-                            await self.notify(session_id, "chat.event", event_note)
-                            if isinstance(placed, TextDelta):
-                                chunk = {
-                                    "id": placed.completion_id,
-                                    "object": "chat.completion.chunk",
-                                    "created": int(event.timestamp),
-                                    "model": "",
-                                    "choices": [{"index": 0, "delta": {"content": placed.delta}}],
-                                }
-                                await self.notify(
-                                    session_id,
-                                    "chat.chunk",
-                                    note
-                                    | {
-                                        "completion_id": placed.completion_id,
-                                        "seq": progress.chunks,
-                                        "cursor": cursor,
-                                        "chunk": chunk,
-                                    },
-                                )
-                        if event.event == "tool.completed":
-                            after = await self.publish(request_id, session_id, after)
-                        elif event.event in CONTROLS:
-                            await self.changed(session_id)
-                        elif event.event.removeprefix("run.") in TERMINAL:
-                            return True, after
+                    lines = events(response)
+                    following: asyncio.Task[str | None] | None = None
+                    try:
+                        while True:
+                            if following is None:
+                                following = asyncio.ensure_future(anext(lines, None))
+                            ready, _ = await asyncio.wait({following}, timeout=progress.patience())
+                            if not ready:  # a merged delta is due
+                                await self.record(request, run.run_id, progress.flush())
+                                continue
+                            data, following = following.result(), None
+                            if data is None:
+                                break
+                            event = RunEvent.model_validate_json(data)
+                            if event.event == "replay.truncated":
+                                # The consumer fell behind the gateway's buffer: those events
+                                # were never logged, and the log continues after them.
+                                log.warning("Run %s events lost before logging", run.run_id)
+                                continue
+                            if event.seq is None or event.seq <= last_seq:
+                                continue
+                            last_seq, progressed = event.seq, True
+                            progress.consumed[run.run_id] = last_seq
+                            await self.record(
+                                request, run.run_id, progress.place(run.run_id, event)
+                            )
+                            if event.event == "tool.completed":
+                                after = await self.publish(request_id, session_id, after)
+                            elif event.event in CONTROLS:
+                                await self.changed(session_id)
+                            elif event.event.removeprefix("run.") in TERMINAL:
+                                await self.record(request, run.run_id, progress.flush())
+                                return True, after
+                    finally:  # the pending read ends before its stream closes
+                        if following is not None:
+                            following.cancel()
+                            await asyncio.wait({following})
+                    await self.record(request, run.run_id, progress.flush())
                     if not progressed:
-                        return False, after  # a quiet closed stream; the bridge follows again
+                        return False, after  # a quiet closed stream; the consumer follows again
             except httpx.TransportError:  # the gateway stream dropped; resume after last_seq
                 await asyncio.sleep(1)
 
-    async def bridge(self, request_id: str, session_id: str, scope: Scope, fresh: bool) -> None:
-        """Push one open request's progress, then its outcome once the seam settles it.
+    async def consume(self, request_id: str, session_id: str, scope: Scope) -> None:
+        """The only writer of one request's event log: its runs' events in order, then its
+        outcome as the log's last event once the seam settles it.
 
-        A fresh bridge (a new chat.send) pushes from the request's beginning; any other starts
-        at the progress already placed, so a replayed send or a rebuilt bridge re-sends nothing.
+        It resumes after the log's last row, so a restarted backend neither repeats nor skips
+        an event the log holds; the gateway's buffer covers only what happened in between.
         """
         wake = self.wakes[request_id]
         request = await self.request(session_id, scope, request_id)
-        start = (0, 0)
-        if not fresh:
-            current = await self.attempt(request, request.resumes)
-            start = (request.resumes, current[-1].seq if current else 0)
+        attempts: dict[int, Progress] = {}
+        done: set[str] = set()
+        if request.logged is not None:
+            attempts[request.logged.attempt] = Progress.resumed(request.logged)
+            ran = [run.run_id for run in request.runs]
+            done.update(ran[: ran.index(request.logged.run_id)])
         newest = await self.messages(session_id, 1, 0)
         after = newest[0].id if newest else 0
-        done: set[str] = set()
-        progress: dict[int, Progress] = {}
         try:
             while True:
                 wake.clear()
                 request = await self.request(session_id, scope, request_id)
-                runs = [r for r in request.runs if r.run_id not in done and r.attempt >= start[0]]
+                runs = [r for r in request.runs if r.run_id not in done]
                 if runs:
                     run = runs[0]
-                    attempt = progress.setdefault(run.attempt, Progress(run.attempt))
-                    finished, after = await self.follow(request, run, attempt, start, after)
+                    progress = attempts.setdefault(run.attempt, Progress(run.attempt))
+                    finished, after = await self.follow(request, run, progress, after)
                     if finished:
                         done.add(run.run_id)
                     elif request.status in ACTIVE:
@@ -1113,14 +1136,19 @@ class Backend:
                     continue
                 if request.status in TERMINAL:
                     after = await self.publish(request_id, session_id, after)
-                    final = request.resumes
-                    pushed = progress[final].seq if final in progress else 0
-                    outcome = await self.finish(request, pushed)
-                    request = await self.request(session_id, scope, request_id)
-                    note = {"session_id": session_id, "request_id": request_id}
-                    event_note = note | {"event": outcome.model_dump(mode="json")}
-                    await self.notify(session_id, "chat.event", event_note)
-                    finished = note | {
+                    final = attempts.get(request.resumes, Progress(request.resumes))
+                    outcome = Finished(
+                        attempt=request.resumes,
+                        seq=final.seq + 1,
+                        at=moment(time.time()),
+                        status=request.status,
+                        error=request_error(request),
+                    )
+                    await self.record(request, None, [(outcome, None)])
+                    self.finished.add(request_id)
+                    finished = {
+                        "session_id": session_id,
+                        "request_id": request_id,
                         "status": outcome.status,
                         "cursor": {"attempt": outcome.attempt, "seq": outcome.seq},
                         "revision": request.revision,
@@ -1133,23 +1161,24 @@ class Backend:
         finally:
             del self.wakes[request_id]
 
-    def ensure_bridge(self, request_id: str, session_id: str, scope: Scope, fresh: bool) -> None:
-        if request_id in self.bridges:
+    def ensure_consumer(self, request_id: str, session_id: str, scope: Scope) -> None:
+        if request_id in self.consumers or request_id in self.finished:
             return
         self.requests[request_id] = session_id
         self.wakes[request_id] = asyncio.Event()
-        bridge = self.work.create_task(self.bridge(request_id, session_id, scope, fresh))
-        self.bridges[request_id] = bridge
-        bridge.add_done_callback(lambda _: self.bridges.pop(request_id))
+        consumer = self.work.create_task(self.consume(request_id, session_id, scope))
+        self.consumers[request_id] = consumer
+        consumer.add_done_callback(lambda _: self.consumers.pop(request_id))
 
-    async def rebuild(self) -> None:
-        """Bridge every open request, so pushes resume after a restart without a new send."""
+    async def recover(self) -> None:
+        """Consume every request whose event log is not closed yet, open or newly terminal."""
         snapshot = await self.snapshot()
         scopes = {row.id: row.scope() for row in snapshot.records.sessions}
         for request in snapshot.records.requests:
             scope = scopes[request.session_id]
-            if request.status in ACTIVE and scope is not None:
-                self.ensure_bridge(request.op_id, request.session_id, scope, fresh=False)
+            closed = request.logged is not None and request.logged.event["kind"] == "finished"
+            if not closed and scope is not None:
+                self.ensure_consumer(request.op_id, request.session_id, scope)
 
     # --- methods ------------------------------------------------------------------------------
 
@@ -1196,41 +1225,22 @@ class Backend:
         } | params.model_dump(mode="json", include={"context", "instructions"}, exclude_none=True)
         await self.call(self.seam, "POST", "/message", command=True, json=body)
         if not replay:
-            self.ensure_bridge(request_id, params.session_id, params.scope, fresh=True)
+            self.ensure_consumer(request_id, params.session_id, params.scope)
         return {"accepted": True, "session_id": params.session_id, "request_id": request_id}
 
     async def read_events(self, frontend_id: UUID, request_id: str, params: Events) -> dict:
         self.touch(params.session_id, params.scope, frontend_id)
-        request = await self.request(params.session_id, params.scope, str(params.request_id))
-        after = (params.after.attempt, params.after.seq)
-        found: list[ChatEvent] = []
-        for attempt in range(params.after.attempt, request.resumes + 1):
-            placed = await self.attempt(request, attempt)
-            if placed is None and attempt < request.resumes:
-                raise Refusal(
-                    "history_unavailable",
-                    f"Attempt {attempt} is no longer retained; read the request and history",
-                )
-            # The current attempt's run may be gone (a gateway restart); its outcome still places.
-            found += [e for e in placed or [] if (e.attempt, e.seq) > after]
-        if request.status in TERMINAL:
-            outcome = await self.finish(request)
-            found = [e for e in found if (e.attempt, e.seq) < (outcome.attempt, outcome.seq)]
-            if (outcome.attempt, outcome.seq) > after:
-                found.append(outcome)
-        # Events lost with their run (a gateway restart, a cut backlog) leave a gap before the
-        # retained ones or the outcome: they are not readable, so the read says so.
-        cursors = [after, *((e.attempt, e.seq) for e in found)]
-        if any(
-            later != (earlier[0], earlier[1] + 1) and (later[0] <= earlier[0] or later[1] != 1)
-            for earlier, later in zip(cursors, cursors[1:], strict=False)
-        ):
-            raise Refusal(
-                "history_unavailable",
-                "Some of these events are no longer retained; read the request and history",
-            )
-        page = found[: params.limit]
-        page = page[: fitting(page)]
+        await self.request(params.session_id, params.scope, str(params.request_id))
+        query = {
+            "op_id": str(params.request_id),
+            "attempt": params.after.attempt,
+            "seq": params.after.seq,
+            "limit": params.limit,
+        }
+        found = Log.model_validate_json(
+            await self.call(self.seam, "GET", "/message-events", params=query)
+        )
+        page = found.events[: fitting(found.events)]
         last = page[-1] if page else None
         return {
             "session_id": params.session_id,
@@ -1239,7 +1249,7 @@ class Backend:
             "next": params.after.model_dump()
             if last is None
             else {"attempt": last.attempt, "seq": last.seq},
-            "done": request.status in TERMINAL and len(page) == len(found),
+            "done": found.closed and not found.more and len(page) == len(found.events),
         }
 
     async def history(self, frontend_id: UUID, request_id: str, params: History) -> dict:
@@ -1495,7 +1505,6 @@ class Backend:
         ) as socket:
             Bound.model_validate_json(await socket.recv())
             self.socket = socket
-            await self.rebuild()
             try:
                 async with asyncio.TaskGroup() as replies:
                     try:
