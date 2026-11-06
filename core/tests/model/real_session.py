@@ -4,10 +4,11 @@ The direct tests (``write_actions.py``) ask OpenRouter themselves. Here the mode
 Hermes, so the request is the real one: the stored system prompt, the frozen tool list, Hermes's
 own request shaping, the plugin's hooks, the real tools answering on the fake platform. The
 judging is the same (``write_actions.is_judged`` and ``judge``), read from the Session's stored
-messages. A run is stopped as soon as the judged call is seen, except that a forced turn goes on
-after an invalid one (``MAX_LATER_ATTEMPTS``). What is judged is the call a model composes, not
-what the real tool then answered: that also depends on the seeded records (a Researcher's Session
-holds its Task but has no worker execution, so the real ``task_ask`` refuses it).
+messages. A run is stopped as soon as the judged call is seen, except that a forced turn or an
+ordinary case goes on after an invalid one (``MAX_LATER_ATTEMPTS``). What is judged is the call a
+model composes, not what the real tool then answered: that also depends on the seeded records (a
+Researcher's Session holds its Task but has no worker execution, so the real ``task_ask`` refuses
+it). Only an ordinary case also reads the answer, as below.
 ``test_real_session.py`` runs the cases.
 
 A recovery case needs refused calls already in the history, and the runs API takes only text
@@ -19,6 +20,13 @@ after the refused calls. To measure one turn, ``test_mid_turn_recovery.py`` give
 ``ForcingProxy``, which answers a conversation's first requests with the broken calls, so the
 refusals, hooks and loop guard are the real ones. Both are worth knowing; they do not measure the
 same thing, and the mid-turn rate is much lower without ``repeats.without_repeated_refusals``.
+
+A forced refusal invents a call the model did not make: it is fault injection, not a production
+rate. ``ORDINARY_CASES`` (``test_ordinary_creation.py``) force nothing. A plain request asks for a
+Task, every refusal is the real tool's answer to a call the model chose, and the run goes on after
+a bad call as a forced turn does. Its instructions name only seeded records, so here the real tool's
+answer counts as well: a call the judging passes and the tool refuses is invalid. These runs have
+a host label of their own and are in no ``CASES`` list, so no ``test_the_agreed_rate`` counts them.
 
 No ``research serve`` runs: its coordinator would start Researchers for the Tasks these cases
 create, and a chat turn reaches the gateway the same way. Each case gets its own Coworld with
@@ -43,6 +51,7 @@ from pathlib import Path
 
 from research_core import layout
 from research_core.platform.fake import FakePlatform
+from research_core.plugin.repeats import refusal_of
 from research_core.store import claims, coworlds, goals, sessions, tasks
 from research_core.store.actors import Actor
 from research_core.store.db import Store
@@ -56,6 +65,7 @@ from tests.model.write_actions import Case
 
 HOST_LABEL = "real session"
 MID_TURN_LABEL = "real session, one turn"
+ORDINARY_LABEL = "real session, unforced"
 RUN_TIMEOUT_S = 600
 STOP_TIMEOUT_S = 60
 POLL_S = 2
@@ -167,6 +177,29 @@ RECOVERY_CASES = [
     for refusals in write_actions.RECOVERY_DEPTHS
 ]
 CASES = [*ORCHESTRATOR_CASES, *RESEARCHER_CASES, *RECOVERY_CASES]
+# Requests as a user words them: no tool, action or field named, and the type and the shape of the
+# call left to the model. The last invites end_condition, which a call must send with end_detail.
+ORDINARY_CASES = [
+    Case("orchestrator", "task", "create", instruction, ordinary=kind)
+    for kind, instruction in (
+        (
+            "research",
+            f"We keep losing early fights, which is what Goal {GOAL} is about. Get someone to "
+            "study 20 replays of lost games and tell us the three most common causes.",
+        ),
+        (
+            "maintenance",
+            "The build on main has been failing since yesterday's toolchain bump. Get someone on "
+            "it soon: this one is urgent.",
+        ),
+        (
+            "done-when",
+            f"Under Goal {GOAL}, have a Researcher compare our opening with the top three "
+            "policies of league L-7. It is finished once there is a written comparison of their "
+            "first 50 steps.",
+        ),
+    )
+]
 
 
 @dataclass
@@ -345,7 +378,7 @@ class RealGateway:
 
     def run_case(self, model: str, case: Case) -> harness.Result:
         """Start a run for the case and read the Session until the judged call shows up."""
-        label = MID_TURN_LABEL if self.forcing else HOST_LABEL
+        label = ORDINARY_LABEL if case.ordinary else MID_TURN_LABEL if self.forcing else HOST_LABEL
         result = harness.Result(model, label, case.label, "wrong_tool")
         session_id = self.open_session(case.role)
         text = case.instruction.replace("<run>", str(next(RUN_NUMBERS)))
@@ -406,8 +439,8 @@ class RealGateway:
 
     def _judge_new_calls(self, case: Case, stored: list[dict], result: harness.Result) -> bool:
         """True when the run can stop: the judged call settled it, or there were too many other
-        calls first. After an invalid call, a forced turn stops at a later valid one or at
-        ``MAX_LATER_ATTEMPTS``."""
+        calls first. After an invalid call, a forced turn or an ordinary case stops at a later
+        valid one or at ``MAX_LATER_ATTEMPTS``."""
         detours: list[str] = []
         judged = False
         later: list[str] = []
@@ -418,10 +451,10 @@ class RealGateway:
                     case.role, call.name, call.arguments or {}
                 )
                 if write_actions.is_judged(case, name, args):
-                    outcome, detail = write_actions.judge(case, call, args)
+                    outcome, detail, settled = self._verdict(case, call, args, stored)
                     if judged:
                         later.append(outcome)
-                        if outcome == "valid" or len(later) == MAX_LATER_ATTEMPTS:
+                        if settled and (outcome == "valid" or len(later) == MAX_LATER_ATTEMPTS):
                             return True
                         continue
                     judged = True
@@ -430,9 +463,12 @@ class RealGateway:
                         case, args, harness.reasoning_of(message)
                     )
                     result.detours = detours
-                    # Only the first call sets the rate. A forced turn runs on after a bad one to
-                    # show whether the model gets there; other runs have no reason to spend more.
-                    if outcome == "valid" or not self.forcing:
+                    if not settled:
+                        return False
+                    # Only the first call sets the rate. A forced turn or an ordinary case runs on
+                    # after a bad one to show whether the model gets there; other runs have no
+                    # reason to spend more.
+                    if outcome == "valid" or not (self.forcing or case.ordinary):
                         return True
                     result.later_attempts = later
                     continue
@@ -447,10 +483,32 @@ class RealGateway:
             result.detours = detours
         return False
 
+    @staticmethod
+    def _verdict(
+        case: Case, call: harness.Call, args: dict, stored: list[dict]
+    ) -> tuple[str, str, bool]:
+        """The judged call's outcome and detail, and whether that is final. A valid call of an
+        ordinary case is not final until the real tool's answer is stored, and a refusal in that
+        answer makes it invalid."""
+        outcome, detail = write_actions.judge(case, call, args)
+        if outcome != "valid" or not case.ordinary:
+            return outcome, detail, True
+        answer = next(
+            (m for m in stored if m.get("role") == "tool" and m.get("tool_call_id") == call.id),
+            None,
+        )
+        if answer is None:
+            return outcome, detail, False
+        refusal = refusal_of(answer.get("content"))
+        if refusal is not None:
+            return "invalid", f"the tool refused it: {refusal['error']}"[:300], True
+        return outcome, detail, True
+
     def _judge_end(self, status, stored: list[dict], result: harness.Result) -> None:
         """A run that ended without the judged call: text, or a host problem. A run that ended
-        after it, giving up on a bad call, keeps that call's verdict."""
-        if result.outcome == "invalid":
+        after it, giving up on a bad call or with no answer stored to a good one, keeps that
+        call's verdict."""
+        if result.outcome in ("invalid", "valid"):
             return
         if status.status != "completed":
             http_status = REFUSED_REQUEST.search(status.error or "")

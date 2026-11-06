@@ -132,8 +132,8 @@ valid call or three more calls to the tool that are not reads, the turn ends, or
 (which counts the run as `ERR`). Other calls along the way have no limit of their own. The line
 `invalid, valid later` counts the runs that reached a valid call. Hermes's loop guard halts a turn
 at 5 failures of one tool, so after three forced refusals only one more bad call is possible. Only
-this test runs on, so in any other test's table that line reads `-`. A turn that hangs after a bad
-call still counts as invalid.
+this test and the ordinary creation test below run on, so in any other test's table that line reads
+`-`. A turn that hangs after a bad call still counts as invalid.
 
 Each request keeps only the latest of identical refused calls (`plugin/repeats.py`,
 `without_repeated_refusals`). A batch of calls stays, and so does a result carrying more than loop
@@ -168,6 +168,19 @@ So repeats next to each other cost nothing, and a refusal that comes back costs 
 what was sent since the earlier copy (35,600 tokens against 500 in the third row, about $0.06).
 Requests after it hit the cache again. Six real Hermes sessions per arm agree: 97.7% cached
 without a refusal coming back (97.6% with the middleware unregistered), 97.8% with one (97.9%).
+
+**Ordinary creation** (`test_ordinary_creation.py`). A forced refusal invents a call the model did
+not make, so it is fault injection and not a production rate. Here a plain request asks for a Task
+(`real_session.ORDINARY_CASES`, ids such as `orchestrator-task.create-ordinary-research`), nothing is
+forced, and any refusal is one the model caused. It runs like `test_real_session.py`, with this file
+in its place. It ends with `test_ordinary_first_try_rate`, the same 95% rule on the first call to
+the tool, which here the real tool must also accept. The `invalid, valid later` line is the natural
+recovery. Its sample is only the runs whose first call was bad, so a model that rarely gets it wrong
+gives few runs to read. These runs have their own column, `real session, unforced`, so they change
+no `test_the_agreed_rate`. Three cases at the default 10 repeats are 30 Sessions, not yet run: expect
+about $0.04 a run ($1.20), and up to twice that with a changed tool list. That is 3.2 requests a run
+(2.24 in the usability baseline, 1,968 over 880 runs, plus the one that may start while the tool's
+answer is awaited) at $0.013 a request ($25.63 over those 1,968).
 
 **The other two.** `test_undeclared_fields.py` checks that a model on a closed schema sends a field
 only if it is declared, so a provider change is noticed. `test_tool_call_format.py` sends one
