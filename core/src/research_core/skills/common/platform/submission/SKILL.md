@@ -17,7 +17,7 @@ A policy reaches a League in three steps, each its own tool: a Version (`version
 
 ## A user asked
 
-Do it in the same turn: `version.create` on the code they mean (`code/` for what is on `main`), `upload`, then `submit {version, league, user_requested: true, cites: <their message>, reason}`. No setting, quality bar, pause or Task applies. Warn about what is missing (no Experiment, not merged) and submit anyway. `cites` is a record, never a gate: without it the submission still runs and the result asks you to record the reference.
+Do it in the same turn: `version.create` on the code they mean (`code/` for what is on `main`), `upload`, then `submit {version, league, user_requested: true, cites: <their message>, reason}`. No setting, quality bar or Task applies. Warn about what is missing (no Experiment, not merged) and submit anyway. `cites` is a record, never a gate: without it the submission still runs and the result asks you to record the reference.
 
 ## Your own initiative
 
@@ -25,7 +25,7 @@ Do it in the same turn: `version.create` on the code they mean (`code/` for what
 
 - `submissions.mode`: `ask` means `ui.ask` the user first; `autonomous` submits.
 - `submissions.until` (an open window) and `submissions.max_count`; `paused` stops all of it.
-- `submissions.quality_bar`: the Version is merged into `main` and a confirmed Experiment compares it with the League's champion at a primary effect of at least `submissions.min_margin_over_champion`. With no champion, a merged Version whose mixin `check` passes is enough.
+- `submissions.quality_bar`: the Version is merged into `main` and a confirmed Experiment compares it with our champion in the League at a primary effect of at least `submissions.min_margin_over_champion`. With no champion, a merged Version whose mixin `check` passes is enough.
 
 The bar is on your initiative, not on the user: they can turn it off (`settings_update {key: submissions.quality_bar, value: false, cites}`) or lower the margin. Meet a shortfall rather than argue with it: get the Task reviewed and merged, run the Experiment against the champion (`experiment`).
 

@@ -2,8 +2,8 @@
 
 The research lead of the Softmax IDE: the profile the user talks to. It turns the user's
 requests into Goals and Tasks, answers the Researchers' questions, reviews their work, makes and
-submits policy Versions. The lifetime `research serve` coordinator keeps background work moving. Its principles are the design's: the user's explicit request comes first and is
-never refused, agents repair what breaks and keep going, and the few gates that exist bound only
+submits policy Versions. The lifetime `research serve` coordinator keeps background work moving. Its principles are the design's: the user's explicit request comes first (refused
+only by the platform or the system prompt, and held while `paused`), agents repair what breaks and keep going, and the few gates that exist bound only
 the agents' own initiative.
 
 Everything it does lives in the shared package [`core/`](../core/README.md). This folder is the
@@ -45,6 +45,6 @@ moves open chats onto a release's changed tools and instructions, builds the wor
 
 `research serve` owns observation and domain transitions. Its periodic workflow includes store checks, champion
 sync, resolved waits, run recovery, Researcher messages, merges of accepted work, Goal
-bookkeeping, capability checks, Task dispatch, wakes (setup, review, management, anti-stall
-Sessions of this profile), the heartbeat and the agent-context panel. `research watcher status`
+bookkeeping, capability checks, Task dispatch, wakes (setup, review, management, assignment,
+one daily anti-stall per Coworld with an active Goal: Sessions of this profile), the heartbeat and the agent-context panel. `research watcher status`
 prints the last tick; `workspace.doctor` reports it to the agent.

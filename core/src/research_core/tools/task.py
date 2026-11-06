@@ -455,8 +455,8 @@ SPEC = durable_tool(
             ActionSpec(
                 "message",
                 "Send the Researcher a note: the watcher delivers it to a live run, resumes a "
-                "stopped one with it, or holds it until a wait resolves. A Task not in progress "
-                "never gets it.",
+                "stopped run with it, or holds it until a wait resolves. A Task with no holder "
+                "(unclaimed or ended) never gets it: use ui.notify.",
                 {"task": TASK, "text": a.string("The note.")},
                 ("task", "text"),
                 ORCHESTRATOR,

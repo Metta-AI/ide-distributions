@@ -90,8 +90,8 @@ SPEC = tool(
         description=(
             "Settings bound the agents' own initiative: pausing, researcher count, approval "
             "gates, submission rules, XP request limits, forum and wiki writes, parking Goals, "
-            "recovery attempts, the daily check's hour. They never refuse what the user asks "
-            "for. Returns the setting with its spec."
+            "recovery attempts, the daily check's hour. They never refuse what the user asks for "
+            "in a turn, though paused holds new messages. Returns the setting with its spec."
         ),
         handler=handle,
         roles=BOTH,

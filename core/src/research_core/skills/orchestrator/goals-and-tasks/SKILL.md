@@ -65,7 +65,7 @@ tell the user running work will follow it. `directive.update` when the user chan
 When a setting covers it, use the setting instead: `settings_update {key, value, cites}`, and
 `cites` is the user's message, always. `settings.read` lists the keys with their scopes,
 such as `paused`, `max_researchers`, `approval_required.task_types` and the `submissions` keys.
-Settings bound only the agents' own initiative; nothing the user asks for in a turn is refused by one.
+Settings bound only the agents' own initiative; nothing asked in a running turn is refused by one.
 
 `paused: true` stops everything in the background: no Researcher starts, no merge, no recovery,
 no autonomous submission; running Researcher Sessions are drained and resume on `paused: false`.

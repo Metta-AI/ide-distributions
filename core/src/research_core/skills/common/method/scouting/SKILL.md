@@ -16,7 +16,7 @@ Scouting keeps the picture of the League current: where the Player stands, who m
 
 ## Compare
 
-Read the last snapshot: `claim.search {query: standings, tags: [<league id>]}`. Name what changed: a new champion, our rank, new entrants near the top, a Player whose score moved by more than its usual round-to-round swing, a policy version change. A score without its rank and rounds played is not a finding. A swing of an unchanged opponent's mean is noise, not a meta shift. When our score is flat but our rank drops, the field improved.
+Read the last snapshot: `claim.search {query: standings, tags: [<league id>]}`. Name what changed: a new league leader, our rank, new entrants near the top, a Player whose score moved by more than its usual round-to-round swing, a policy version change. A score without its rank and rounds played is not a finding. A swing of an unchanged opponent's mean is noise, not a meta shift. When our score is flat but our rank drops, the field improved.
 
 ## The meta
 
@@ -34,7 +34,7 @@ Retire the previous snapshot claim with `claim.retire {claim, status: superseded
 
 ## Propose
 
-For each usable weakness in the field or gap in ours: `task_propose` a research Task (a question with the evidence) or an improvement Task with a proposed Experiment (`diagnose`). Name the opponents worth a deep profile for `analyze-opponents`: those above us, the champion, and any whose policy version changed since the last profile.
+For each usable weakness in the field or gap in ours: `task_propose` a research Task (a question with the evidence) or an improvement Task with a proposed Experiment (`diagnose`). Name the opponents worth a deep profile for `analyze-opponents`: those above us, the league leader, and any whose policy version changed since the last profile.
 
 ## Failure handling
 

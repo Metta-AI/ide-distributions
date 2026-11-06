@@ -94,7 +94,7 @@ SPEC = tool(
         description=(
             "Call any Softmax Observatory route with authentication handled, for routes no tool "
             "covers (see the softmax-api-routes skill). Paths are relative to /observatory. "
-            "Runs as the Player. Every call is logged."
+            "Runs as the Player unless an Orchestrator passes identity: user. Every call is logged."
         ),
         handler=handle,
         roles=BOTH,

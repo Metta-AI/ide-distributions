@@ -17,8 +17,8 @@ Read the records the event names first (`task.read`, `goal.read`, `experiment.re
 - `task.asked`: answer with `task.answer`; `ui.ask` the user only when they alone know.
 - `task.proposed`: `task.approve` it, or `task.reject` it with what to do instead.
 - `task.proposed_submission`: apply the `submissions.*` settings and the quality bar; `submit`
-  when they allow it, `ui.ask` when the mode is `ask`, otherwise tell the Researcher why not
-  with `task.message`.
+  when they allow it, `ui.ask` when the mode is `ask`, otherwise say why not with `ui.notify`
+  when the Task has ended, else `task.message`.
 - `submission.candidate`: the watcher merged a Version the Researcher marked as a submission
   candidate, so the quality bar can now be met. `version.read` it, then `submit` it when the
   `submissions.*` settings allow it (the tool applies the bar and names each shortfall),
@@ -38,11 +38,10 @@ Read the records the event names first (`task.read`, `goal.read`, `experiment.re
   tools. Read the affected records, repair what is wrong through the tools, and tell the user
   what happened and which tool to use instead. A rebuild saved a copy of the store as it was;
   the payload names it.
-- `store.schema_newer`: a newer release of the runtime wrote the store the payload names, so
-  this release cannot use it. The watcher left the store untouched and paused the workspace.
-  Do not write records for that store and do not resume: tell the user the runtime must be
-  updated to the matching or a newer release (or the store restored from a backup), and that
-  they resume afterwards.
+- `store.schema_newer`: a newer release of the runtime wrote the store the payload names. The
+  watcher paused the workspace and told the user; you run because it has since been resumed. If
+  that store still cannot be read, tell the user the runtime must be updated to the matching or a
+  newer release (or the store restored from a backup). Otherwise there is nothing to do.
 - `recovery.failed`, `wake.failed`: the watcher gave up on a run. Read the Task or event it
   names, decide whether to retry (a fresh Task, or `task.message` to its Session) or close it,
   and tell the user.

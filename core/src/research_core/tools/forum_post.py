@@ -77,7 +77,7 @@ SPEC = tool(
     ToolSpec(
         name="forum_post",
         description=(
-            "Post or comment on the session Coworld's forum as your Player. The "
+            "Post or comment on the session Coworld's forum, by default as your Player. The "
             "platform_writes.forum setting bounds posts you make on your own."
         ),
         handler=handle,

@@ -5,7 +5,7 @@ description: Use when a capability, tool, command or install is broken.
 
 # Repair
 
-A failing tool, command, install or call is work, not a wall. Capabilities are what the checks test: the mixin commands (`build`, `check`, `upload`, `evaluate`), the platform logins (`login:player`, `login:user`), the CLIs (`cli:research`, `cli:coworld`, `cli:softmax`) and `github`. A failure marks the capability broken, opens or joins one `high` maintenance Task for it, and Tasks whose type needs it wait on that Task. After two failed repair Tasks the user gets a notice.
+A failing tool, command, install or call is work, not a wall. Capabilities are what the checks test: `build`, `check`, `upload` and `evaluate` (mixin commands where declared), the platform logins (`login:player`, `login:user`), the CLIs (`cli:research`, `cli:coworld`, `cli:softmax`) and `github`. A failure marks the capability broken, opens or joins one `high` maintenance Task for it, and Tasks whose type needs it wait on that Task. After two failed repair Tasks the user gets a notice.
 
 ## Diagnose
 
@@ -33,6 +33,6 @@ This section is for a repair Task, or a failure no capability covers. A Task tha
 
 ## Common cases
 
-- `evaluate` fails on downloaded results: the runs are marked invalid and the capability broken; the Experiment waits for the repair, not for a hand-computed verdict.
-- `build` works for you but `version.create` refuses: the tree is dirty, or the artifact path in `MIXIN.md` is wrong.
+- `evaluate` fails on downloaded results: the runs are marked invalid and the capability broken; the Experiment waits for the repair, then `xp.status` evaluates them again; never hand-compute a verdict.
+- `build` works for you but `version.create` refuses: its error names why.
 - A CLI command works in your shell but the tool fails: the tool runs in the workspace environment with the Player's credential; compare the two before blaming the platform.
