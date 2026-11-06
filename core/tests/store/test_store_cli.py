@@ -700,6 +700,66 @@ def test_every_holder_of_several_locks_takes_coworld_stores_before_the_workspace
     assert sleep.sleep_databases(workspace.ws, env, ()) == expected
 
 
+def refill_the_wal_before_each_lock(monkeypatch) -> None:
+    """A writer commits between every checkpoint and the lock taken after it."""
+    connect = sqlite3.connect
+
+    class Refilled(sqlite3.Connection):
+        def __init__(self, database, **kwargs):
+            super().__init__(database, **kwargs)
+            self.database = database
+
+        def execute(self, sql, *args):
+            if sql == "BEGIN IMMEDIATE":
+                writer = connect(self.database, isolation_level=None)
+                writer.execute(
+                    "INSERT OR REPLACE INTO meta(key, value) VALUES ('refill', hex(randomblob(8)))"
+                )
+                writer.close()
+            return super().execute(sql, *args)
+
+    monkeypatch.setattr(
+        store_cli.sqlite3,
+        "connect",
+        lambda path, **kwargs: connect(path, factory=Refilled, **kwargs),
+    )
+
+
+def test_quiesce_holds_every_lock_when_writers_outrun_its_checkpoints(
+    workspace, capsys, monkeypatch
+):
+    """Readiness means the locks are held; what the checkpoints left is in the fsynced WAL."""
+    paths = [workspace.store.path, workspace.ws.store_path]
+    refill_the_wal_before_each_lock(monkeypatch)
+    probe = [sys.executable, "-c", LOCK_PROBE, *map(str, paths)]
+    code, (held, released) = run_lines(capsys, "quiesce", "--max-hold", "10", "--then", *probe)
+    assert code == 1  # the probe's non-zero exit is the quiesce's
+    assert released["then_exit"] == 3  # every database was write-locked
+    for report in held["checkpoints"].values():
+        assert report["busy"] is False and report["wal_bytes"] > 0
+
+
+def test_a_flush_holds_each_lock_for_its_fsync_and_reports_a_wal_it_could_not_empty(
+    workspace, monkeypatch
+):
+    paths = [workspace.store.path, workspace.ws.store_path]
+    refill_the_wal_before_each_lock(monkeypatch)
+    locked = []
+
+    def probe_the_locks(databases):
+        for path in databases:
+            with pytest.raises(sqlite3.OperationalError, match="locked"):
+                assert_write_lock_free(path)
+            locked.append(path)
+
+    monkeypatch.setattr(store_cli, "flush_to_disk", probe_the_locks)
+    reports = store_cli.flush_databases(paths)
+    assert locked == paths
+    for path in paths:
+        assert not sleep.is_flushed(reports[str(path)])
+        assert_write_lock_free(path)  # released
+
+
 def test_lock_order_settles_coworlds_registered_at_the_same_moment(workspace):
     for coworld_id in ("cow-z", "cow-a"):
         coworlds.register(
