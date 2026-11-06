@@ -208,7 +208,10 @@ The durable state is `$IDE_WORKSPACE` (stores, code repositories, worktrees, doc
 profile's Hermes `state.db`. SQLite runs in WAL mode with `synchronous=FULL` on every writable
 connection, so a committed record survives a crash of the process or the machine; the bridge may
 read the stores with a read-only connection (check S3: WAL reads under gVisor from a second
-process). Nothing on the volume survives losing the volume, so backups are part of the contract:
+process). A writer waits up to 5 s for another writer, including during a store's first switch to
+WAL, where SQLite itself would not wait; a lock held longer than that still fails the call as
+`database is locked`. Nothing on the volume survives losing the volume, so backups are part of the
+contract:
 
 - **Hourly encrypted snapshots of the volume are the required minimum**, keeping the daily
   history as it is (a longer retention, not a shorter one). This bounds the loss at one hour of
