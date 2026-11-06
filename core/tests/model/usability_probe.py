@@ -21,8 +21,8 @@ nothing at all),
 ``limit`` (still preparing after ``MAX_REQUESTS``), ``rejected`` (the host refused the request),
 ``host_error`` (transport, 5xx, or account limit; not counted in any rate).
 
-The baseline in ``usability_baseline.json`` predates ``usability_reads``: every read in it got one
-placeholder line, and ``docs/reports/tool-usability-baseline-2026-11-04.md`` marks what that did.
+``usability_baseline.json`` was measured with ``usability_reads``; the first baseline was not, and
+``docs/reports/tool-usability-baseline-2026-11-04.md`` marks what that did.
 """
 
 from __future__ import annotations

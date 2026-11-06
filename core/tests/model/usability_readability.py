@@ -365,7 +365,6 @@ QUESTIONS: dict[str, list[Question]] = {
     ],
     "skill:goals-and-tasks": [
         q("At most how many ideation Tasks may be open per Goal?", r"\bone\b|\b1\b"),
-        q("What is the default of ideation.park_after_rounds?", r"\b3\b|three"),
         q("Which Tasks may have no Goal?", r"repair|maintenance"),
     ],
     "skill:merge-conflicts": [
@@ -460,7 +459,6 @@ QUESTIONS: dict[str, list[Question]] = {
     "tool:softmax_api": [
         q("Which arguments are required?", r"method", r"path"),
         q("What are paths relative to?", r"/observatory"),
-        q("Which identity may the Researcher use?", r"player"),
     ],
     "tool:submit": [
         q("Which arguments are required?", r"version", r"league"),
@@ -472,7 +470,6 @@ QUESTIONS: dict[str, list[Question]] = {
             "What are the required arguments for review?",
             r"task",
             r"accept",
-            r"merge",
             r"reason",
         ),
         q("What are the required arguments for answer?", r"task", r"text"),
@@ -495,7 +492,6 @@ QUESTIONS: dict[str, list[Question]] = {
     ],
     "tool:upload": [
         q("Which argument is required?", r"version"),
-        q("What happens when you upload an adopted Version?", r"no-op|nothing|no op"),
         q("What does an unresolved earlier attempt need?", r"user_requested"),
     ],
     "tool:version": [

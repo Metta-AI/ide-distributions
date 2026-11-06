@@ -8,7 +8,7 @@ run answers has the real tools' shape. The measurement writes its raw runs to
 that file only when ``USABILITY_WRITE_BASELINE=1``.
 A run that is cut short resumes from the same ``USABILITY_RUN_DIR``, and is refused there if the
 tools, skills, situations or test changed. The report on a run belongs in
-``docs/reports/``; the first is ``tool-usability-baseline-2026-11-04.md``.
+``docs/reports/``; the latest is ``tool-usability-2026-11-05.md``.
 
 Environment, all optional but the first:
   IDE_HERMES_SRC            a Hermes source tree, for its schema sanitizers (required)
