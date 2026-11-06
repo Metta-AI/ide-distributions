@@ -195,8 +195,9 @@ def test_policy_file_writes_the_uploaded_bytes(call, platform, ctx_factory):
     version = upload(platform)
     result = call("platform", {"action": "policy_file", "policy_version": version.id})
     assert result["ok"] is True
-    path = documents(ctx_factory) / "policies" / f"{version.id}.bin"
+    path = documents(ctx_factory) / "policies" / f"{version.id}.txt"
     assert result["path"] == str(path)
+    assert result["content_type"] == "text/plain; charset=utf-8"
     assert path.read_bytes() == POLICY
     assert result["size_bytes"] == len(POLICY)
     assert result["sha256"] == hashlib.sha256(POLICY).hexdigest()
