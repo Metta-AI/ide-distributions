@@ -279,6 +279,23 @@ tracing; invalid remote-exporter configuration preserves console tracing and rec
 resource detector plus explicit workspace/service identity; automatic resource-discovery
 plugins do not run on the application path.
 
+Audit of workspace instrumentation:
+
+| Boundary | Policy |
+| --- | --- |
+| Application logs and SDK diagnostics | Standard bounded logging queue; no handler delivery on functional threads |
+| Native turns, model attempts, tools, HTTP intake and coordinator observations | Standard SDK spans, background batch export, no exit flush |
+| Short-lived tool commands | No SDK export; complete call observed by the native parent |
+| Turn cleanup | In-memory session/size bounds; no native lease database query |
+| Admission correlation | Reuses the required native-message binding read; no tracing-only connection or query; optional annotation cannot fail binding |
+| Relay instrumentation | Separate prompt/response exporter stays disabled |
+
+The public-interface system checks exercise real HTTP admissions, durable receipt replay,
+real OTLP delivery, stalled/rejected collectors, invalid configuration, full export queues,
+a full unread stderr pipe, tool results and process exit. The existing installed-Hermes
+flow verifies turn/model IDs and admission links. These follow the standard
+[OpenTelemetry batching/error policy](https://opentelemetry.io/docs/specs/otel/trace/sdk/)
+and [Python logging queue recipe](https://docs.python.org/3.12/howto/logging-cookbook.html#dealing-with-handlers-that-block).
 
 Hosting must configure an accessible, authorized endpoint before claiming remote trace delivery.
 The distribution neither provisions a collector nor assumes a Datadog endpoint. Changing
@@ -304,8 +321,8 @@ tool handlers explicitly bind the unique active turn for their native session. S
 carry W3C trace context through `TRACEPARENT`/`TRACESTATE`; adapter HTTP requests use the same
 propagator through normal trace headers. Durable asynchronous intake and native execution
 continue the platform W3C context carried in relay metadata. Durable message admissions retain
-that original context across retries, queued dispatch and restarts. Native model/tool turns recover
-the exact native message binding and link their asynchronous turn spans to the admitted request
+that original context across retries, queued dispatch and restarts. Native model/tool turns reuse
+the native-message binding hook and link their asynchronous turn spans to the admitted request
 using standard OpenTelemetry span links. Direct native sessions have their own trace. No latest-run
 heuristic or process-global session context is used.
 

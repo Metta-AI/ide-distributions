@@ -8,6 +8,7 @@ packaged dependencies, because it runs inside Hermes's own interpreter.
 from __future__ import annotations
 
 from collections.abc import Callable
+from functools import partial
 from typing import Any
 
 from research_core.tools.catalog import Role, tools_for
@@ -25,11 +26,12 @@ def make_register(role: Role) -> Callable[[Any], None]:
         from research_core.plugin.advisory import make_hooks
         from research_core.plugin.executor import make_handler
         from research_core.plugin.messages import record_native_message
-
-        ctx.register_hook("pre_api_request", record_native_message)
         from research_core.plugin.tracing import make_instrumentation
 
         hooks, session_span = make_instrumentation(role)
+        ctx.register_hook(
+            "pre_api_request", partial(record_native_message, span_for_session=session_span)
+        )
         for hook_name, callback in hooks.items():
             ctx.register_hook(hook_name, callback)
 

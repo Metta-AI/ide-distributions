@@ -1097,25 +1097,30 @@ class Coordinator:
 
     def observe_terminal(self, row, status: hermes_api.RunStatus) -> None:
         """Acceptance to terminal observation includes polling delay, not native completion."""
-        current = tracer().start_span(
-            "workspace.run.observed",
-            start_time=int(parse_iso(row["created_at"]).timestamp() * 1e9),
-            attributes={
-                "session.id": row["session_id"],
-                "op.id": row["op_id"],
-                "run.id": status.run_id,
-                "role": row["profile"],
-                "outcome": status.status,
-                "observation.boundary": "acceptance_to_terminal_observation",
-            },
-        )
-        if row["admitted_at"] is not None:
-            current.add_event(
-                "execution.admitted", timestamp=int(parse_iso(row["admitted_at"]).timestamp() * 1e9)
+        try:
+            current = tracer().start_span(
+                "workspace.run.observed",
+                start_time=int(parse_iso(row["created_at"]).timestamp() * 1e9),
+                attributes={
+                    "session.id": row["session_id"],
+                    "op.id": row["op_id"],
+                    "run.id": status.run_id,
+                    "role": row["profile"],
+                    "outcome": status.status,
+                    "observation.boundary": "acceptance_to_terminal_observation",
+                },
             )
-        if status.status != "completed":
-            current.set_status(StatusCode.ERROR)
-        current.end()
+            if row["admitted_at"] is not None:
+                current.add_event(
+                    "execution.admitted",
+                    timestamp=int(parse_iso(row["admitted_at"]).timestamp() * 1e9),
+                )
+            if status.status != "completed":
+                current.set_status(StatusCode.ERROR)
+            current.end()
+        except Exception:
+            # Optional timing annotation must never fail the completed state transition.
+            pass
 
     def _installed_key_id(self) -> str | None:
         lease = inference.read_lease(self.inference_lease_file)
