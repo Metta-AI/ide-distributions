@@ -256,8 +256,9 @@ Readers continue and database writers wait, so the databases it locked stop at o
 transaction spanning stores has either finished or not begun. That recovery point has limits:
 
 - A WAL that readers or constant writers kept from emptying stays, reported as `wal_bytes` above 0
-  in the first line. The lock is still held and the WAL is fsynced, but the snapshot must take the
-  `-wal` file with the database, as a volume snapshot does.
+  in the first line. The lock is still held and the WAL is fsynced, so a volume snapshot, which
+  takes every file, still has every committed write. To copy databases rather than snapshot the
+  volume, use `research store backup`.
 - The list of Coworlds is read before the first lock, so a Coworld registered after that is not
   locked or checkpointed: it keeps taking writes, and is in the snapshot as a crash would leave it.
 - Only the `state.db` of the `HERMES_HOME` profile is locked. Other profiles' transcripts are also

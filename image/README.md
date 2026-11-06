@@ -139,6 +139,10 @@ the log, so an append that committed before the timeout is not pushed again and 
 returns it. Nothing retries the failed call, so a failure that lasts across boots can crash-loop
 the workspace.
 
+A request is different: the failure is answered to that request alone. One the handler did not
+expect is logged with its traceback and answered `unavailable`, with `outcome: unknown` for a
+command, since it may have taken effect. The backend keeps serving.
+
 A frontend subscribes to a session's pushes through any request naming that session, once the
 backend has read the session and its scope is that session's own. A wrong scope is refused
 (`forbidden`) to that request alone and is not recorded, because the event watcher reads with the
