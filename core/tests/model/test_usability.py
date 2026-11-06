@@ -137,11 +137,17 @@ class RawFile:
 
 
 def in_parallel(jobs: list, worker) -> None:
-    """Run the jobs, at most USABILITY_WORKERS at once. A job's unexpected error fails the test."""
+    """Run the jobs, at most USABILITY_WORKERS at once. A job's unexpected error fails the test.
+    An error or Ctrl-C drops the queued jobs, so they spend nothing; running ones finish."""
     workers = int(os.environ.get("USABILITY_WORKERS") or 8)
     with concurrent.futures.ThreadPoolExecutor(workers) as pool:
-        for future in [pool.submit(worker, job) for job in jobs]:
-            future.result()
+        futures = [pool.submit(worker, job) for job in jobs]
+        try:
+            for future in futures:
+                future.result()
+        except BaseException:
+            pool.shutdown(wait=False, cancel_futures=True)
+            raise
 
 
 def selected_situations() -> list[Situation]:

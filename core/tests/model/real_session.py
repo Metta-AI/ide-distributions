@@ -375,14 +375,20 @@ class RealGateway:
                     break
                 time.sleep(POLL_S)
             else:
-                result.outcome = "host_error"
-                result.detail = f"no judged call in {RUN_TIMEOUT_S} s"
+                self._host_error(result, f"no judged call in {RUN_TIMEOUT_S} s")
         except RunsUnavailable as error:
-            result.outcome, result.detail = "host_error", f"the gateway stopped answering: {error}"
+            self._host_error(result, f"the gateway stopped answering: {error}")
         finally:
             self._stop_and_wait(case.role, run_id)  # a run left going keeps spending
         result.replies = self._billed_replies(case.role, session_id, time.monotonic() - started)
         return result
+
+    @staticmethod
+    def _host_error(result: harness.Result, detail: str) -> None:
+        """A run that failed before its verdict counts for nothing. An invalid verdict stands: a
+        turn that goes on after a bad call and then hangs still made that call."""
+        if result.outcome != "invalid":
+            result.outcome, result.detail = "host_error", detail
 
     def _stop_and_wait(self, role: str, run_id: str) -> None:
         """Stop the run and let it end, so its usage is stored before it is read. A gateway that
@@ -415,7 +421,6 @@ class RealGateway:
                     outcome, detail = write_actions.judge(case, call, args)
                     if judged:
                         later.append(outcome)
-                        result.later_attempts = later
                         if outcome == "valid" or len(later) == MAX_LATER_ATTEMPTS:
                             return True
                         continue
@@ -429,6 +434,7 @@ class RealGateway:
                     # show whether the model gets there; other runs have no reason to spend more.
                     if outcome == "valid" or not self.forcing:
                         return True
+                    result.later_attempts = later
                     continue
                 if judged:
                     continue

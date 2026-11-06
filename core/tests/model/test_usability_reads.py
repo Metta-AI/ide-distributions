@@ -673,3 +673,18 @@ def test_offline_a_credit_refusal_reads_as_an_uploaded_version_and_no_balance():
     assert version["record"]["uploaded"]["policy_version_id"] == "pv-12"
     assert json.loads(CREDITS_REFUSAL)["credits_refused"]["balance"] == 0.0
     assert usability_reads.platform_credits(situation)["balance"] == 0.0
+
+
+def test_an_error_in_a_job_drops_the_queued_jobs(monkeypatch):
+    from tests.model.test_usability import in_parallel
+
+    monkeypatch.setenv("USABILITY_WORKERS", "1")
+    ran = []
+
+    def worker(job):
+        ran.append(job)
+        raise ValueError(job)
+
+    with pytest.raises(ValueError):
+        in_parallel(list(range(50)), worker)
+    assert len(ran) < 50

@@ -367,7 +367,7 @@ class Result:
     # Fields the judged call's reasoning names but its arguments omit (see ``reasoning_gaps``).
     reasoning_gaps: list[str] = field(default_factory=list)
     # Outcomes of the later judged calls, after an invalid one in a forced turn.
-    later_attempts: list[str] = field(default_factory=list)
+    later_attempts: list[str] | None = None  # None: this run did not go on to measure them
 
 
 def reasoning_gaps(
@@ -471,8 +471,9 @@ def judged_rate(results: list[Result]) -> tuple[int, int]:
 
 
 def _recovered_later(results: list[Result]) -> str:
-    """Of the runs whose judged call was invalid, how many sent a valid one later in the turn."""
-    invalid = [r for r in results if r.outcome == "invalid"]
+    """Of the forced runs whose judged call was invalid, how many sent a valid one later in the
+    turn. The other runs stop at that call, so they say nothing either way."""
+    invalid = [r for r in results if r.outcome == "invalid" and r.later_attempts is not None]
     if not invalid:
         return "-"
     return f"{sum('valid' in r.later_attempts for r in invalid)}/{len(invalid)}"
@@ -559,7 +560,7 @@ def summary() -> list[str]:
         "a real Session a time limit or a gateway that stopped (not counted). +N = N "
         "other calls first, answered as the tools would (refusal or plausible result). "
         "Invalid, valid later: invalid calls followed by a valid one; only a forced turn goes "
-        "on after one, so elsewhere 0/N means not measured. "
+        "on after one, so elsewhere it reads -. "
         "Prompt tokens: mean of each case's first request (through a real Session, of its "
         "requests: Hermes stores totals). With repeats a cell is valid/judged "
         "and a rate is valid/judged, percent and [95% Wilson interval]. Intervals that do not "

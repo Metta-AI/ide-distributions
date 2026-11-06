@@ -378,6 +378,28 @@ def test_a_gateway_that_stops_answering_leaves_a_host_error_result(monkeypatch):
     assert gateway.run_case("m", CLAIM_WRITE).outcome == "host_error"
 
 
+def test_a_gateway_that_stops_after_an_invalid_call_keeps_the_verdict(monkeypatch):
+    call = {"id": "b", "function": {"name": "claim", "arguments": '{"action": "write"}'}}
+    bad = {"tool_calls": [call]}
+    runs = FinishedRun("completed", GOOD_CLAIM)
+    answers = [[bad]]
+
+    def stored(*_args, **_kwargs):
+        if answers:
+            return answers.pop()
+        raise_unavailable()
+
+    monkeypatch.setattr(runs, "session_messages", stored)
+    running = RunStatus("r", "running", "s", None, None, terminal=False)
+    monkeypatch.setattr(runs, "status", lambda *_a, **_k: running)
+    gateway = RealGateway(Path("/"), Path("h"), "k", "m", runs=runs, forcing=ForcingProxy(key="k"))
+    monkeypatch.setattr(gateway, "open_session", lambda role: "s")
+    monkeypatch.setattr(gateway, "_billed_replies", lambda *_: [])
+    monkeypatch.setattr(gateway, "_stop_and_wait", lambda *_: None)
+    monkeypatch.setattr("tests.model.real_session.POLL_S", 0)
+    assert gateway.run_case("m", CLAIM_WRITE).outcome == "invalid"
+
+
 def test_the_detour_limit_applies_before_a_later_judged_call():
     gateway = RealGateway(Path("/"), Path("h"), "k", "m")
     other = {"id": "c", "function": {"name": "web_search", "arguments": "{}"}}
@@ -535,4 +557,12 @@ def test_an_unforced_run_stops_at_the_first_verdict():
     bad = {"id": "b", "function": {"name": "claim", "arguments": '{"action": "write"}'}}
     result = harness.Result("m", "h", "c", "wrong_tool")
     assert gateway._judge_new_calls(CLAIM_WRITE, [{"tool_calls": [bad]}], result) is True
-    assert result.later_attempts == []
+    assert result.later_attempts is None
+
+
+def test_the_later_line_counts_only_runs_that_went_on():
+    unforced = harness.Result("m", "h", "c", "invalid")
+    assert harness._recovered_later([unforced]) == "-"
+    forced = harness.Result("m", "h", "c", "invalid", later_attempts=[])
+    recovered = harness.Result("m", "h", "c", "invalid", later_attempts=["invalid", "valid"])
+    assert harness._recovered_later([unforced, forced, recovered]) == "1/2"
