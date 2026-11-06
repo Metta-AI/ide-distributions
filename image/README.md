@@ -255,9 +255,15 @@ To export to any OTLP/HTTP backend or an OpenTelemetry Collector, configure
 `OTEL_EXPORTER_OTLP_ENDPOINT` (base URL) or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (full trace URL)
 on the workspace container. The SDK handles protobuf, batching, retry, TLS and shutdown.
 Standard `OTEL_EXPORTER_OTLP_HEADERS`, timeout, certificate and batch-processor settings apply.
-The supervisor inherits these settings into both interpreters. Export is asynchronous with a
-bounded SDK queue; backend outages or abrupt process termination can lose spans. Console
-output remains independent. `OTEL_SERVICE_NAME` defaults to `ide-distributions`.
+The supervisor inherits these settings into both interpreters. Long-lived processes export
+asynchronously with a bounded SDK queue. A `research tool` subprocess exports directly when
+its span ends, so returning a tool result does not wait for a batch flush at process exit.
+These short-lived processes default to a 250 ms local-collector export budget. Explicit
+`OTEL_EXPORTER_OTLP_TRACES_TIMEOUT` or `OTEL_EXPORTER_OTLP_TIMEOUT` settings retain their
+standard precedence, including for remote collectors that need a larger budget.
+Backend outages or abrupt process termination can lose OTLP spans. Console output remains
+independent, including when the tool export deadline expires. `OTEL_SERVICE_NAME` defaults to
+`ide-distributions`.
 
 Hosting must configure an accessible, authorized endpoint before claiming remote trace delivery.
 The distribution neither provisions a collector nor assumes a Datadog endpoint. Changing

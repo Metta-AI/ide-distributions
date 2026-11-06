@@ -30,7 +30,7 @@ _lock = threading.Lock()
 propagator = TraceContextTextMapPropagator()
 
 
-def tracer() -> trace.Tracer:
+def tracer(*, tool_process: bool = False) -> trace.Tracer:
     global _provider
     with _lock:
         if _provider is None:
@@ -59,7 +59,18 @@ def tracer() -> trace.Tracer:
             if "OTEL_EXPORTER_OTLP_ENDPOINT" in os.environ or (
                 "OTEL_EXPORTER_OTLP_TRACES_ENDPOINT" in os.environ
             ):
-                _provider.add_span_processor(BatchSpanProcessor(OTLPSpanExporter()))
+                # A tool's caller waits for process exit. Export its single completed span
+                # directly to the local collector instead of flushing a batch at exit.
+                # Failed delivery remains visible in the independent console export.
+                configured_timeout = (
+                    "OTEL_EXPORTER_OTLP_TRACES_TIMEOUT" in os.environ
+                    or "OTEL_EXPORTER_OTLP_TIMEOUT" in os.environ
+                )
+                exporter = OTLPSpanExporter(
+                    timeout=0.25 if tool_process and not configured_timeout else None
+                )
+                processor = SimpleSpanProcessor if tool_process else BatchSpanProcessor
+                _provider.add_span_processor(processor(exporter))
             trace.set_tracer_provider(_provider)
         return _provider.get_tracer("research_core")
 
