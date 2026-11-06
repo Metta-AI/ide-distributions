@@ -21,7 +21,7 @@ Hermes distribution shell:
 
 ## Tools
 
-23 tools, listed in `plugins/researcher/plugin.yaml`; `goal` and `directive` are read-only. A
+22 tools, listed in `plugins/researcher/plugin.yaml`; `goal` and `directive` are read-only. A
 Researcher cannot create Goals, submit or notify the user, and has no `github` or attachment tool;
 it proposes Tasks and submissions through its own Task.
 

@@ -411,7 +411,6 @@ SPEC = durable_tool(
                 "approval and no cites is given).",
                 {
                     **CREATE_PARAMS,
-                    "ideation_round": a.integer("Round number of an ideation Task."),
                     "cites": CITES,
                 },
                 ("type", "title", "description"),
@@ -426,7 +425,6 @@ SPEC = durable_tool(
                 ("type", "title", "description"),
                 RESEARCHER,
                 example_fields=("goal",),
-                hidden_params=CREATE_HIDDEN,
                 own_tool=True,
             ),
             ActionSpec(

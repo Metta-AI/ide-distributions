@@ -22,7 +22,7 @@ Hermes distribution shell:
 
 ## Tools
 
-26 tools, listed in `plugins/orchestrator/plugin.yaml`. `SOUL.md` lists their actions; the
+24 tools, listed in `plugins/orchestrator/plugin.yaml`. `SOUL.md` lists their actions; the
 `briefing` prompt section is a snapshot of the session Coworld's state, written when Hermes builds
 the Session's prompt and then replayed with it (`core/src/research_core/plugin/briefing.py` says
 what renders it again).

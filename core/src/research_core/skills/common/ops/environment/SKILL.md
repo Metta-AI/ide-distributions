@@ -27,7 +27,7 @@ Where you are, the image and source commits, the two Python environments, writab
 ## CLIs and identities
 
 - `research softmax exec -- coworld <args>` and `-- softmax <args>` run the official CLIs from the workspace environment as the workspace's Player. The wrapper refuses commands that would change the identity (`login`, `player use`). `-- coworld docs --local` lists the installed reference docs.
-- The Player credential is the workspace's; the User credential is the Orchestrator's and may be absent ("User identity not provisioned"). A permission error means the Player may not do that: report it, never look for another credential.
+- The Player credential is the workspace's; the User credential is the Orchestrator's and may be absent ("User identity not provisioned"). A permission error means the Player may not: report it, never find another credential.
 - The `platform` tool's reads, `upload`, `xp` and `version` act as the Player and record what they did; `softmax_api` covers the rest (`softmax-api-routes`).
 
 ## Sleep, wake and limits
