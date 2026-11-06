@@ -27,7 +27,7 @@ A Coworld's public code repository holds all its game-specific material: the gam
 
 ## Rules
 
-- Never edit `source/`: it is a read-only reference. Candidate edits go in your worktree; mixin changes are commits in `code/mixin/` on a branch and go live on merge.
+- Never edit `source/`'s files: it is a reference, moved only by the checkout above. Candidate edits go in your worktree; mixin changes are commits in `code/mixin/` on a branch and go live on merge.
 - If the published source URL floats or is absent, that is a provenance gap: say so in the claim. A review of the latest source is still useful but does not establish the released behaviour.
 - Never substitute another game's source or bindings, even a similar name or a newer release of the same name; the League's game names its exact Coworld id.
 - Other repositories: `github.clone {repository, commit}` (Orchestrator; the user's granted repositories, into `documents/repos/`); public ones with plain `git clone` under `documents/repos/`.

@@ -36,7 +36,7 @@ A claim is one finding with typed evidence. Everything you learn that someone wi
 | `replay` | `episode:<ereq id>[/seat <n>][/phase <p>] xp:<request id>` (`xp:none` outside an XP request); `platform.replay` pins the file |
 | `annotation` | `annotation:<id>`, a person's note on a replay |
 
-A mixin may register game types; its skills say how to cite them. `claim.inspect_evidence {claim}` shows what each link says now; use it before you lean on an old claim.
+`claim.inspect_evidence {claim}` shows what each link says now; use it before you lean on an old claim.
 
 ## Retire, never delete
 

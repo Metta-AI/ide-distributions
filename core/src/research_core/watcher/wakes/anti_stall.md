@@ -12,8 +12,8 @@ Payload:
 ```
 
 1. Read your briefing and `workspace.doctor`: the active Goals and where each stands, broken
-   capabilities and their maintenance Tasks, the champion and the recent Versions. `task.list` shows
-   open and in-progress Tasks, with each wait and when it began.
+   capabilities and their maintenance Tasks, the champion and the recent Versions. `task.list` lists
+   Tasks (`status` narrows it), with each wait and when it began.
 2. For a Goal with no open Task and nothing waiting on the user, create or approve a Task with
    `task.create` or `task.approve`. For a Task waiting longer than its wait should take,
    `task.read` why and answer it (`task.answer`), message it (`task.message`) or abandon it. For

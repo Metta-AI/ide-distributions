@@ -21,7 +21,7 @@ Where you are, the image and source commits, the two Python environments, writab
 
 - Writable: everything in the session's Coworld's folder except its bookkeeping: `code/` (after setup, commit on a branch in a worktree, never on `main` directly), `documents/` (your files; command logs under `documents/logs/`, artifacts, replays and measurements; in no git repository, so never committed; kept through sleep and restarts), and `worktrees/`. `source/` is a clone to read, not to edit.
 - Read-only: the profile source checkout (plugin, store library and schema, tools, prompts). Report a bug there; do not patch it. `config.yaml` is writable, but `prepare.py` re-applies the protected keys.
-- Shipped skills are in that checkout, so `skill_manage` `patch` on one fails with a file system error and changes nothing, whatever the skill index says. Keep a fix as a claim tagged `lesson` and report the fault. `create` with a new name makes a skill only this profile sees, kept through sleep, restarts and releases.
+- Shipped skills are in that checkout: do not `skill_manage` one (it fails, or on a local install changes every profile). Keep a fix as a claim tagged `lesson` and report the fault. `create` with a new name makes a skill only this profile sees, kept through sleep, restarts and releases.
 - Records live in the store and change through the record tools and the user's edits; direct edits to the store are detected and reported. A record tool returns the updated record; a transition may answer `pending` instead.
 
 ## CLIs and identities
@@ -32,8 +32,8 @@ Where you are, the image and source commits, the two Python environments, writab
 
 ## Sleep, wake and limits
 
-- Neither profile has a turn or time limit, though a guard stops a run after five failures of one tool. A tool in the workspace environment has about 400 seconds, and a mixin command 240 seconds before it is backgrounded with a log and a resume token (the `candidate` skill has the protocol). Results carry the log path and a 2,000-character tail.
-- The watcher ticks every minute: it resumes Sessions whose wait resolved, runs due checks, merges reviewed Tasks and syncs the champion every ten minutes. A Session that ends on `task_wait` is asleep, not finished.
+- Neither profile has a turn or time limit, but a guard ends the turn at five failures of one tool (not `terminal`, `execute_code` and the like), five identical failing calls or ten identical calls with identical results. A workspace tool has about 400 seconds; a mixin command 240 before it is backgrounded with a log and a resume token (`candidate` skill); its result has the log path and tail.
+- The watcher ticks every minute: it resumes Sessions whose wait resolved, runs due checks, merges reviewed Tasks and syncs the champion every ten minutes. A Task on `task_wait` is asleep, not finished.
 - Reaching the user: the Orchestrator through the conversation or `ui.notify`. A Researcher reaches only the Orchestrator, through its Task (`task_ask`, the result). Wakes never write into a chat.
 - `paused` stops background starts and holds new user messages; a turn already running finishes.
 

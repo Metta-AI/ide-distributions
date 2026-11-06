@@ -369,11 +369,13 @@ SPEC = durable_tool(
                             "cites": a.string("The user's message reference."),
                         },
                     ),
+                    "source": a.string(
+                        "A git URL, when the platform lists no source or the user names a fork."
+                    ),
+                    "commit": a.string("The commit of source to set up."),
                 },
                 ("coworld",),
                 ORCHESTRATOR,
-                # For local repositories and tests; no model has a reason to send them.
-                hidden_params={"source": {"type": "string"}, "commit": {"type": "string"}},
             ),
             ActionSpec(
                 "worktree_open",

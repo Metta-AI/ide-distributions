@@ -29,7 +29,7 @@ an unset repository, a git failure, an unfinished dependency): end your run with
 
 ## 3. Work in your worktree
 
-Edit only inside your worktree and commit on your branch with messages that say what and why;
+Edit code only inside your worktree and commit on your branch with messages that say what and why;
 never touch `main` or another worktree. `version.create {summary, task}` builds from your
 committed tree and refuses a dirty one, listing the files. Record findings as you go:
 `claim_write` with evidence, `experiment_create`; `xp.request` records its runs. The record is the
@@ -52,7 +52,7 @@ Anything outside your control is a wait: `task_wait {task, kind, detail, ref}` w
 a background build or evaluate), `permit` (`ref`: the route to read), `submission` (`ref`: the
 policy version id), `platform` (set for you when a route keeps failing), `user` (`ref`: the setting
 or T-n their answer changes) or `dependency`. Then stop: end the run with no further tool call. That
-is not quitting: the watcher resumes this Session, with its history, when the wait resolves.
+is not quitting: the watcher continues the Task when the wait resolves, usually in a new Session.
 Never poll in a loop and never sleep. On resume, call the tool you were waiting for
 (`xp.status {experiment}` for XP) and `directive.list`, since your briefing does not update.
 

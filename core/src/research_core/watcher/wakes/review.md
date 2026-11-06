@@ -19,8 +19,8 @@ Do this, then end the run:
    evidence, whether the deliverables the checklist names exist.
 2. Call `task.review {task, accept, merge, reason}`. Accept and merge when the work is sound and
    `main` stays healthy; accept without merge when the result is a finding, not a change;
-   reject with a specific, actionable reason when something must be redone, and the same
-   Researcher Session resumes with your reason.
+   reject with a specific, actionable reason when something must be redone, and the Task
+   continues with your reason.
 3. The watcher merges accepted work mechanically and re-runs the mixin checks; a merge that
    conflicts or fails its checks comes back to you as a management wake. A submission candidate
    you just accepted waits for that merge, then a `submission.candidate` wake decides it; a user's

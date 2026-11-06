@@ -5,16 +5,16 @@ description: Use when a capability, tool, command or install is broken.
 
 # Repair
 
-A failing tool, command, install or call is work, not a wall. Capabilities are what the checks test: the mixin commands (`build`, `check`, `upload`, `evaluate`), the platform logins (`login:player`, `login:user`) and the CLIs (`cli:coworld`, `cli:softmax`). A failure marks the capability broken, opens or joins one `high` maintenance Task for it, and Tasks whose type needs it wait on that Task. After two failed repair Tasks the user gets a notice.
+A failing tool, command, install or call is work, not a wall. Capabilities are what the checks test: the mixin commands (`build`, `check`, `upload`, `evaluate`), the platform logins (`login:player`, `login:user`), the CLIs (`cli:research`, `cli:coworld`, `cli:softmax`) and `github`. A failure marks the capability broken, opens or joins one `high` maintenance Task for it, and Tasks whose type needs it wait on that Task. After two failed repair Tasks the user gets a notice.
 
 ## Diagnose
 
-1. Read everything. `workspace.capabilities` lists each capability with its status, last check, command and output tail; the repair Task's description carries the same. Tool refusals carry the log path (`documents/logs/<name>-<timestamp>.log`) and a 2,000-character tail: read the whole log. `workspace.doctor` adds commits, the watcher heartbeat, CLI staleness and store checks.
+1. Read everything. `workspace.capabilities` lists each capability with its status, last check, command and output tail; the repair Task's description carries the same. A mixin command's result carries the log path (`documents/logs/<name>-<timestamp>.log`) and a 2,000-character tail: read the whole log. `workspace.doctor` adds commits, the watcher heartbeat, CLI staleness and store checks.
 2. Reproduce in your worktree with the exact command from `MIXIN.md` `commands.<name>`, in the workspace environment (`environment` skill for the paths). A result you cannot reproduce is not understood yet.
 3. Name the layer:
    - **Environment**: a Python mismatch (declare the version in `MIXIN.md` `toolchains`; `environment` skill); a missing package (install it into that toolchain, never into Hermes's interpreter); an absent tool on `PATH`; a dependency the game's docs name.
    - **The command**: a wrong path or flag in `commands.<name>`, a script the repository moved; fix the mixin, which is yours to edit.
-   - **The platform**: a route, status and request id in the error. 401 marks `login:<identity>` broken; a 4xx on a body means the shape changed (`softmax-api-routes`); 5xx and timeouts are retried and then become a `platform` wait. A refusal (a permit, credits, an access error, the user's no) is not a break: do not route around it with another identity, credential or command.
+   - **The platform**: a route, status and request id in the error. 401 marks `login:<identity>` broken; another 4xx may mean the shape changed, so read its detail (`softmax-api-routes`); 5xx, 408, 425, 429 and timeouts are retried and then become a `platform` wait. A refusal (a permit, credits, an access error, the user's no) is not a break: do not route around it with another identity, credential or command.
    - **The machinery**: the profile source checkout (plugin, store, tools, prompts) is read-only, and `research` CLI versions can lag the lock (`workspace.doctor` reports it). Report a bug there with the exact error in your result; do not patch it.
 
 ## Fix

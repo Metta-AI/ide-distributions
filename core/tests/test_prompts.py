@@ -123,6 +123,15 @@ def test_forbidden_words_and_the_summary_line(role):
     assert SUMMARY_LINE in text
 
 
+def test_the_tool_list_shows_a_role_only_the_fields_it_can_use():
+    rendered = build.render_tools("researcher")
+    for spec in tools_for("researcher"):
+        if spec.actions is None and spec.split_from is None:
+            line = next(ln for ln in rendered.splitlines() if ln.startswith(f"- `{spec.name}`"))
+            for name in spec.orchestrator_fields:
+                assert name not in line, f"{spec.name} shows the Researcher {name}"
+
+
 @pytest.mark.parametrize("role", ROLES)
 def test_every_tool_named_exists_for_the_role(role):
     catalog = {spec.name: spec for spec in tools_for(role)}

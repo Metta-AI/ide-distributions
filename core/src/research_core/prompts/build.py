@@ -221,7 +221,8 @@ def render_tools(role: Role) -> str:
             names += [f"`{name}`" for name in spec.own_tools(role)]
             lines.append(f"- `{spec.name}`: {', '.join(names)}")
         else:
-            lines.append(f"- `{spec.name}` (inputs: {', '.join(spec.params) or 'none'})")
+            inputs = ", ".join(spec.offered(None, role)) or "none"
+            lines.append(f"- `{spec.name}` (inputs: {inputs})")
     return "\n".join(lines)
 
 

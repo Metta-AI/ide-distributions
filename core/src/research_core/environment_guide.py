@@ -199,8 +199,9 @@ def _sleep_and_wake() -> list[str]:
         "",
         f"- The watcher runs every {WATCHER_TICK_S} seconds (`research serve`, with no model). "
         "It starts Task runs, resolves waits, recovers dead runs and runs capability checks.",
-        "- `task_wait` ends your run; the same Session resumes with its history when the wait "
-        "resolves. Nothing you started in the foreground survives the end of a run.",
+        "- After `task_wait`, end your run; the watcher continues the Task when the wait resolves, "
+        "usually in a new Session with the Task's record, worktree and recent messages. Nothing "
+        "you started in the foreground survives the end of a run.",
         "- Long mixin commands run detached with their output in a log file; a result with "
         "`background` means the command outlived the tool budget and is still running.",
         "- The sandbox may sleep while nothing runs; the watcher's heartbeat says when it last "

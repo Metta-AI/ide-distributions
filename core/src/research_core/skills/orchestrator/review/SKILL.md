@@ -32,10 +32,10 @@ they mean what they say. Nobody is reading a chat: use `ui.notify`, or `ui.ask` 
 
 - `accept: true` when the deliverables are real and the reasoning holds. A refuted hypothesis
   with sound evidence is a completed improvement Task, not a failed one.
-- `accept: false` reopens the Task: the Session that holds it resumes with your reason. Write
-  what to do next, not what is wrong. Good: "the baseline arm ran 40 episodes; the mixin's
-  minimum is 100; X-7 is closed, so run a new Experiment with 100 per arm." Bad: "insufficient
-  evidence."
+- `accept: false` reopens the Task, which continues with your reason. Write what to do next,
+  not what is wrong. Good: "C-12's evidence does not show its cause; add the replay." Bad:
+  "insufficient evidence." A Task keeps its Experiment: for a new one, accept with `merge: no`
+  and `task.create` a follow-up.
 - `merge: yes` when the change is the point: an improvement whose Experiment confirmed, a
   maintenance fix, a mixin edit. The watcher merges the recorded commit with no model after the
   mixin's build and check pass again; a conflict or a failed check comes back to you as a
