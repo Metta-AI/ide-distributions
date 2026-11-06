@@ -36,10 +36,15 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake
 
 from research_core.run_failures import CONTINUATION_PREFIX
+from research_core.store.db import DEFAULT_MAX_HOLD_S
+from research_core.store.migrate import BUSY_TIMEOUT_MS
 from research_core.telemetry import propagator, span
 
 log = logging.getLogger(__name__)
 
+# A seam write waits out a ``research store quiesce``: at most the default hold plus the usual lock
+# wait, and then it has to commit and answer. Timing out first ends the backend for a normal hold.
+SEAM_TIMEOUT_S = DEFAULT_MAX_HOLD_S + BUSY_TIMEOUT_MS / 1000 + 5
 MAX_BYTES = 1048576
 ACTIVE = frozenset({"queued", "running", "waiting"})
 TERMINAL = frozenset({"completed", "cancelled", "failed", "interrupted"})
@@ -742,7 +747,9 @@ class Backend:
         """A native reply's body, or the refusal its status means."""
         headers = dict(kwargs.pop("headers", {}))
         propagator.inject(headers)
-        response = await client.request(method, path, timeout=30, headers=headers, **kwargs)
+        response = await client.request(
+            method, path, timeout=SEAM_TIMEOUT_S, headers=headers, **kwargs
+        )
         if response.is_success:
             return response.content
         if "op_id was already used for different input" in response.text:

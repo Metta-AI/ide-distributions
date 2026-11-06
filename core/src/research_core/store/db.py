@@ -53,6 +53,7 @@ Direct edits are detected and reported. Do not edit files here.
 # ``research store quiesce`` writes this file in the workspace's ``.state`` while it holds every
 # database's write lock for a volume snapshot, and removes it when it releases them.
 QUIESCE_MARKER = "quiesce.json"
+DEFAULT_MAX_HOLD_S = 30.0
 
 
 def quiesce_busy_timeout_ms(store_path: Path, now: datetime | None = None) -> int | None:

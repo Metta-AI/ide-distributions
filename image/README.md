@@ -139,6 +139,10 @@ the log, so an append that committed before the timeout is not pushed again and 
 returns it. Nothing retries the failed call, so a failure that lasts across boots can crash-loop
 the workspace.
 
+The backend's seam calls time out after 40 s (`SEAM_TIMEOUT_S`), which a write waiting out a default
+`research store quiesce` stays inside: the run's events are late, not lost. A `--max-hold` above the
+default 30 s has no such margin, and an append that times out recycles the runtime as above.
+
 The normal image smoke checks execute the real packaged adapter against its running
 seam, including the previously accepted-by-the-stub invalid actor field. Real model
 chat remains a target-environment acceptance check with an authorized inference lease.

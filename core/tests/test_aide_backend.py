@@ -2,8 +2,12 @@
 
 import asyncio
 import json
+import os
+import sqlite3
+import subprocess
 import sys
 import threading
+import time
 import types
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -15,6 +19,7 @@ import pytest
 from research_core import run_failures
 from research_core.serve import SeamServer
 from research_core.store import admissions, goals, sessions, settings, tasks
+from research_core.store.db import DEFAULT_MAX_HOLD_S, quiesce_busy_timeout_ms
 from research_core.watcher.hermes_api import FakeHermesRuns
 from tests.test_serve import COWORLD_ID, HARNESS, make_ctx
 
@@ -41,6 +46,7 @@ import aide  # noqa: E402
 WORKSPACE = {"scope": "workspace", "coworld": None, "league": None}
 LEAGUE = {"scope": "coworld", "coworld": COWORLD_ID, "league": "league_1"}
 FRONTEND, OTHER = uuid4(), uuid4()
+SCENARIO_LIMIT_S = 30
 
 
 class Socket:
@@ -224,7 +230,7 @@ def run(system, scenario, inference=None, seam_transport=None, gateway=None):
                 return backend
 
             try:
-                async with asyncio.timeout(30):
+                async with asyncio.timeout(SCENARIO_LIMIT_S):
                     await scenario(restart(), gateway, ctx, hermes)
             finally:
                 # A cancel can be lost while a task reads the seam stream (cause not yet
@@ -576,6 +582,101 @@ def test_a_rebuilt_backend_resumes_pushes_for_an_open_request_without_a_new_send
 
     run(system, scenario)
     assert [name for name, _ in system[1].calls].count("start") == 1
+
+
+def test_a_seam_call_outlasts_the_longest_lock_wait_of_a_default_quiesce(tmp_path):
+    marker = {"held_at": datetime.now(UTC).isoformat(), "max_hold_s": DEFAULT_MAX_HOLD_S}
+    (tmp_path / "quiesce.json").write_text(json.dumps(marker))
+    seam_wait_s = quiesce_busy_timeout_ms(tmp_path / "store.db") / 1000
+    timeouts = []
+
+    def answer(request):
+        timeouts.append(request.extensions["timeout"]["read"])
+        return httpx.Response(200, json={})
+
+    async def main():
+        async with (
+            httpx.AsyncClient(
+                base_url="http://seam", transport=httpx.MockTransport(answer)
+            ) as seam,
+            asyncio.TaskGroup() as work,
+        ):
+            backend = aide.Backend(seam, seam, Availability(), work)
+            await backend.call(seam, "POST", "/message-events", json={})
+
+    asyncio.run(main())
+    assert timeouts[0] > seam_wait_s
+
+
+def wait_for_write_lock(path):
+    probe = sqlite3.connect(path, isolation_level=None, timeout=0)
+    try:
+        while True:
+            try:
+                probe.execute("BEGIN IMMEDIATE")
+                probe.execute("ROLLBACK")
+            except sqlite3.OperationalError:
+                return
+            time.sleep(0.001)
+    finally:
+        probe.close()
+
+
+def test_a_default_quiesce_hold_delays_a_running_request_and_loses_nothing(system, monkeypatch):
+    """A real ``research store quiesce`` with its default hold, so this takes 30 s on purpose.
+
+    The text and tool call arrive as the lock is taken: SQLite polls its lock up to 100 ms apart, so
+    an append this early answers after the whole hold, and the second event of the pair has yet to
+    be sent. A client timeout of 30 s loses that event here and ends the backend.
+    """
+    monkeypatch.setattr(sys.modules[__name__], "SCENARIO_LIMIT_S", DEFAULT_MAX_HOLD_S + 30)
+    ctx = system[0]
+
+    async def scenario(backend, gateway, ctx, hermes):
+        gateway.script = lambda run_id: [
+            {"event": "run.started"},
+            {"event": "reasoning.available", "text": "Thinking."},
+            {"gate": True},
+            {"event": "message.delta", "delta": "Hello"},
+            {"event": "tool.started", "tool": "ls", "preview": "ls", "tool_call_id": "call_1"},
+            {"event": "tool.completed", "tool": "ls", "tool_call_id": "call_1"},
+            {"event": "run.completed"},
+        ]
+        session_id = await opened(backend)
+        request_id = str(uuid4())
+        params = {"session_id": session_id, "messages": say("hi"), "scope": WORKSPACE}
+        await call(backend, "chat.send", params, request_id=request_id)
+        await until(lambda: backend.socket.notes("chat.event"))
+
+        command = [sys.executable, "-m", "research_core.cli", "store", "quiesce"]
+        env = {**os.environ, "IDE_WORKSPACE": str(ctx.workspace.root)}
+        env.pop("HERMES_HOME", None)  # never a real profile's state.db
+        quiesce = subprocess.Popen(command, stdout=subprocess.PIPE, text=True, env=env)
+        try:
+            await asyncio.to_thread(wait_for_write_lock, ctx.workspace.store_path)
+            gateway.gate.set()
+            started = time.monotonic()
+            await until(lambda: backend.socket.notes("chat.finished"))
+            assert time.monotonic() - started >= DEFAULT_MAX_HOLD_S - 2  # the hold really held it
+            assert (await asyncio.to_thread(quiesce.wait)) == 0
+        finally:
+            if quiesce.poll() is None:
+                quiesce.kill()
+                quiesce.wait()
+        # Every event was logged in order and pushed, none of them after a timeout.
+        read = (await events_read(backend, session_id, request_id))["result"]
+        pushed = [n["event"] for n in backend.socket.notes("chat.event")]
+        assert read["events"] == pushed
+        assert [e["kind"] for e in pushed] == [
+            "reasoning",
+            "text.delta",
+            "tool.started",
+            "tool.completed",
+            "finished",
+        ]
+
+    run(system, scenario)
+    assert ctx.wstore.one("PRAGMA integrity_check")[0] == "ok"
 
 
 def test_a_held_request_reads_waiting_then_stitches_its_next_attempt(system):

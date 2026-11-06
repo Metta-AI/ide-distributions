@@ -247,7 +247,11 @@ run `research store quiesce` in the background and initiate the snapshot when it
 line appears. It checkpoints each database's WAL into its file, takes and holds the write lock
 on the workspace store, every Coworld store and (with `HERMES_HOME` set) that profile's Hermes
 `state.db`, fsyncs each file and its directory, and holds for at most 30 seconds (`--max-hold`;
-a `--then` command still running is killed). Readers continue and database writers wait, so the
+a `--then` command still running is killed). Without `--then` it holds for all of that time.
+Do not raise `--max-hold` above the default on a workspace running chats: the AIDE backend's seam
+calls outlast the default hold by a few seconds, and a longer one can time out an append, which
+recycles the runtime (`image/README.md`).
+Readers continue and database writers wait, so the
 snapshot is one consistent recovery point across the databases. Nothing stops writes to ordinary
 files, so a document or worktree may be mid-write from a tool process.
 Keep the hold short: a store connection opened before the hold began waits only its usual five
