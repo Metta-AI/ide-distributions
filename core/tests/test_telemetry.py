@@ -17,9 +17,7 @@ def test_exception_status_never_records_sensitive_exception_text(spans):
 
 
 def test_native_callbacks_keep_concurrent_turns_and_retry_attempts_separate(monkeypatch, spans):
-    monkeypatch.setattr(tracing, "admission_trace", lambda *_: (None, {}))
     active = {"t1", "t2"}
-    monkeypatch.setattr(tracing, "active_native_turns", lambda current: active)
     hooks, session_span = tracing.make_instrumentation("researcher")
     for turn_id in active:
         hooks["pre_llm_call"](session_id=turn_id, task_id=turn_id, turn_id=turn_id)
@@ -51,19 +49,15 @@ def test_native_callbacks_keep_concurrent_turns_and_retry_attempts_separate(monk
 
 
 def test_orphan_observation_ends_incomplete_without_reclaiming_active_tool(monkeypatch, spans):
-    monkeypatch.setattr(tracing, "admission_trace", lambda *_: (None, {}))
     active = {"failed", "long-tool"}
-    monkeypatch.setattr(tracing, "active_native_turns", lambda current: active)
     hooks, session_span = tracing.make_instrumentation("orchestrator")
     for turn_id in active:
         hooks["pre_llm_call"](session_id=turn_id, task_id=turn_id, turn_id=turn_id)
     hooks["pre_tool_call"](turn_id="long-tool", tool_call_id="tool")
-    active.remove("failed")
-    active.add("next")
-    hooks["pre_llm_call"](session_id="next", task_id="next", turn_id="next")
+    hooks["pre_llm_call"](session_id="failed", task_id="next", turn_id="next")
     (orphan,) = spans.get_finished_spans()
     assert orphan.attributes["observation.complete"] is False
-    assert orphan.attributes["observation.reason"] == "native_lease_released"
+    assert orphan.attributes["observation.reason"] == "next_turn_in_session"
     hooks["post_tool_call"](
         turn_id="long-tool", tool_call_id="tool", tool_name="terminal", status="ok"
     )

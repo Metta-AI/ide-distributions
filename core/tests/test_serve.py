@@ -24,7 +24,7 @@ from uuid import uuid4
 
 import pytest
 
-from research_core import intake, serve
+from research_core import intake, serve, telemetry
 from research_core.client import ScriptedClient, SeamError
 from research_core.serve import SeamServer
 from research_core.store import admissions, coworlds, goals, notices, sessions, tasks, ui_state
@@ -829,13 +829,22 @@ def test_metadata_uses_native_identity_for_identical_messages(seam, monkeypatch)
     seam.client.open(session_context={"contract_version": 1, "coworld": COWORLD_ID})
     first = seam.say("yes", context={"contract_version": 1, "view": {"id": "first"}})
     message_plugin.record_native_message(
-        session_id=seam.client.session_id, conversation_history=[{"role": "user", "_row_id": 1}]
+        span_for_session=lambda _: 1 / 0,  # Failed tracing must not roll back the binding.
+        session_id=seam.client.session_id,
+        conversation_history=[{"role": "user", "_row_id": 1}],
     )
-    seam.hermes.complete(first["run_id"], "done")
-    seam.say("yes", context={"contract_version": 1, "view": {"id": "second"}})
-    message_plugin.record_native_message(
-        session_id=seam.client.session_id, conversation_history=[{"role": "user", "_row_id": 3}]
-    )
+    # An older resumed input must not steal the newer steered message's row binding.
+    with seam.ctx.wstore.tx(Actor.harness()) as tx:
+        tx.execute("UPDATE client_admissions SET resumes=1 WHERE op_id=?", (first["op_id"],))
+    second = seam.say("yes", context={"contract_version": 1, "view": {"id": "second"}})
+    with telemetry.span("invoke_agent") as current:
+        for _ in range(2):
+            message_plugin.record_native_message(
+                span_for_session=lambda _: current,
+                session_id=seam.client.session_id,
+                conversation_history=[{"role": "user", "_row_id": 3}],
+            )
+        assert current.attributes["op.id"] == second["op_id"]
     response = seam.client._post(
         "/messages/context",
         {
@@ -1213,6 +1222,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 import pytest
+from opentelemetry import trace
 
 from research_core import serve
 from research_core.coordinator import ownership

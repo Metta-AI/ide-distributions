@@ -7,18 +7,13 @@ avoid Hermes's cumulative retry clock. Missing terminal hooks never imply comple
 
 from __future__ import annotations
 
-import json
-import sqlite3
 import threading
-import time
 from collections.abc import Callable
-from contextlib import closing
 from dataclasses import dataclass, field
 from functools import partial
 from typing import Any
 
 from opentelemetry import trace
-from opentelemetry.context import Context
 from opentelemetry.trace import Span, SpanKind, StatusCode
 
 from research_core import telemetry
@@ -30,67 +25,8 @@ class Turn:
     span: Span
     session_id: str
     complete: bool = True
-    linked: bool = False
     attempts: dict[str, Span] = field(default_factory=dict)
     tools: dict[str, Span] = field(default_factory=dict)
-
-
-def active_native_turns(current_turn_id: str) -> set[str]:
-    """Read authoritative leases through the pinned runtime's routed database contract."""
-    from hermes_state import SessionDB
-
-    native = SessionDB(read_only=True)
-    try:
-        with closing(sqlite3.connect(f"file:{native.db_path}?mode=ro", uri=True)) as connection:
-            holders = connection.execute(
-                "SELECT holder FROM session_turn_leases WHERE expires_at>?", (time.time(),)
-            ).fetchall()
-        active = {
-            holder.partition(":turn=")[2].rpartition(":platform=")[0] for (holder,) in holders
-        }
-        if current_turn_id not in active:
-            raise RuntimeError("Tracing callback does not hold the pinned native turn lease")
-        return active
-    finally:
-        native.close()
-
-
-def admission_trace(
-    session_id: str, conversation_history: list | None
-) -> tuple[Context | None, dict[str, str]]:
-    """Recover the admitted input's W3C context after queueing, restarts, or a worker switch."""
-    from research_core import layout
-    from research_core.plugin.executor import profile_env
-    from research_core.store.db import Store
-
-    if not conversation_history:
-        return None, {}
-    message = next(m for m in reversed(conversation_history) if m["role"] == "user")
-    workspace = layout.from_env(profile_env())
-    with Store.open(workspace.store_path, kind="workspace") as store:
-        row = store.one(
-            "SELECT op_id,run_id,payload FROM client_admissions"
-            " WHERE session_id=? AND kind='message' AND native_message_id=?",
-            (session_id, message["_row_id"]),
-        )
-        if row is None:
-            # A native continuation is a new transcript row for the same admitted input.
-            resumed = store.q(
-                "SELECT op_id,run_id,payload FROM client_admissions"
-                " WHERE session_id=? AND kind='message' AND resumes>0 AND dispatch_started=1"
-                " AND status IN ('queued','running')",
-                (session_id,),
-            )
-            if len(resumed) > 1:
-                raise RuntimeError("More than one resumed input owns this session")
-            row = resumed[0] if resumed else None
-    if row is None:
-        return None, {}
-    payload = json.loads(row["payload"])
-    return telemetry.propagator.extract(payload.get("trace_context", {})), {
-        "op.id": row["op_id"],
-        **({"run.id": row["run_id"]} if row["run_id"] is not None else {}),
-    }
 
 
 def make_instrumentation(
@@ -121,14 +57,13 @@ def make_instrumentation(
         **_: Any,
     ) -> None:
         with lock:
-            active = active_native_turns(turn_id)
             for previous, turn in list(turns.items()):
-                if previous not in active:
-                    incomplete(turn, "native_lease_released")
+                if turn.session_id == session_id:
+                    incomplete(turn, "next_turn_in_session")
                     del turns[previous]
             if len(turns) >= 256:
-                with telemetry.span("hermes.observation", reason="tracking_capacity", role=role):
-                    return
+                oldest = next(iter(turns))
+                incomplete(turns.pop(oldest), "tracking_capacity")
             current = telemetry.tracer().start_span(
                 "invoke_agent",
                 attributes={
@@ -154,14 +89,6 @@ def make_instrumentation(
             if turn_id not in turns:
                 return
             turn = turns[turn_id]
-            if not turn.linked:
-                parent, admission = admission_trace(turn.session_id, conversation_history)
-                turn.span.set_attributes(admission)
-                if parent is not None:
-                    origin = trace.get_current_span(parent).get_span_context()
-                    if origin.is_valid:
-                        turn.span.add_link(origin)
-                turn.linked = True
             turn.attempts[api_request_id] = telemetry.tracer().start_span(
                 "chat",
                 kind=SpanKind.CLIENT,
