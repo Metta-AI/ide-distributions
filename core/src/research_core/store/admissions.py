@@ -99,9 +99,9 @@ def requests(store: Store, session_ids: list[str]) -> list[dict]:
 
     Beside :func:`snapshot`'s fields: ``origin``; ``resumes``; ``revision`` and ``updated_at``,
     the seq and time of the latest event about it; ``runs``, each run it started with its
-    ``attempt`` (the resumes before that run, from ``client.resumed``); and ``finished``, the
-    progress position AIDE placed its outcome at (``aide.finished``), once placed. ``input`` is
-    the user's message, or ``None`` for runtime work.
+    ``attempt`` (the resumes before that run, from ``client.resumed``); and ``logged``, the last
+    row of its event log (:func:`append_event`), once it has one. ``input`` is the user's
+    message, or ``None`` for runtime work.
     """
     rows = store.q(
         "SELECT op_id,session_id,origin,resumes,created_at,error,error_class,resume_after,"
@@ -110,17 +110,19 @@ def requests(store: Store, session_ids: list[str]) -> list[dict]:
         " CASE WHEN status='queued' AND resume_after IS NOT NULL THEN 'waiting'"
         " ELSE status END AS status,"
         " (SELECT seq FROM events WHERE subject=op_id ORDER BY seq DESC LIMIT 1) AS revision,"
-        " (SELECT at FROM events WHERE subject=op_id ORDER BY seq DESC LIMIT 1) AS updated_at"
+        " (SELECT at FROM events WHERE subject=op_id ORDER BY seq DESC LIMIT 1) AS updated_at,"
+        " (SELECT json_object('attempt',attempt,'seq',seq,'run_id',run_id,"
+        "'source_seq',source_seq,'event',json(event)) FROM request_events"
+        " WHERE request_id=op_id ORDER BY attempt DESC, seq DESC LIMIT 1) AS logged"
         " FROM client_admissions WHERE kind='message'"
         " AND session_id IN (SELECT value FROM json_each(?)) ORDER BY created_at, rowid",
         (json.dumps(session_ids),),
     )
     runs: dict[str, list[dict]] = {row["op_id"]: [] for row in rows}
     attempts = dict.fromkeys(runs, 0)
-    finished: dict[str, dict | None] = dict.fromkeys(runs)
     for event in store.q(
-        "SELECT subject,kind,payload,at FROM events"
-        " WHERE kind IN ('client.started','client.resumed','aide.finished')"
+        "SELECT subject,kind,payload FROM events"
+        " WHERE kind IN ('client.started','client.resumed')"
         " AND subject IN (SELECT op_id FROM client_admissions WHERE kind='message'"
         " AND session_id IN (SELECT value FROM json_each(?))) ORDER BY seq",
         (json.dumps(session_ids),),
@@ -128,8 +130,6 @@ def requests(store: Store, session_ids: list[str]) -> list[dict]:
         payload = json.loads(event["payload"])
         if event["kind"] == "client.resumed":
             attempts[event["subject"]] = payload["resume"]
-        elif event["kind"] == "aide.finished":
-            finished[event["subject"]] = finished[event["subject"]] or payload | {"at": event["at"]}
         elif payload["run_id"] not in {run["run_id"] for run in runs[event["subject"]]}:
             runs[event["subject"]].append(
                 {"attempt": attempts[event["subject"]], "run_id": payload["run_id"]}
@@ -139,33 +139,64 @@ def requests(store: Store, session_ids: list[str]) -> list[dict]:
             **dict(row),
             "input": None if row["input"] is None else json.loads(row["input"]),
             "runs": runs[row["op_id"]],
-            "finished": finished[row["op_id"]],
+            "logged": None if row["logged"] is None else json.loads(row["logged"]),
         }
         for row in rows
     ]
 
 
-def place_finished(tx: Tx, op_id: str, attempt: int, seq: int) -> dict:
-    """Record where AIDE placed a terminal admission's outcome; the first placement stands."""
-    row = tx.one(
-        "SELECT payload,at FROM events WHERE kind='aide.finished' AND subject=?"
-        " ORDER BY seq LIMIT 1",
-        (op_id,),
+def append_event(
+    tx: Tx, op_id: str, event: dict, run_id: str | None, source_seq: int | None
+) -> None:
+    """Append one AIDE ``ChatEvent`` to its request's log at the cursor it carries.
+
+    The log's triggers keep each attempt's seqs contiguous and ``finished`` last; only a
+    finished admission has an outcome to append. ``run_id`` and ``source_seq`` name the last
+    gateway event folded into this one.
+    """
+    if event["kind"] == "finished":
+        status = tx.one(
+            "SELECT status FROM client_admissions WHERE op_id=? AND kind='message'", (op_id,)
+        )
+        if status is None or status["status"] not in {
+            "completed",
+            "cancelled",
+            "failed",
+            "interrupted",
+        }:
+            raise StoreError(["only a finished message admission has an outcome to append"])
+    tx.execute(
+        "INSERT INTO request_events(request_id,attempt,seq,kind,event,run_id,source_seq)"
+        " VALUES (?,?,?,?,?,?,?)",
+        (
+            op_id,
+            event["attempt"],
+            event["seq"],
+            event["kind"],
+            json.dumps(event),
+            run_id,
+            source_seq,
+        ),
     )
-    if row is not None:
-        return json.loads(row["payload"]) | {"at": row["at"]}
-    status = tx.one(
-        "SELECT status FROM client_admissions WHERE op_id=? AND kind='message'", (op_id,)
-    )
-    if status is None or status["status"] not in {
-        "completed",
-        "cancelled",
-        "failed",
-        "interrupted",
-    }:
-        raise StoreError(["only a finished message admission has an outcome to place"])
-    tx.event("aide.finished", op_id, {"attempt": attempt, "seq": seq})
-    return {"attempt": attempt, "seq": seq, "at": tx.at}
+
+
+def events_after(store: Store, op_id: str, attempt: int, seq: int, limit: int) -> dict:
+    """Up to ``limit`` logged events after ``(attempt, seq)``, in cursor order; ``more`` when
+    further rows follow them and ``closed`` once the log holds its ``finished`` event."""
+    with store.read_tx():
+        rows = store.q(
+            "SELECT event FROM request_events WHERE request_id=?"
+            " AND (attempt>? OR (attempt=? AND seq>?)) ORDER BY attempt, seq LIMIT ?",
+            (op_id, attempt, attempt, seq, limit + 1),
+        )
+        closed = store.one(
+            "SELECT 1 FROM request_events WHERE request_id=? AND kind='finished'", (op_id,)
+        )
+    return {
+        "events": [json.loads(row["event"]) for row in rows[:limit]],
+        "more": len(rows) > limit,
+        "closed": closed is not None,
+    }
 
 
 def enqueue(

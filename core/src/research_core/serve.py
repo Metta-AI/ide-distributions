@@ -804,13 +804,24 @@ class SeamServer:
                 ]
             }
 
-    def message_finished(self, body: dict) -> dict:
-        """Record where AIDE placed a finished message's outcome in its progress; the first
-        placement stands, so every later read and notification carries the same position."""
+    def message_event(self, body: dict) -> dict:
+        """Append one AIDE event to a message's log; the runtime pushes it only after this."""
         op_id = str(UUID(_text(body, "op_id")))
+        event = _object(body, "event")
         with self.stores() as stores, stores.wstore.tx(_actor(body.get("actor"))) as tx:
-            placed = admissions.place_finished(tx, op_id, int(body["attempt"]), int(body["seq"]))
-        return {"op_id": op_id, **placed}
+            admissions.append_event(tx, op_id, event, body["run_id"], body["source_seq"])
+        return {"op_id": op_id, "attempt": event["attempt"], "seq": event["seq"]}
+
+    def message_events(self, query: dict[str, str]) -> dict:
+        """A message's logged AIDE events after a cursor (``admissions.events_after``)."""
+        with self.stores() as stores:
+            return admissions.events_after(
+                stores.wstore,
+                str(UUID(query["op_id"])),
+                int(query["attempt"]),
+                int(query["seq"]),
+                int(query["limit"]),
+            )
 
     def message_cancel(self, body: dict) -> dict:
         op_id = str(UUID(_text(body, "op_id")))
@@ -1237,6 +1248,8 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json(HTTPStatus.OK, seam.session_pending(query["session_id"]))
             elif url.path == "/input-response":
                 self._json(HTTPStatus.OK, seam.input_response(query["op_id"]))
+            elif url.path == "/message-events":
+                self._json(HTTPStatus.OK, seam.message_events(query))
             elif url.path == "/stream":
                 self._stream(query)
             elif url.path == "/models":
@@ -1258,7 +1271,7 @@ class _Handler(BaseHTTPRequestHandler):
             "/message": seam.message,
             "/message-cancel": seam.message_cancel,
             "/input-response": seam.input_responded,
-            "/message-finished": seam.message_finished,
+            "/message-events": seam.message_event,
             "/messages/context": seam.message_context,
             "/ui-action": seam.ui_action,
             "/store/apply": seam.store_apply,

@@ -42,6 +42,7 @@ WORKSPACE_TABLES = {
     "transition_effects",
     "task_assignments",
     "client_admissions",
+    "request_events",
     "meta",
     "events",
     "change_log",
@@ -100,8 +101,10 @@ def test_change_log_triggers_cover_every_record_table():
         tables = tables_of(schema) - {"meta", "change_log", "claims_fts", "experiments_fts"}
         for table in tables:
             assert f"trigger {table}_log_insert" in schema, (kind, table)
-            if table == "events":
+            if table in {"events", "request_events"}:
                 assert f"trigger {table}_log_update" not in schema
+                assert f"trigger {table}_append_only_update" in schema
+                assert f"trigger {table}_append_only_delete" in schema
                 continue
             assert f"trigger {table}_log_update" in schema, (kind, table)
             assert f"trigger {table}_log_delete" in schema, (kind, table)
@@ -160,8 +163,8 @@ def test_second_apply_is_a_noop():
 
 def test_apply_migrations_returns_the_version_it_reached():
     conn = sqlite3.connect(":memory:", isolation_level=None)
-    assert migrate.apply_migrations(conn, "workspace") == 9
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 9
+    assert migrate.apply_migrations(conn, "workspace") == 10
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
 
 
 def test_admission_waiting_migration_keeps_rows_and_adds_no_hold():
@@ -179,7 +182,7 @@ def test_admission_waiting_migration_keeps_rows_and_adds_no_hold():
         " VALUES (7,'op','message','{}','s','hi',?,'failed','run_1',1,'boom','t',42,'client')",
         (payload,),
     )
-    assert migrate.apply_migrations(conn, "workspace") == 9
+    assert migrate.apply_migrations(conn, "workspace") == 10
     row = conn.execute("SELECT rowid, * FROM client_admissions").fetchone()
     assert (row["rowid"], row["op_id"], row["status"], row["error"]) == (7, "op", "failed", "boom")
     assert (row["payload"], row["native_message_id"], row["origin"]) == (payload, 42, "client")
@@ -198,7 +201,7 @@ def test_scoped_notices_upgrade_keeps_existing_workspace_notices():
         "INSERT INTO notices(text,refs,urgency,created,created_by)"
         " VALUES ('Existing news','[]','normal','t','harness')"
     )
-    assert migrate.apply_migrations(conn, "workspace") == 9
+    assert migrate.apply_migrations(conn, "workspace") == 10
     row = conn.execute("SELECT * FROM notices").fetchone()
     assert row["text"] == "Existing news" and row["coworld_id"] is None
 

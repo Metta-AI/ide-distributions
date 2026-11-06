@@ -63,9 +63,11 @@ class Socket:
 class Gateway:
     """The gateway routes the backend reads: transcripts, run state and run event streams.
 
-    Each run's events come from ``script`` once and are retained, as the gateway's backlog is,
-    so every read of a run sees the same events; their ``say`` messages join the transcript
-    when the run first reaches them. A ``gate`` entry holds the run open until it is set.
+    Each run's events come from ``script`` once. Like Hermes's per-run buffer, the gateway
+    retains only the newest ``capacity`` events a run has reached, in memory: a read from
+    before them starts with ``replay.truncated``, and ``restart`` loses every run. Their ``say``
+    messages join the transcript when the run first reaches them. A ``gate`` entry holds the
+    run open until it is set.
     """
 
     def __init__(self, hermes: FakeHermesRuns):
@@ -78,6 +80,12 @@ class Gateway:
         self.runs: dict[str, list[dict]] = {}
         self.retired: set[str] = set()
         self.gate = asyncio.Event()
+        self.capacity = 1000
+        self.reached: dict[str, int] = {}  # run id -> the newest seq the run has produced
+
+    def restart(self) -> None:
+        """The gateway process restarts: its in-memory runs and their buffers are gone."""
+        self.retired |= set(self.runs)
 
     def say(self, session_id: str, **message) -> None:
         rows = self.transcripts.setdefault(session_id, [])
@@ -138,9 +146,13 @@ class Gateway:
         if run_id not in self.runs:
             self.runs[run_id] = self.script(run_id)
         yield b": open\n\n"
+        oldest = self.reached.get(run_id, -1) - self.capacity + 1
+        if last_seq + 1 < oldest:
+            yield f"data: {json.dumps({'event': 'replay.truncated'})}\n\n".encode()
         for seq, event in enumerate(self.runs[run_id]):
-            if seq <= last_seq:
+            if seq <= max(last_seq, oldest - 1):
                 continue
+            self.reached[run_id] = max(self.reached.get(run_id, -1), seq)
             if event.get("gate"):
                 await self.gate.wait()
                 continue
@@ -194,12 +206,12 @@ def run(system, scenario, inference=None):
         ):
             backends, watchers = [], []
 
+            def tasks():
+                return watchers + [task for old in backends for task in old.consumers.values()]
+
             def stop():
-                for watcher in watchers:
-                    watcher.cancel()
-                for old in backends:
-                    for bridge in list(old.bridges.values()):
-                        bridge.cancel()
+                for task in tasks():
+                    task.cancel()
 
             def restart():
                 """A new backend process: nothing of the last one's memory survives."""
@@ -215,12 +227,10 @@ def run(system, scenario, inference=None):
                 async with asyncio.timeout(30):
                     await scenario(restart(), gateway, ctx, hermes)
             finally:
-                stop()
-                # A cancel can be lost while a watcher reads the seam stream (cause not yet
+                # A cancel can be lost while a task reads the seam stream (cause not yet
                 # known), and the task group would then wait forever. Repeat it until it lands.
-                while not all(watcher.done() for watcher in watchers):
-                    for watcher in watchers:
-                        watcher.cancel()
+                while not all(task.done() for task in tasks()):
+                    stop()
                     await asyncio.sleep(0.05)
 
     asyncio.run(main())
@@ -311,17 +321,17 @@ def test_chat_round_trip_pushes_what_the_reads_return_to_every_subscriber(system
         assert [e["kind"] for e in pushed] == [
             "reasoning",
             "text.delta",
-            "text.delta",
             "tool.started",
             "tool.completed",
             "text.delta",
             "finished",
         ]
-        # Every placed event takes the next seq of its attempt.
-        assert [cursor(e) for e in pushed] == [(0, n) for n in range(1, 8)]
-        assert pushed[3] | {"at": None} == {
+        # Consecutive deltas merge into one event; every event takes the next seq of its attempt.
+        assert [e.get("delta") for e in pushed if e["kind"] == "text.delta"] == ["Hello", "Done"]
+        assert [cursor(e) for e in pushed] == [(0, n) for n in range(1, 7)]
+        assert pushed[2] | {"at": None} == {
             "attempt": 0,
-            "seq": 4,
+            "seq": 3,
             "at": None,
             "kind": "tool.started",
             "call_id": "call_1",
@@ -331,11 +341,8 @@ def test_chat_round_trip_pushes_what_the_reads_return_to_every_subscriber(system
         }
         for frontend in (FRONTEND, OTHER):
             chunks = socket.notes("chat.chunk", frontend)
-            assert [(c["completion_id"], c["seq"]) for c in chunks] == [
-                (f"{run_id}:2", 1),
-                (f"{run_id}:2", 2),
-                (f"{run_id}:6", 1),
-            ]
+            assert [c["completion_id"] for c in chunks] == [f"{run_id}:2", f"{run_id}:5"]
+            assert all("seq" not in c for c in chunks)
             # A chunk mirrors the text.delta at its cursor.
             assert [
                 (c["cursor"]["seq"], c["chunk"]["choices"][0]["delta"]["content"]) for c in chunks
@@ -346,13 +353,13 @@ def test_chat_round_trip_pushes_what_the_reads_return_to_every_subscriber(system
             assert messages[-1]["reasoning"] == "Listing first." and messages[-1]["created_at"]
             (finished,) = socket.notes("chat.finished", frontend)
             assert finished["status"] == "completed"
-            assert finished["cursor"] == {"attempt": 0, "seq": 7}
+            assert finished["cursor"] == {"attempt": 0, "seq": 6}
             changes = socket.notes("state.changed", frontend)
             assert any(request_id in c["item"]["active_request_ids"] for c in changes)
             assert all(c["previous_revision"] + 1 == c["revision"] for c in changes)
         read = (await events_read(backend, session_id, request_id))["result"]
         assert read["events"] == pushed and read["done"] is True
-        assert read["next"] == {"attempt": 0, "seq": 7}
+        assert read["next"] == {"attempt": 0, "seq": 6}
         assert (await events_read(backend, session_id, request_id))["result"] == read
         tail = await events_read(backend, session_id, request_id, {"attempt": 0, "seq": 5})
         assert tail["result"]["events"] == pushed[5:]
@@ -385,6 +392,7 @@ def test_chat_round_trip_pushes_what_the_reads_return_to_every_subscriber(system
         assert code(await call(backend, "chat.send", changed, request_id=request_id)) == "id_reused"
 
         # A new backend process reads the same records, events and seqs from durable state.
+        requested = len(gateway.event_requests)
         restarted = backend.restart()
         assert (await events_read(restarted, session_id, request_id))["result"] == read
         reread = await call(
@@ -400,12 +408,10 @@ def test_chat_round_trip_pushes_what_the_reads_return_to_every_subscriber(system
         )["result"]["item"]
         assert [r["request_id"] for r in session["requests"]] == [request_id]
         assert session["active_request_ids"] == []
-        # After the gateway retires the run, its outcome still reads after the last applied
-        # cursor, and a read of the lost events says they are gone.
-        gateway.retired.add(run_id)
-        retired = await events_read(restarted, session_id, request_id, {"attempt": 0, "seq": 6})
-        assert retired["result"]["events"] == pushed[-1:] and retired["result"]["done"] is True
-        assert code(await events_read(restarted, session_id, request_id)) == "history_unavailable"
+        # The log, not the gateway, answers: a gateway restart changes no read.
+        gateway.restart()
+        assert (await events_read(restarted, session_id, request_id))["result"] == read
+        assert all(run != run_id for run, _ in gateway.event_requests[requested:])
 
     run(system, scenario)
     ctx, hermes, _ = system
@@ -419,14 +425,14 @@ def test_a_dropped_run_stream_resumes_from_its_last_sequence_without_duplicates(
         params = {"session_id": session_id, "messages": say("hi"), "scope": WORKSPACE}
         await call(backend, "chat.send", params)
         await until(lambda: backend.socket.notes("chat.finished"))
-        # The bridge resumes after the drop; placing the outcome reads the run once more.
-        assert [last for _, last in gateway.event_requests] == ["-1", "2", "-1"]
+        # The consumer resumes after the drop, and the delta merge spans it.
+        assert [last for _, last in gateway.event_requests] == ["-1", "2"]
         deltas = [
             c["chunk"]["choices"][0]["delta"]["content"] for c in backend.socket.notes("chat.chunk")
         ]
-        assert deltas == ["Hel", "lo", "Done"]
+        assert deltas == ["Hello", "Done"]
         seqs = [n["event"]["seq"] for n in backend.socket.notes("chat.event")]
-        assert seqs == list(range(1, 8))
+        assert seqs == list(range(1, 7))
 
     run(system, scenario)
 
@@ -451,14 +457,10 @@ def test_a_rebuilt_backend_resumes_pushes_for_an_open_request_without_a_new_send
         assert live["done"] is False
 
         restarted = backend.restart()
-        await call(
-            restarted, "state.get", {"resource": "sessions", "id": session_id, "scope": WORKSPACE}
-        )
-        await restarted.rebuild()
-        assert list(restarted.bridges) == [request_id]
+        await until(lambda: list(restarted.consumers) == [request_id])
         # A replayed send attaches to the open request and starts nothing.
         await call(restarted, "chat.send", params, request_id=request_id)
-        await asyncio.sleep(0.5)  # the rebuilt bridge has placed what was already streamed
+        await asyncio.sleep(0.5)
         gateway.gate.set()
         await until(lambda: restarted.socket.notes("chat.finished"))
         chunks = restarted.socket.notes("chat.chunk")
@@ -512,7 +514,6 @@ def test_a_held_request_reads_waiting_then_stitches_its_next_attempt(system):
         held = (await call(restarted, "state.get", get))["result"]["item"]
         assert held["waiting"]["reason"] == "rate_limited" and held["waiting"]["until"]
         assert (held["error"], held["attempt"], held["in_history"]) == (None, 0, True)
-        await restarted.rebuild()
         server.test_clock.now += timedelta(minutes=2)
         await until(lambda: restarted.socket.notes("chat.finished"))
         read = (await events_read(restarted, session_id, request_id))["result"]
@@ -524,10 +525,9 @@ def test_a_held_request_reads_waiting_then_stitches_its_next_attempt(system):
         (chunk,) = restarted.socket.notes("chat.chunk")
         assert chunk["cursor"] == {"attempt": 1, "seq": 1}
         assert (await call(restarted, "state.get", get))["result"]["item"]["attempt"] == 1
-        # Once the gateway retires the first attempt, a read from it reports the gap.
-        gateway.retired.add(next(iter(hermes.runs)))
-        gap = await events_read(restarted, session_id, request_id)
-        assert code(gap) == "history_unavailable"
+        # The first attempt reads from the log after the gateway restarts.
+        gateway.restart()
+        assert (await events_read(restarted, session_id, request_id))["result"] == read
         current = await events_read(restarted, session_id, request_id, {"attempt": 1, "seq": 0})
         assert current["result"]["events"] == read["events"][1:]
 
@@ -591,37 +591,83 @@ def test_failed_and_unstarted_requests_stay_readable_after_a_restart(system):
     run(system, scenario)
 
 
-def test_an_interrupted_request_places_its_outcome_once_after_what_was_retained(system):
+def midway(run_id):
+    return [
+        {"event": "run.started"},
+        {"event": "reasoning.available", "text": "Thinking."},
+        {"event": "message.delta", "delta": "Hel"},
+        {"event": "message.delta", "delta": "lo"},
+        {"event": "tool.started", "tool": "ls", "preview": "ls", "tool_call_id": "call_1"},
+        {"gate": True},
+        {"event": "tool.completed", "tool": "ls", "tool_call_id": "call_1"},
+        {"event": "message.delta", "delta": "Done"},
+        {"event": "run.completed"},
+    ]
+
+
+def started(backend):
+    return any(n["event"]["kind"] == "tool.started" for n in backend.socket.notes("chat.event"))
+
+
+def test_a_backend_restart_mid_run_keeps_every_logged_event_and_finishes_the_run(system):
     async def scenario(backend, gateway, ctx, hermes):
         session_id = await opened(backend)
-        gateway.script = lambda run_id: [
-            {"event": "run.started"},
-            {"event": "message.delta", "delta": "Hel"},
-            {"gate": True},
-        ]
+        # Hermes keeps only a few events per run, so the start of the run is gone from it.
+        gateway.capacity, gateway.script = 3, midway
         request_id = str(uuid4())
         params = {"session_id": session_id, "messages": say("hi"), "scope": WORKSPACE}
         await call(backend, "chat.send", params, request_id=request_id)
-        await until(lambda: backend.socket.notes("chat.chunk"))
-        # The gateway restarts under the run: its events are gone with it.
-        (run_id,) = hermes.runs
-        hermes.crash(run_id)
-        gateway.retired.add(run_id)
-        gateway.gate.set()
-        await until(lambda: backend.socket.notes("chat.finished"))
-        (finished,) = backend.socket.notes("chat.finished")
-        assert finished["status"] == "interrupted" and finished["error"]["code"] == "interrupted"
-        assert finished["cursor"] == {"attempt": 0, "seq": 2}
+        await until(lambda: started(backend))
+        before = [n["event"] for n in backend.socket.notes("chat.event")]
+
         restarted = backend.restart()
-        # The frontend that applied the pushed delta reads the outcome right after it.
-        read = await events_read(restarted, session_id, request_id, {"attempt": 0, "seq": 1})
-        assert [(cursor(e), e["kind"], e["status"]) for e in read["result"]["events"]] == [
-            ((0, 2), "finished", "interrupted")
-        ]
-        assert read["result"]["next"] == finished["cursor"] and read["result"]["done"] is True
-        # From the start, the lost delta is a gap the read reports instead of skipping.
-        gap = await events_read(restarted, session_id, request_id)
-        assert code(gap) == "history_unavailable"
+        live = (await events_read(restarted, session_id, request_id))["result"]
+        assert live["events"] == before and live["done"] is False
+        assert [e["kind"] for e in before] == ["reasoning", "text.delta", "tool.started"]
+        gateway.gate.set()
+        await until(lambda: restarted.socket.notes("chat.finished"))
+        after = [n["event"] for n in restarted.socket.notes("chat.event")]
+        read = (await events_read(restarted, session_id, request_id))["result"]
+        assert read["events"] == before + after and read["done"] is True
+        assert [cursor(e) for e in read["events"]] == [(0, n) for n in range(1, 7)]
+        assert [e["kind"] for e in after] == ["tool.completed", "text.delta", "finished"]
+        assert after[-1]["status"] == "completed"
+
+    run(system, scenario)
+    assert [name for name, _ in system[1].calls].count("start") == 1
+
+
+def test_a_run_gone_after_a_full_restart_ends_interrupted_with_its_events_readable(system):
+    async def scenario(backend, gateway, ctx, hermes):
+        session_id = await opened(backend)
+        gateway.script = midway
+        request_id = str(uuid4())
+        params = {"session_id": session_id, "messages": say("hi"), "scope": WORKSPACE}
+        await call(backend, "chat.send", params, request_id=request_id)
+        await until(lambda: started(backend))
+        before = [n["event"] for n in backend.socket.notes("chat.event")]
+        # The whole runtime restarts: Hermes loses the run and its buffer with it.
+        (run_id,) = hermes.runs
+        del hermes.runs[run_id]
+        gateway.restart()
+        restarted = backend.restart()
+        # The reloaded frontend subscribes before the new backend's first await.
+        state = {"resource": "sessions", "id": session_id, "scope": WORKSPACE}
+        await call(restarted, "state.get", state)
+        await until(lambda: restarted.socket.notes("chat.finished"))
+        (finished,) = restarted.socket.notes("chat.finished")
+        assert finished["status"] == "interrupted" and finished["error"]["code"] == "interrupted"
+        assert finished["cursor"] == {"attempt": 0, "seq": 4}
+        read = (await events_read(restarted, session_id, request_id))["result"]
+        assert read["events"][:3] == before and read["done"] is True
+        (outcome,) = [n["event"] for n in restarted.socket.notes("chat.event")]
+        assert read["events"][3] == outcome
+        assert (outcome["kind"], outcome["status"]) == ("finished", "interrupted")
+        assert outcome["error"]["message"]
+        # A frontend that applied the pushed events reads the outcome right after them.
+        tail = await events_read(restarted, session_id, request_id, {"attempt": 0, "seq": 3})
+        assert tail["result"]["events"] == [outcome]
+        assert tail["result"]["next"] == finished["cursor"]
 
     run(system, scenario)
 

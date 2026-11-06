@@ -115,11 +115,18 @@ bundle or validate it, the relay does.
 Each method maps to the same seam and gateway calls as the legacy adapter. The AIDE request id
 is the seam `op_id` or gateway `Idempotency-Key`, so retries need no new tables. The gateway
 forgets a prompt once it is resolved, so an applied `input.respond` is also recorded at the
-seam's `/input-response`, which an identical retry replays. Notifications
-go to the frontends that named a session in the last ten minutes: run output from the gateway's
-resumable run stream (`chat.chunk`, `chat.message`, `chat.finished`) and session changes from
-the seam's event stream (`state.changed`). Coworld sessions without a league have no AIDE scope
-and are not listed.
+seam's `/input-response`, which an identical retry replays. Notifications go to the frontends
+that named a session in the last ten minutes: run output (`chat.event`, `chat.chunk`,
+`chat.message`, `chat.finished`) and session changes from the seam's event stream
+(`state.changed`). Coworld sessions without a league have no AIDE scope and are not listed.
+
+Run progress is durable. One consumer per open request reads the gateway's run stream,
+translates each event to an AIDE `ChatEvent` (consecutive text deltas merge for 250 ms), appends
+it to the workspace store's `request_events` log through the seam (`POST /message-events`), and
+only then pushes it. `chat.events` reads that log alone (`GET /message-events`); the gateway's
+in-memory run buffer only bridges a consumer's restart. Consumers start with the backend and
+resume after their log's last row. A run the gateway lost ends `interrupted` once the seam
+settles it, and its logged events stay readable for as long as the request record.
 
 The normal image smoke checks execute the real packaged adapter against its running
 seam, including the previously accepted-by-the-stub invalid actor field. Real model
