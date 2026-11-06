@@ -545,7 +545,9 @@ def test_ui_action_answer_is_durable_and_steers_the_live_run(seam):
     assert seam.client.answer("ask_1", "yes")["op_id"] == result["op_id"]
     delivered = seam.client.wait_admission(result["op_id"])
     assert delivered["run_id"] == run["run_id"]
-    assert seam.hermes.steered[run["run_id"]] == ["[UI action] answer to ask_1: yes"]
+    assert seam.hermes.steered[run["run_id"]] == [
+        "[UI action] answer to ask_1: yes\nThe question: Submit V-2?"
+    ]
     assert seam.starts() == 1
 
 
@@ -555,7 +557,9 @@ def test_ui_action_answer_starts_a_run_when_none_is_live_and_finds_workspace_ask
     result = seam.client.answer("ask_w", {"choice": "no"})
     assert result["delivered"] == "queued" and result["conversation"] == "coworld:" + COWORLD_ID
     delivered = seam.client.wait_admission(result["op_id"])
-    assert seam.run_input(delivered["run_id"]) == '[UI action] answer to ask_w: {"choice": "no"}'
+    assert seam.run_input(delivered["run_id"]) == (
+        '[UI action] answer to ask_w: {"choice": "no"}\nThe question: Submit V-2?'
+    )
     assert ui_state.get(seam.wstore, "coworld:" + COWORLD_ID)["doc"]["asks"]["ask_w"]["answer"] == {
         "choice": "no"
     }

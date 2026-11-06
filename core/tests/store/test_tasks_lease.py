@@ -8,10 +8,11 @@ from __future__ import annotations
 
 import pytest
 
-from research_core.store import tasks
+from research_core.store import experiments, goals, tasks
 from research_core.store.actors import Actor
 from research_core.store.db import Store
 from research_core.store.errors import LeaseError
+from tests.store.test_experiments import HYPOTHESIS, make_methods
 from tests.store.test_tasks import SHA, claim, make_goal, make_task, make_version
 
 FIRST = Actor.session("api_1761690300_first")
@@ -172,3 +173,43 @@ def test_stale_holder_cannot_complete_after_takeover_and_the_new_holder_can(
     done = _complete(coworld_store, SECOND, held["id"])
     assert done["completed_commit"] == SHA
     assert done["held_by"] == SECOND.id
+
+
+def _experiment(coworld_store, harness, **fields):
+    make_version(coworld_store, harness)
+    return experiments.create(
+        coworld_store,
+        harness,
+        summary="An experiment",
+        hypothesis=HYPOTHESIS,
+        methods=make_methods(),
+        **fields,
+    )
+
+
+def test_claiming_a_task_that_names_an_experiment_makes_its_holder_the_experiments(
+    coworld_store, harness, goal
+):
+    experiment = _experiment(coworld_store, harness)
+    first = make_task(
+        coworld_store, harness, goal, type="improvement", experiment_id=experiment["id"]
+    )
+    claim(coworld_store, FIRST, first["id"], n=1)
+    assert experiments.read(coworld_store, experiment["id"])["task_id"] == 1
+
+
+def test_an_open_task_keeps_its_experiment_from_a_later_claim(coworld_store, harness, goal):
+    experiment = _experiment(coworld_store, harness)
+    fields = {"type": "improvement", "experiment_id": experiment["id"]}
+    first = make_task(coworld_store, harness, goal, **fields)
+    second = make_task(coworld_store, harness, goal, title="second", **fields)
+    claim(coworld_store, FIRST, first["id"], n=1)
+    claim(coworld_store, SECOND, second["id"], n=2)
+    assert experiments.read(coworld_store, experiment["id"])["task_id"] == 1
+
+
+def test_an_experiment_takes_its_goal_from_its_task(coworld_store, harness, goal):
+    task = make_task(coworld_store, harness, goal, type="improvement")
+    experiment = _experiment(coworld_store, harness, task_id=task["id"])
+    assert goals.read(coworld_store, goal)["experiments"]["proposed"] == 1
+    assert experiments.read(coworld_store, experiment["id"])["goal_id"] == goal

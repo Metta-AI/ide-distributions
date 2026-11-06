@@ -120,6 +120,8 @@ def _credits(ctx: TickContext, store: Store, task: dict, waiting: dict) -> str |
     credits = ctx.platform.credits()
     match = NEED.search(waiting.get("detail") or "")
     need = float(match.group(1)) if match else 0.0
+    if credits.max is not None:
+        need = min(need, credits.max)  # the balance can never pass the account's maximum
     if credits.balance <= 0 or credits.balance < need:
         return None
     return f"credits balance {credits.balance:g} covers the need ({need:g})"
@@ -228,11 +230,15 @@ def _user(ctx: TickContext, store: Store, task: dict, waiting: dict) -> str | No
 
 
 def _dependency(ctx: TickContext, store: Store, task: dict, waiting: dict) -> str | None:
-    for ref in task["depends_on"]:
+    """Resolved once the Task in ``ref`` has ended, however it ended: a failed or abandoned one
+    will never complete, so the waiter is told instead of sleeping for good."""
+    ended = []
+    for ref in [waiting["ref"]] if waiting.get("ref") else task["depends_on"]:
         dependency = tasks.read(store, ref)
-        if dependency["status"] != "complete" or dependency["outcome"] == "failed":
+        if dependency["status"] in tasks.OPEN_STATUSES:
             return None
-    return "dependencies complete: " + (", ".join(task["depends_on"]) or "none")
+        ended.append(f"{ref} {dependency['outcome'] or dependency['status']}")
+    return "dependencies ended: " + ", ".join(ended)
 
 
 RESOLVERS: dict[str, Resolver] = {

@@ -5,10 +5,13 @@ from __future__ import annotations
 import os
 import subprocess
 
+import pytest
+
 from research_core.platform.errors import PlatformError
 from research_core.platform.fake import FakePlatform
 from research_core.store import experiments, settings, tasks, versions
 from research_core.store.actors import Actor
+from research_core.store.errors import StoreError
 from research_core.watcher import waits
 from tests.watcher._support import (
     HARNESS,
@@ -62,10 +65,16 @@ def running_experiment(ctx, actor, task_id=None):
     return record
 
 
+ROSTER = [
+    {"player": {"policy_ref": "pv_a"}, "slot": 0},
+    {"player": {"policy_ref": "pv_b"}, "slot": 1},
+]
+
+
 def test_xp_wait_resolves_when_every_request_is_terminal(tmp_path):
     ctx = make_ctx(tmp_path)
     ctx.platform.configure(polls_to_complete=2)
-    body = {"coworld_id": "cow_fake", "roster": [], "num_episodes": 2, "title": "ide:X-1:1:a"}
+    body = {"coworld_id": "cow_fake", "roster": ROSTER, "num_episodes": 2, "title": "ide:X-1:1:a"}
     first = ctx.platform.xp_create(body)
     second = ctx.platform.xp_create({**body, "title": "ide:X-1:2:a"})
     experiment = running_experiment(ctx, HARNESS)
@@ -91,7 +100,9 @@ def test_xp_wait_resolves_when_every_request_is_terminal(tmp_path):
 
 def test_xp_wait_skips_run_updates_the_store_refuses_to_the_watcher(tmp_path):
     ctx = make_ctx(tmp_path)
-    request = ctx.platform.xp_create({"coworld_id": "cow_fake", "roster": [], "num_episodes": 1})
+    request = ctx.platform.xp_create(
+        {"coworld_id": "cow_fake", "roster": ROSTER, "num_episodes": 1}
+    )
     task, session, run_id = working_session(ctx)
     holder = Actor.session(session["id"])
     experiment = running_experiment(ctx, holder, task_id=task["id"])
@@ -105,6 +116,13 @@ def test_xp_wait_skips_run_updates_the_store_refuses_to_the_watcher(tmp_path):
 
     assert report["resolved"][0]["kind"] == "xp" and report["errors"] == []
     assert experiments.read(ctx.store, experiment["id"])["runs"][0]["state"] is None
+
+
+def test_a_need_above_the_accounts_maximum_cannot_sleep_forever(tmp_path):
+    ctx = make_ctx(tmp_path)
+    full = ctx.platform.credits()
+    task, session = waiting(ctx, "credits", f"XP for X-5: need {full.max * 10:g} credits")
+    assert waits.run(ctx)["resolved"][0]["task"] == task["id"]
 
 
 def test_credits_wait_needs_the_balance_the_detail_names(tmp_path):
@@ -234,10 +252,24 @@ def test_dependency_wait_resolves_when_every_dependency_succeeded(tmp_path):
     assert waits.run(ctx)["resolved"] == []
     with ctx.store.tx(HARNESS) as tx:
         tx.execute("UPDATE tasks SET status = 'complete', outcome = 'failed' WHERE id = 1")
-    assert waits.run(ctx)["resolved"] == [], "a failed dependency does not count"
+    assert waits.run(ctx)["resolved"][0]["note"] == "dependencies ended: T-1 failed"
+
+
+def test_a_dependency_wait_names_the_task_it_waits_on(tmp_path):
+    ctx = make_ctx(tmp_path)
+    other = make_task(ctx, title="Theirs")
+    task, session = waiting(ctx, "dependency", "their result", ref=other["id"])
+    assert waits.run(ctx)["resolved"] == []
+    assert not resolved(ctx, task)
     with ctx.store.tx(HARNESS) as tx:
-        tx.execute("UPDATE tasks SET outcome = 'succeeded' WHERE id = 1")
-    assert waits.run(ctx)["resolved"][0]["note"] == "dependencies complete: T-1"
+        tx.execute("UPDATE tasks SET status = 'complete', outcome = 'succeeded' WHERE id = 1")
+    assert waits.run(ctx)["resolved"][0]["note"] == "dependencies ended: T-1 succeeded"
+
+
+def test_a_dependency_wait_on_nothing_is_refused(tmp_path):
+    ctx = make_ctx(tmp_path)
+    with pytest.raises(StoreError, match="dependency wait names the Task"):
+        waiting(ctx, "dependency", "something")
 
 
 def test_platform_errors_are_reported_and_leave_the_wait(tmp_path):

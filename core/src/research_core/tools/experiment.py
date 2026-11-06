@@ -76,7 +76,10 @@ METRIC = a.obj(
         "direction": a.string("Which way is better.", enum=list(experiments.METRIC_DIRECTIONS)),
         "role": a.string("At least one metric is primary.", enum=list(experiments.METRIC_ROLES)),
         "min_effect": {"type": "number", "description": "Primary: the smallest effect worth it."},
-        "tolerance": {"type": "number", "description": "Guardrail: how far it may drop."},
+        "tolerance": {
+            "type": "number",
+            "description": "Guardrail or performance: how far it may drop; none: any drop refutes.",
+        },
     },
     required=("name", "direction", "role"),
     closed=True,
@@ -519,8 +522,9 @@ SPEC = tool(
         name="experiment",
         description=(
             "Experiments: a comparison of Versions whose hypothesis and methods lock at start "
-            "and end in a verdict. xp.request records the runs; close applies the pre-registered "
-            "decision rule to the stored rows, or records an explicit verdict with its reason."
+            "and end in a verdict or are abandoned. xp.request records the runs; close applies "
+            "the pre-registered decision rule to the stored rows, or records an explicit verdict "
+            "with its reason."
         ),
         handler=handle,
         executor="workspace",

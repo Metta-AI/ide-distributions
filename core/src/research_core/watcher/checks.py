@@ -25,8 +25,8 @@ What is checked, each a capability row (``capabilities.mark``):
   ``evaluate`` commands run in a temporary
   worktree of ``main`` (``evaluate`` on downloaded results under ``documents/xp`` when there are
   any, else skipped with "no results to evaluate"), and ``upload``: the mixin's own ``upload``
-  command if it has one, then the starter artifact is sent through ``upload_file_policy`` as the
-  dry run when the platform is the fake or the route was never verified; a real platform whose
+  command if it has one, then the starter artifact is really sent through ``upload_file_policy``
+  when the platform is the fake or the route was never verified; a real platform whose
   upload already passed records "skipped: real upload not attempted" and keeps its mark.
 
 A failed check goes through ``capabilities.report_failure``: the capability is broken and one
@@ -341,10 +341,8 @@ def _upload_check(
         if command_result["ok"] is not True:
             return {**command_result, "name": "upload", "kind": "route"}
         outputs.append(command_result["output"])
-    dry_run = ctx.env.get("IDE_PLATFORM", "real").lower() == "fake" or not _was_ok(
-        ctx.store, "upload"
-    )
-    if not dry_run:
+    send = ctx.env.get("IDE_PLATFORM", "real").lower() == "fake" or not _was_ok(ctx.store, "upload")
+    if not send:
         note = "skipped: real upload not attempted (the route was verified before)"
         return _result("upload", "route", None, note, capability="upload", note=note)
     name = f"{ctx.coworld.coworld_id}-{UPLOAD_NAME_SUFFIX}"

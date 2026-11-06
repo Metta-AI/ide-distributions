@@ -157,6 +157,10 @@ def dirty_files(repo: Path) -> list[str]:
     return [entry[3:] for entry in out.split("\0") if entry]
 
 
+def tracked_files(repo: Path) -> set[str]:
+    return set(filter(None, git(repo, "ls-files", "-z").stdout.split("\0")))
+
+
 def is_clean(repo: Path) -> bool:
     return not dirty_files(repo)
 

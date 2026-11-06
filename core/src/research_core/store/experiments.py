@@ -83,6 +83,9 @@ def create(
         goal_id = _require_record(store, goal_id, kind="goal", field="goal_id", problems=problems)
     if task_id is not None:
         task_id = _require_record(store, task_id, kind="task", field="task_id", problems=problems)
+        if goal_id is None and task_id is not None:
+            # goal.read counts by this column, and its Task says which Goal this serves.
+            goal_id = store.one("SELECT goal_id FROM tasks WHERE id = ?", (task_id,))["goal_id"]
     related_claims = _check_related(
         store, related_claims, kind="claim", field="related_claims", problems=problems
     )

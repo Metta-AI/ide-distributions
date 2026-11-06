@@ -14,6 +14,7 @@ import shutil
 import tarfile
 import time
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -233,6 +234,18 @@ def test_version_create_refuses_dirty_tree(lab):
     assert "uncommitted changes" in result["error"]
     assert sorted(result["context"]["dirty_files"]) == ["notes.md", "policy.json"]
     assert lab.store.one("SELECT COUNT(*) FROM versions")[0] == 0
+
+
+def test_a_tracked_file_beside_the_artifact_is_a_dirty_input():
+    """The artifact's folder holds what the build wrote; a tracked source there is not that."""
+    repo_files = {"policy/strategy.py", "policy/player.bin"}
+    dirty = ["policy/strategy.py", "policy/player.bin", "policy/generated.o", "notes.md"]
+    with (
+        mock.patch.object(gitops, "dirty_files", return_value=dirty),
+        mock.patch.object(gitops, "tracked_files", return_value=repo_files),
+    ):
+        found = version_tool.dirty_files_excluding(Path("."), "policy/player.bin")
+    assert found == ["policy/strategy.py", "notes.md"]
 
 
 def test_version_create_refuses_ignored_inputs(lab):

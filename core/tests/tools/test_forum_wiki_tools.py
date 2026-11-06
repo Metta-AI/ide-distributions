@@ -5,7 +5,9 @@ import pytest
 import research_core.tools.forum_post  # noqa: F401
 import research_core.tools.settings  # noqa: F401
 import research_core.tools.wiki_edit  # noqa: F401
-from research_core.store import notices
+from research_core.store import intents, notices
+from research_core.store.actors import Actor
+from research_core.tools import _writes
 from research_core.tools.base import ToolContext, run_tool
 
 
@@ -143,3 +145,40 @@ def test_wiki_conflict_and_user_identity_notice(call, ctx_factory):
         role="researcher",
     )
     assert denied["ok"] is False
+
+
+def test_wiki_recovery_compares_the_title_too(call, ctx_factory):
+    """An unsent title change is not done just because the body already matches."""
+    args = {"wiki": "w", "page": "p", "body": "v1"}
+    first = call("wiki_edit", {**args, "title": "Old"})
+    assert first["ok"] is True
+    args["base_revision_id"] = base = first["edit"]["revision_id"]
+    ctx = ctx_factory("orchestrator")
+    key = _writes.digest("wiki", "player", "w", "p", "New", base, "v1")
+    intents.begin(ctx.store, Actor.harness(), kind="wiki", key=key)
+    retry = call("wiki_edit", {**args, "title": "New"})
+    assert retry["ok"] is True and "reconciled" not in retry
+    assert ctx.platform().wiki_read("w", "p")["title"] == "New"
+
+
+def test_wiki_recovery_still_tells_the_user(ctx_factory, call, monkeypatch):
+    """A crash after the platform accepted the edit: the retry records and notices it once."""
+    ctx = ctx_factory("orchestrator")
+    env = dict(ctx.env, SOFTMAX_USER_CREDENTIAL="user-token")
+    user_ctx = ToolContext.from_env("orchestrator", env)
+    args = {"wiki": "w", "page": "p", "title": "T", "body": "v1", "identity": "user"}
+
+    def crash(*_args, **_kwargs):
+        raise RuntimeError("crash before the notice")
+
+    with monkeypatch.context() as patch:
+        patch.setattr("research_core.tools._writes.notices.add", crash)
+        assert json.loads(run_tool("wiki_edit", args, user_ctx))["ok"] is False
+    retried = json.loads(run_tool("wiki_edit", args, user_ctx))
+    assert retried["ok"] is True and retried["reconciled"] is True
+    shown = notices.unread(ctx.wstore, limit=50, coworld_id="cow_fake")
+    assert sum("Acted as your User" in n["text"] for n in shown) == 1
+    done = json.loads(run_tool("wiki_edit", args, user_ctx))
+    assert done["reconciled"] is True
+    shown = notices.unread(ctx.wstore, limit=50, coworld_id="cow_fake")
+    assert sum("Acted as your User" in n["text"] for n in shown) == 1
