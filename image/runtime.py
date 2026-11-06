@@ -267,7 +267,8 @@ async def run(stack: AsyncExitStack) -> None:
                     connected=relay_connected,
                 )
             )
-            # The AIDE backend runs beside the legacy connection and gates nothing.
+            # The AIDE backend runs beside the legacy connection and gates nothing; it fails,
+            # restarting the container, once the relay has not bound it for two minutes.
             aide_backend = group.create_task(
                 serve_aide(
                     platform_url=bootstrap.platform_url,

@@ -112,6 +112,14 @@ legacy connection, gates neither readiness nor sleep, and reconnects forever; no
 it until the platform routes a frontend to it. The contract stays in Metta; this image does not
 bundle or validate it, the relay does.
 
+The relay keeps a backend present only while it hears from it, so every bound connection sends
+the relay frame `{"message": {"jsonrpc": "2.0", "method": "aide.heartbeat", "params": {}}}`
+every 10 s. A draining relay pod sends `{"message": aide.reconnect {within_ms}}`; the backend then
+opens a new connection, which carries every push from its binding on. Requests delivered on the
+old connection reply on it, and the old connection closes once they have, or at `within_ms`. A
+backend with no bound connection for 120 s fails, which exits the runtime so the kubelet restarts
+the container.
+
 Each method maps to the same seam and gateway calls as the legacy adapter. The AIDE request id
 is the seam `op_id` or gateway `Idempotency-Key`, so retries need no new tables. The gateway
 forgets a prompt once it is resolved, so an applied `input.respond` is also recorded at the

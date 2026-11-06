@@ -28,6 +28,7 @@ from pydantic import (
     ConfigDict,
     Field,
     JsonValue,
+    TypeAdapter,
     ValidationError,
     model_serializer,
 )
@@ -49,6 +50,9 @@ EMBEDDED_ACTIVE = 1000  # open requests a Session embeds at most
 ERROR_CHARS = 4000  # RequestError.message
 TEXT_CHARS = 65536  # reasoning, interim text and tool arguments in one event
 MERGE_SECONDS = 0.25  # consecutive text deltas share one logged event for this long
+HEARTBEAT_SECONDS = 10  # the relay renews a backend's presence on each heartbeat, for 30 s
+UNBOUND_SECONDS = 120  # without a bound relay connection this long, exit for a restart
+HEARTBEAT = '{"message":{"jsonrpc":"2.0","method":"aide.heartbeat","params":{}}}'
 DEFAULT_CLIENT = {"id": "aide", "kind": "ide"}
 TASK_STATUSES = {
     "proposed": "proposed",
@@ -516,6 +520,25 @@ class Frame(BaseModel):
     frontend_id: UUID
     message: dict[str, JsonValue]
     trace_context: dict[str, str] = Field(default_factory=dict)
+
+
+class Deadline(Closed):
+    within_ms: int = Field(ge=1000)
+
+
+class Reconnect(Closed):
+    jsonrpc: Literal["2.0"]
+    method: Literal["aide.reconnect"]
+    params: Deadline
+
+
+class Handover(Closed):
+    """The relay's own frame, naming no frontend: it closes this connection within the deadline."""
+
+    message: Reconnect
+
+
+RELAY = TypeAdapter(Frame | Handover)
 
 
 class Refusal(Exception):
@@ -1503,7 +1526,36 @@ class Backend:
         for subscription in self.subscribers.values():
             subscription.frontends.discard(frontend_id)
 
-    async def connect(self, url: str, credential: str) -> None:
+    async def heartbeat(self, socket: ClientConnection) -> None:
+        """Renew this connection's relay presence while it lasts."""
+        try:
+            while True:
+                await socket.send(HEARTBEAT)
+                await asyncio.sleep(HEARTBEAT_SECONDS)
+        except ConnectionClosed:  # the read loop reports the connection's end
+            return
+
+    async def retire(
+        self,
+        socket: ClientConnection,
+        successor: asyncio.Event,
+        answers: set[asyncio.Task[None]],
+        within_ms: int,
+    ) -> None:
+        """Close a connection the relay drains once its successor is bound and the requests it
+        delivered have replied on it, and by the relay's deadline at the latest."""
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + within_ms / 1000
+        bound = asyncio.create_task(successor.wait())
+        await asyncio.wait([bound], timeout=within_ms / 1000)
+        bound.cancel()
+        if answers:
+            await asyncio.wait(set(answers), timeout=deadline - loop.time())
+        await socket.close()
+
+    async def connect(self, url: str, credential: str, previous: asyncio.Event) -> bool:
+        """Hold one relay connection; once bound, it carries every push and ``previous`` may
+        close. True when it ended handed over to a successor."""
         async with connect(
             url,
             additional_headers={"Authorization": f"Bearer {credential}"},
@@ -1512,20 +1564,59 @@ class Backend:
         ) as socket:
             Bound.model_validate_json(await socket.recv())
             self.socket = socket
+            previous.set()
+            successor, answers, handed_over = asyncio.Event(), set(), False
+            async with asyncio.TaskGroup() as replies:
+                heartbeat = replies.create_task(self.heartbeat(socket))
+                try:
+                    async for raw in socket:
+                        frame = RELAY.validate_json(raw)
+                        if isinstance(frame, Handover):
+                            if not handed_over:
+                                handed_over = True
+                                self.work.create_task(self.run(url, credential, successor))
+                                within_ms = frame.message.params.within_ms
+                                replies.create_task(
+                                    self.retire(socket, successor, answers, within_ms)
+                                )
+                        # This backend sends no reverse requests, so no replies arrive.
+                        elif frame.message.get("method") == "frontend.closed":
+                            self.closed(frame.frontend_id)
+                        elif "method" in frame.message and "id" in frame.message:
+                            answer = replies.create_task(self.answer(socket, frame))
+                            answers.add(answer)
+                            answer.add_done_callback(answers.discard)
+                except ConnectionClosed:  # superseded or expired; in-flight commands finish
+                    log.info("AIDE relay closed the connection")
+                finally:
+                    heartbeat.cancel()
+                    if self.socket is socket:  # a successor may already carry the pushes
+                        self.socket = None
+        return handed_over
+
+    async def run(self, url: str, credential: str, previous: asyncio.Event) -> None:
+        """Hold the platform's AIDE backend socket until a successor takes it over; failures
+        only delay reconnection."""
+        delay = 1
+        while True:
+            started = time.monotonic()
             try:
-                async with asyncio.TaskGroup() as replies:
-                    try:
-                        async for raw in socket:
-                            frame = Frame.model_validate_json(raw)
-                            # This backend sends no reverse requests, so no replies arrive.
-                            if frame.message.get("method") == "frontend.closed":
-                                self.closed(frame.frontend_id)
-                            elif "method" in frame.message and "id" in frame.message:
-                                replies.create_task(self.answer(socket, frame))
-                    except ConnectionClosed:  # superseded or expired; in-flight commands finish
-                        log.info("AIDE relay closed the connection")
-            finally:
-                self.socket = None
+                if await self.connect(url, credential, previous):
+                    return
+            except (ConnectionClosed, InvalidHandshake, OSError) as error:  # retry forever
+                log.info("AIDE relay connection ended: %s", type(error).__name__)
+            delay = 1 if time.monotonic() - started > 60 else min(delay * 2, 30)
+            await asyncio.sleep(delay)
+
+    async def heal(self) -> None:
+        """Only a restart recovers a backend the relay never binds: fail once unbound too long."""
+        since = time.monotonic()
+        while True:
+            await asyncio.sleep(1)
+            if self.socket is not None:
+                since = time.monotonic()
+            elif time.monotonic() - since > UNBOUND_SECONDS:
+                raise RuntimeError(f"No bound AIDE relay connection for {UNBOUND_SECONDS} s")
 
 
 async def serve(
@@ -1536,7 +1627,8 @@ async def serve(
     env: dict[str, str],
     inference: Availability,
 ) -> None:
-    """Hold the platform's AIDE backend socket forever; failures only delay reconnection."""
+    """Hold the platform's AIDE backend socket, handing it over when the relay asks; fails once
+    no connection has been bound for ``UNBOUND_SECONDS``."""
     url = f"{platform_url.rstrip('/')}/v2/workspaces/{workspace_id}/aide/1.0.0/backend"
     url = "ws" + url.removeprefix("http")
     async with (
@@ -1549,12 +1641,5 @@ async def serve(
     ):
         backend = Backend(seam, gateway, inference, work)
         work.create_task(backend.watch())
-        delay = 1
-        while True:
-            started = time.monotonic()
-            try:
-                await backend.connect(url, credential)
-            except (ConnectionClosed, InvalidHandshake, OSError) as error:  # retry forever
-                log.info("AIDE relay connection ended: %s", type(error).__name__)
-            delay = 1 if time.monotonic() - started > 60 else min(delay * 2, 30)
-            await asyncio.sleep(delay)
+        work.create_task(backend.heal())
+        work.create_task(backend.run(url, credential, asyncio.Event()))

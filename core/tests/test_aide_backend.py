@@ -1135,3 +1135,131 @@ def test_relay_failures_reconnect_without_touching_the_legacy_connection():
             control.cancel()
 
     asyncio.run(main())
+
+
+def test_a_relay_handover_binds_the_new_connection_before_closing_the_old(monkeypatch):
+    from websockets.asyncio.server import serve as websocket_server
+
+    monkeypatch.setattr(aide, "HEARTBEAT_SECONDS", 0.05)
+    binding = {"backend_id": str(uuid4()), "version": "1.0.0", "max_message_bytes": 1048576}
+    reconnect = {"jsonrpc": "2.0", "method": "aide.reconnect"}
+
+    def request(request_id):
+        message = {"jsonrpc": "2.0", "id": request_id, "method": "session.open"}
+        message["params"] = {"scope": WORKSPACE}
+        return json.dumps({"frontend_id": str(FRONTEND), "message": message})
+
+    async def main():
+        sockets, frames, timeline = [], [], []
+        entered, release = asyncio.Event(), asyncio.Event()
+
+        async def platform(socket):
+            index = len(sockets)
+            sockets.append(socket)
+            frames.append([])
+            await socket.send(json.dumps({"binding": binding}))
+            timeline.append(("bound", index))
+            async for raw in socket:
+                frames[index].append(json.loads(raw))
+            timeline.append(("closed", index))
+
+        def replies(index, request_id):
+            return [f for f in frames[index] if f.get("message", {}).get("id") == request_id]
+
+        async with (
+            websocket_server(
+                platform, "127.0.0.1", 0, select_subprotocol=lambda _, offered: offered[0]
+            ) as server,
+            httpx.AsyncClient() as unused,
+        ):
+            url = f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}/backend"
+            started = asyncio.get_running_loop().create_future()
+
+            async def held(frontend_id, request_id, params):
+                entered.set()
+                await release.wait()
+                return {"held": request_id}
+
+            async def hold():
+                async with asyncio.TaskGroup() as work:
+                    backend = aide.Backend(unused, unused, Availability(), work)
+                    backend.open = held
+                    relay = work.create_task(backend.run(url, "proof", asyncio.Event()))
+                    started.set_result((backend, relay))
+                    await asyncio.Future()
+
+            holder = asyncio.create_task(hold())
+            backend, relay = await started
+            try:
+                async with asyncio.timeout(10):
+                    # Each bound connection renews its presence with the relay's heartbeat.
+                    await until(lambda: frames and len(frames[0]) >= 2)
+                    assert frames[0][0] == json.loads(aide.HEARTBEAT)
+                    assert all(frame == frames[0][0] for frame in frames[0])
+
+                    await sockets[0].send(request("old"))
+                    await entered.wait()
+                    params = {"within_ms": 5000}
+                    await sockets[0].send(json.dumps({"message": {**reconnect, "params": params}}))
+                    await until(lambda: ("bound", 1) in timeline)
+                    assert ("closed", 0) not in timeline
+                    await until(lambda: frames[1])  # the new connection heartbeats too
+
+                    # Pushes follow the new binding while the old connection drains.
+                    backend.touch("s1", aide.Scope(**WORKSPACE), FRONTEND)
+                    await backend.notify("s1", "state.changed", {"proof": 1})
+                    await until(lambda: any("frontend_id" in frame for frame in frames[1]))
+                    assert all("frontend_id" not in frame for frame in frames[0])
+
+                    # The request in flight on the old connection replies there, then it closes.
+                    release.set()
+                    await until(lambda: ("closed", 0) in timeline)
+                    assert replies(0, "old")[0]["message"]["result"] == {"held": "old"}
+                    assert timeline.index(("bound", 1)) < timeline.index(("closed", 0))
+                    await until(relay.done)  # the old connection's loop ends with it
+                    assert relay.result() is None
+
+                    # A request that never settles holds its connection only until the deadline.
+                    entered.clear()
+                    release.clear()
+                    await sockets[1].send(request("stuck"))
+                    await entered.wait()
+                    params = {"within_ms": 1000}
+                    await sockets[1].send(json.dumps({"message": {**reconnect, "params": params}}))
+                    noticed = asyncio.get_running_loop().time()
+                    await until(lambda: ("closed", 1) in timeline)
+                    assert asyncio.get_running_loop().time() - noticed < 2
+                    assert timeline.index(("bound", 2)) < timeline.index(("closed", 1))
+                    assert not replies(1, "stuck") and backend.socket is not None
+            finally:
+                holder.cancel()
+                await asyncio.wait([holder])
+
+    asyncio.run(main())
+
+
+def test_a_backend_the_relay_never_binds_fails_for_a_restart(monkeypatch):
+    from websockets.asyncio.server import serve as websocket_server
+
+    monkeypatch.setattr(aide, "UNBOUND_SECONDS", 0.5)
+
+    async def main():
+        async def platform(socket):  # accepts the socket and never binds it
+            await socket.wait_closed()
+
+        async with websocket_server(
+            platform, "127.0.0.1", 0, select_subprotocol=lambda _, offered: offered[0]
+        ) as server:
+            url = f"http://127.0.0.1:{server.sockets[0].getsockname()[1]}"
+            async with asyncio.timeout(10):
+                await aide.serve(
+                    platform_url=url,
+                    workspace_id="w",
+                    credential="proof",
+                    env={"API_SERVER_KEY": "proof"},
+                    inference=Availability(),
+                )
+
+    with pytest.raises(ExceptionGroup) as failure:
+        asyncio.run(main())
+    assert failure.group_contains(RuntimeError, match="No bound AIDE relay connection")
