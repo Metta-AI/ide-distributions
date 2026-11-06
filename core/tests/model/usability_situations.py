@@ -823,7 +823,7 @@ CREDITS_REFUSAL = json.dumps(
     {
         "ok": False,
         "error": "credits refused: not enough credits",
-        "credits_refused": {"balance": 4.0, "held": 36.0, "next_refill_at": "2026-11-05T00:00:00Z"},
+        "credits_refused": {"balance": 0.0, "held": 36.0, "next_refill_at": "2026-11-05T00:00:00Z"},
         "experiment": "X-5",
         "created": [],
         "reconciled": [],

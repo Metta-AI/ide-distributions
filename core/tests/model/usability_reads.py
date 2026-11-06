@@ -1090,7 +1090,7 @@ def _episode(episode_id: str, seed: int, policy_version_id: str) -> dict:
 def platform_credits(situation: Situation) -> dict:
     low = situation.id in LOW_CREDITS
     return {
-        "balance": 4.0 if low else 840.0,
+        "balance": 0.0 if low else 840.0,
         "max": 1000.0,
         "refill_amount": 1000.0,
         "next_refill_at": "2026-11-05T00:00:00Z",
@@ -1432,6 +1432,8 @@ def result(
     answer = ACTIONS[label](situation, args or {})
     if label in ("version.read", "version.list"):
         evaluated = situation.x5 in X5_EVALUATED and "upload" not in situation.acts
+        # xp.request checks uploads before it asks the platform, so a credit refusal means uploaded.
+        evaluated = evaluated or situation.id in LOW_CREDITS
         _show_uploads(answer, [*uploaded, "V-12"] if evaluated else uploaded)
     if label not in BUILTINS:
         answer.setdefault("ok", True)
