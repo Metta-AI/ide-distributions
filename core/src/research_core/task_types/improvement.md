@@ -52,7 +52,7 @@ Work, in order:
    `experiment.start`; they lock.
 2. Make the change in your worktree, commit, `version.create {summary, task, experiment}`, then
    `upload {version}`.
-3. `xp.request {experiment, candidate, baseline, seeds, episodes, opponents}`, then `task_wait
+3. `xp.request {experiment, candidate, baseline, seeds, episodes, opponents}` (a credits refusal is `task_wait {task, kind: credits, detail}` at once, not a failed Task), then `task_wait
    {task, kind: "xp", detail, ref: [<request ids>]}` and END YOUR RUN. On resume
    `xp.status {experiment}` stores the rows.
 4. `experiment.close {experiment}` applies the rule: confirmed, refuted or inconclusive. Record

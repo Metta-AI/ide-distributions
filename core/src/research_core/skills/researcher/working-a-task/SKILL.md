@@ -65,7 +65,7 @@ again. `commit` is the commit on your branch to merge; `merge: no` needs `merge_
 is two or three sentences the Orchestrator reads first.
 
 `task.complete {task, outcome: "failed", failure: {what_failed, next_step, error, exit_code,
-tried}}` when the Task cannot succeed; the type's instructions show a good one. Fill `tried` so
+tried}}` when the Task cannot succeed. Fill `tried` so
 nobody repeats it.
 
 `task_release {task, reason}` when you must not continue, as when a directive forbids the only

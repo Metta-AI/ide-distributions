@@ -28,7 +28,7 @@ Write the finding as claims (`writing-claims`): a `measurement` evidence link to
 ## Footguns
 
 - **Taint before means.** Drop invalid (tainted) episodes at the episode level before computing anything and report the share dropped, the taint rate; counting a crash as a score fabricates a regression.
-- **A survey is not a verdict.** Comparing this batch with an older one is confounded by field drift; when the question becomes "is V-7 better than V-5", stop and run an Experiment.
+- **A survey is not a verdict.** Comparing this batch with an older one is confounded by field drift; when the question becomes "is V-7 better than V-5", stop: `experiment.search` for one that answers it, else run an Experiment.
 - **Small batches are directional only.** Say so. Noise is a first-class finding.
 - **Generic reasons are worse than none**; they teach the reader to ignore the list.
 - **Missing binding.** Without the mixin's survey knowledge, do a scores-only overview (win rate, score, taint rate), say the result is weaker and propose a maintenance Task to write the binding.
