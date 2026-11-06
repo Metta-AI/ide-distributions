@@ -860,6 +860,7 @@ def _league(row: coworld_api.LeaguePublic) -> League:
         game_id=row.game.id,
         coworld_id=row.game.coworld_id,
         coworld_name=row.game.coworld_name,
+        default_variant_id=(row.commissioner_config or {}).get("default_variant_id"),
         participation_url=row.participation_url,
         forum_markdown_url=row.forum_markdown_url,
         wiki_markdown_url=row.wiki_markdown_url,

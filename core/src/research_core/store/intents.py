@@ -53,11 +53,13 @@ def begin(
     key: str,
     subject: str | None = None,
     request: dict[str, Any] | None = None,
+    renew_request: bool = False,
 ) -> dict[str, Any]:
     """Record the intent to act; returns the row with ``existing`` and ``retried`` flags.
 
     ``request`` (the action's exact inputs) is saved on a new row and kept on a retried one that
-    has none yet; a row that already saved its inputs keeps them.
+    has none yet; a row that already saved its inputs keeps them, unless ``renew_request``: the
+    platform refused those inputs, so a retry sends the new ones.
     """
     problems: list[str] = []
     require(problems, kind in INTENT_KINDS, f"kind is one of {', '.join(INTENT_KINDS)}")
@@ -86,7 +88,7 @@ def begin(
             return {**record, "existing": False, "retried": False}
         if row["state"] != "failed":
             return {**_record_from(row), "existing": True, "retried": False}
-        record = _new_attempt(tx, row, _answer(row), request=request)
+        record = _new_attempt(tx, row, _answer(row), request=request, renew=renew_request)
         return {**record, "existing": True, "retried": True}
 
 
@@ -184,12 +186,16 @@ def _record_from(row: Any) -> dict[str, Any]:
 
 
 def _new_attempt(
-    tx: Tx, row: Any, answer: dict[str, Any], request: dict[str, Any] | None = None
+    tx: Tx,
+    row: Any,
+    answer: dict[str, Any],
+    request: dict[str, Any] | None = None,
+    renew: bool = False,
 ) -> dict[str, Any]:
     """Back to ``pending`` as the next attempt; ``answer`` is what the earlier one came to."""
     stored: dict[str, Any] = {FAILURES_KEY: _failures(row) + [answer]}
     saved = _request(row)
-    if saved is None:
+    if saved is None or renew:
         saved = request
     if saved is not None:
         stored[REQUEST_KEY] = saved

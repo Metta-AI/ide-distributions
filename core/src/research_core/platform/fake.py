@@ -9,7 +9,8 @@ Shapes follow :mod:`research_core.platform.protocol`. A submission is ``pending`
 next ``submissions``/``memberships`` read after ``polls_to_complete`` polls, then ``placed``;
 its membership goes ``pending`` -> ``competing`` and, with ``auto_champion="always"``,
 becomes the Player's champion in that league. An XP request is ``pending`` before its first
-``xp_get``, ``running`` until ``polls_to_complete`` polls, then ``completed``.
+``xp_get``, ``running`` until ``polls_to_complete`` polls, then ``completed``. The game seats
+:data:`FAKE_GAME_SEATS`, and ``xp_create`` refuses the rosters the real route refuses.
 
 Seeded metrics (the research lever the fake research cycle measures). A ``policy.json`` upload
 with ``{"parameters": {"aggression": a, "patience": p}}`` plays by those parameters; any other
@@ -100,6 +101,7 @@ COWORLD_VERSIONS = {
 }
 GAME_ID = "game_fake"
 LEAGUE_ID = "league_fake"
+FAKE_GAME_SEATS = 2
 LEAGUE_NAME = "Fake League"
 DIVISION_ID = "div_fake"
 DIVISION_NAME = "Fake Division"
@@ -171,16 +173,41 @@ def _league_metrics(policy: str, seed: int) -> dict:
 
 
 def _roster(body: dict) -> tuple[str | None, list[int]]:
-    """Our policy (the first fixed roster entry) and the roster's seat slots, in order."""
-    policy = None
-    slots: list[int] = []
-    for entry in body.get("roster") or []:
-        ref = entry.get("policy_version_id") or (entry.get("player") or {}).get("policy_ref")
-        if ref and policy is None:
-            policy = str(ref)
-        if entry.get("slot", -1) >= 0:
-            slots.append(int(entry["slot"]))
-    return policy or body.get("policy_version_id"), sorted(slots) or [0]
+    """Our policy (the first roster entry) and the seats it sits in, in order."""
+    roster = body["roster"]
+    policy = roster[0]["player"].get("policy_ref")
+    slots = [entry["slot"] for entry in roster if entry["player"].get("policy_ref") == policy]
+    return policy, sorted(slots)
+
+
+def _refuse_create(body: dict) -> None:
+    """Refuse what ``POST /v2/experience-requests`` refuses (metta's experience_requests service).
+
+    The roster's length is the player count and nothing adds seats; a league target picks the
+    Coworld itself; only sampled seats need a league.
+    """
+    route = "POST /v2/experience-requests"
+    league_id = (body.get("target") or {}).get("league_id")
+
+    def refuse(detail: str, status: int = 400) -> PlatformError:
+        return PlatformError(detail, route=route, status=status)
+
+    if league_id and body.get("coworld_id"):
+        raise refuse("coworld_id cannot be supplied with league or division target selectors")
+    if not league_id and not body.get("coworld_id"):
+        raise refuse("coworld_id or target is required")
+    roster = body.get("roster") or []
+    for entry in roster:
+        kinds = [key for key, value in entry.get("player", {}).items() if value]
+        if len(kinds) != 1 or kinds[0] not in ("policy_ref", "top_n", "random"):
+            raise refuse("player must set exactly one of policy_ref, top_n or random", 422)
+        if kinds[0] != "policy_ref" and not league_id:
+            raise refuse("top_n and random roster participants require a league target")
+    if len(roster) != FAKE_GAME_SEATS:
+        raise refuse(f"game_config is invalid at tokens: this game seats {FAKE_GAME_SEATS}")
+    pinned = [entry.get("slot", -1) for entry in roster if entry.get("slot", -1) != -1]
+    if len(set(pinned)) != len(pinned) or any(slot >= len(roster) for slot in pinned):
+        raise refuse("roster slots must be unique and within the player count")
 
 
 class FakePlatform:
@@ -829,6 +856,7 @@ class FakePlatform:
     def xp_create(self, body: dict) -> XpRequest:
         route = "POST /v2/experience-requests"
         self._require_identity("player", route)
+        _refuse_create(body)
         policy, slots = _roster(body)
         title = body.get("title")
 
@@ -1054,13 +1082,26 @@ class FakePlatform:
             "name": name,
             "version": version,
             "manifest": {
+                "variants": [{"id": "default", "name": "Default", "game_config": {}}],
                 "game": {
+                    "config_schema": {
+                        "type": "object",
+                        "required": ["tokens"],
+                        "properties": {
+                            "tokens": {
+                                "type": "array",
+                                "items": {"type": "string"},
+                                "minItems": FAKE_GAME_SEATS,
+                                "maxItems": FAKE_GAME_SEATS,
+                            }
+                        },
+                    },
                     "player_runtime": "game-hosted",
                     "runnable": {
                         "source_url": self._source_url_env or state["source_url"],
                         "commit": state["source_commit"],
                     },
-                }
+                },
             },
         }
 
@@ -1235,7 +1276,9 @@ class FakePlatform:
             row = state["wiki"].get(wiki, {}).get(page)
             if row is None:
                 raise self._not_found(f"GET /v2/wikis/{wiki}/pages/{page}")
-            return self._page_view(wiki, page, row)
+            # The platform nests the current text under its revision.
+            current = {"id": row["revision_id"], "body": row["body"]}
+            return {**self._page_view(wiki, page, row), "current_revision": current}
 
         return self._operate("wiki_read", action, persist=False)
 

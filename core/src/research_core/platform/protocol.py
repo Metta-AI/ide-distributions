@@ -50,6 +50,7 @@ class League:
     game_id: str | None = None
     coworld_id: str | None = None  # the Coworld version the league runs
     coworld_name: str | None = None  # the same in every version of the Coworld
+    default_variant_id: str | None = None  # None: the manifest's first variant
     participation_url: str | None = None
     forum_markdown_url: str | None = None
     wiki_markdown_url: str | None = None

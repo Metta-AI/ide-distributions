@@ -35,7 +35,10 @@ def make(tmp_path: Path, faults: str = "", **env: str) -> FakePlatform:
 def xp_body(policy_version_id: str, seed: int | None, *, title: str | None = None) -> dict:
     body = {
         "coworld_id": fake.COWORLD_ID,
-        "roster": [{"player": {"policy_ref": policy_version_id}, "slot": 0}],
+        "roster": [
+            {"player": {"policy_ref": policy_version_id}, "slot": 0},
+            {"player": {"policy_ref": "pv_house"}, "slot": 1},
+        ],
         "num_episodes": 2,
     }
     if seed is not None:
@@ -699,3 +702,51 @@ def test_fakegame_build_check_and_evaluate(tmp_path):
 def test_fakegame_repo_variant_declares_another_coworld(tmp_path):
     repo, _ = make_fakegame_repo(tmp_path, coworld_id="cow_other")
     assert front_matter((repo / "MIXIN.md").read_text())["coworld"] == "cow_other"
+
+
+@pytest.mark.parametrize(
+    ("change", "detail"),
+    [
+        ({"target": {"league_id": fake.LEAGUE_ID}}, "coworld_id cannot be supplied"),
+        ({"coworld_id": None}, "coworld_id or target is required"),
+        ({"roster": [{"player": {"policy_ref": "pv"}, "slot": 0}]}, "this game seats 2"),
+        (
+            {"roster": [{"player": {"policy_ref": "a"}, "slot": 0}, {"player": {"random": True}}]},
+            "require a league target",
+        ),
+        (
+            {
+                "roster": [
+                    {"player": {"policy_ref": "a"}},
+                    {"player": {"policy_ref": "b", "top_n": 3}},
+                ]
+            },
+            "exactly one of",
+        ),
+        (
+            {
+                "roster": [
+                    {"player": {"policy_ref": "a"}, "slot": 2},
+                    {"player": {"policy_ref": "b"}},
+                ]
+            },
+            "within the player count",
+        ),
+    ],
+)
+def test_xp_create_refuses_what_the_platform_refuses(tmp_path, change, detail):
+    platform = make(tmp_path)
+    with pytest.raises(PlatformError, match=detail) as refused:
+        platform.xp_create({**xp_body("pv", 1), **change})
+    assert refused.value.retryable is False
+    assert platform.snapshot()["counts"]["xp_create"] == 0
+
+
+def test_xp_create_samples_a_league_seat_for_the_field(tmp_path):
+    platform = make(tmp_path)
+    roster = [{"player": {"policy_ref": "pv"}, "slot": 0}, {"player": {"random": True}, "slot": -1}]
+    body = {"target": {"league_id": fake.LEAGUE_ID}, "roster": roster, "num_episodes": 1}
+    request = platform.xp_create(body)
+    assert request.coworld_id == fake.COWORLD_ID
+    (row,) = platform.snapshot()["xp"].values()
+    assert (row["policy"], row["slots"]) == ("pv", [0])

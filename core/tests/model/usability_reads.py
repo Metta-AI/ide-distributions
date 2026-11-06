@@ -1002,6 +1002,7 @@ def _league_row(league_id: str = LEAGUE) -> dict:
         "game_id": "game_cogs",
         "coworld_id": usability_context.COWORLD,
         "coworld_name": "cogs",
+        "default_variant_id": None,
         "participation_url": f"https://softmax.com/participate?league_id={league_id}",
         "forum_markdown_url": f"https://softmax.com/v2/forums/{league_id}.md",
         "wiki_markdown_url": f"https://softmax.com/v2/wikis/{league_id}/pages.md",
@@ -1243,7 +1244,12 @@ PLATFORM: dict[str, Callable[[Situation, dict], dict]] = {
         "slug": a.get("slug"),
         "hits": [{"post": _post(), "rank": 1.0}] if _matches(a["query"], "scouting scout") else [],
     },
-    "wiki_read": lambda s, a: {"page": _wiki_page(str(a["wiki"]), str(a["page"]))},
+    "wiki_read": lambda s, a: {
+        "page": {
+            **(page := _wiki_page(str(a["wiki"]), str(a["page"]))),
+            "current_revision": {"id": page["revision_id"], "body": page["body"]},
+        }
+    },
     "wiki_search": lambda s, a: {
         "wiki": a["wiki"],
         "query": a["query"],

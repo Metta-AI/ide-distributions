@@ -1,8 +1,9 @@
 """The ``xp`` tool (design C.2, B.8, B.13; amendments A3.2, A3.9, A4.1, A4.2, A4.4).
 
 ``request`` creates one experience request per (seed, arm) for a running Experiment and
-records each as a run the moment the platform accepts it. ``status`` refreshes the runs,
-downloads the results of completed requests, runs the mixin's ``evaluate`` command on them
+records each as a run the moment the platform accepts it. The roster sets the player count, so
+``_open_seats`` checks it against the game's manifest before any request is sent. ``status``
+refreshes the runs, downloads the results of completed requests, runs the mixin's ``evaluate`` command on them
 and stores the per-seat rows on the run, in the results-row contract the ``experiment`` tool
 closes on (``tools/experiment.py``: ``results.rows`` objects with ``episode_id``,
 ``game_version``, ``policy_version`` as the Version's record id, ``seed``, ``seats``,
@@ -28,7 +29,8 @@ A platform error that outlives the retries becomes a refusal through ``platform/
 ``evaluate`` runs through ``mixin.run_command`` with the A3.2 budget: a command that outlives
 it keeps running and the result carries ``background.resume``; ``status {resume: <token>}``
 finishes the work when the process is done. A failed or non-conforming ``evaluate`` marks the
-run ``invalid`` and reports the ``evaluate`` capability (A4.1). The evaluate command runs in
+run ``invalid`` and reports the ``evaluate`` capability (A4.1), and the next ``status`` tries it
+again: the episodes were fine, so the Experiment waits for the repair. The evaluate command runs in
 the code repository root with ``XP_RESULTS`` naming the folder of downloaded results.
 
 Stdlib at import time (the plugin imports the catalog); PyYAML loads inside ``mixin.load`` in
@@ -39,6 +41,7 @@ from __future__ import annotations
 
 import json
 import os
+import time
 from dataclasses import asdict
 from functools import partial
 from pathlib import Path
@@ -68,6 +71,10 @@ TERMINAL_STATES = ("completed", "failed", "cancelled")
 RUN_KIND = "xp"
 # A3.2: the budget an evaluate command gets before it is left running in the background.
 EVALUATE_BUDGET_S = mixin_module.DEFAULT_BUDGET_S
+# All of one status call's evaluates share this, so the call returns under the tool's own deadline
+# (plugin/executor.py's TOOL_TIMEOUT_S) rather than being killed with a command still running.
+STATUS_BUDGET_S = 330
+EVALUATE_FAILED = "invalid: evaluate"
 RESULTS_ENV = "XP_RESULTS"
 CREATE_ROUTE = "POST /v2/experience-requests"
 
@@ -108,6 +115,7 @@ def handle_request(call: ToolCall) -> dict:
         )
 
     coworld_id = ctx.coworld().coworld_id
+    open_seats = _open_seats(ctx, platform, plan) if new_pairs else 0
     created: list[str] = []
     reconciled: list[str] = []
     for seed, arm in plan["pairs"]:
@@ -120,6 +128,7 @@ def handle_request(call: ToolCall) -> dict:
             title=title,
             league_id=plan["league"],
             opponents=plan["opponents"],
+            open_seats=open_seats,
         )
         body["idempotency_key"] = str(uuid4())
         intent = intents.begin(
@@ -129,6 +138,7 @@ def handle_request(call: ToolCall) -> dict:
             key=f"X-{n}:{seed}:{arm}",
             subject=record["id"],
             request=body,
+            renew_request=True,
         )
         intent_n = parse_display_id(intent["id"])[1]
         run = _run_for(existing_runs, seed, arm)
@@ -146,6 +156,9 @@ def handle_request(call: ToolCall) -> dict:
                 intents.finish(store, actor, intent_n, state="failed", result=error.to_dict())
                 return _credits_refused(ctx, record, error, created, reconciled, plan)
             except PlatformError as error:
+                if not error.retryable:
+                    # Refused, so nothing was created: the next call sends its own body, not this.
+                    intents.finish(store, actor, intent_n, state="failed", result=error.to_dict())
                 refusal = wait.tool_error(ctx, CREATE_ROUTE, error)
                 refusal.context.update(created=created, reconciled=reconciled)
                 raise refusal from error
@@ -175,6 +188,37 @@ def handle_request(call: ToolCall) -> dict:
         "warnings": warnings,
         "next": _next_after_request(ctx, record, ids),
     }
+
+
+def _open_seats(ctx: ToolContext, platform: Platform, plan: dict) -> int:
+    """The seats a league fills. The roster's length sets the player count, so a roster the game
+    would refuse, or a lone seat nobody asked for, is refused here before it can spend credits.
+    """
+    league_id, opponents = plan["league"], plan["opponents"]
+    coworld_id, variant_id = ctx.coworld().coworld_id, None
+    if league_id is not None:
+        league = wait.call_platform(
+            ctx, f"GET /v2/leagues/{league_id}", lambda: platform.league(league_id)
+        )
+        coworld_id, variant_id = league.coworld_id, league.default_variant_id
+    row = wait.call_platform(
+        ctx, f"GET /v2/coworlds/{coworld_id}", lambda: platform.coworld_manifest(coworld_id)
+    )
+    seats = xp_module.seats_for(row["manifest"], variant_id)
+    pinned = 1 + len(opponents or ())
+    if league_id is not None and pinned < (seats.exact or 0):
+        return seats.exact - pinned
+    required = f"{seats.exact}" if seats.exact else f"{seats.low} to {seats.high}"
+    wrong = pinned != seats.exact if seats.exact else not seats.low <= pinned <= seats.high
+    if wrong or (opponents is None and seats.high > 1):
+        raise ToolError(
+            f"this game seats {required} and the roster has {pinned}; the roster sets the player"
+            " count. Pin the other seats with opponents"
+            + (", or name a league to fill them" if seats.exact and league_id is None else ""),
+            seats=required,
+            roster=pinned,
+        )
+    return 0
 
 
 def _plan(call: ToolCall, record: dict) -> dict:
@@ -439,15 +483,22 @@ def handle_status(call: ToolCall) -> dict:
     if record["status"] != "running":
         return _report(record, note=f"{record['id']} is {record['status']}; its runs are final")
     wanted = call.get("request")
+    deadline = time.monotonic() + STATUS_BUDGET_S
+    out_of_time = False
     for run in _xp_runs(store, n):
         if wanted and run["platform_request_id"] != wanted:
             continue
         run = _refresh(ctx, record, run)
-        if _needs_evaluate(run):
-            background = _evaluate(ctx, record, run)
+        if _needs_evaluate(run) and not out_of_time:
+            remaining = deadline - time.monotonic()
+            out_of_time = remaining <= 0
+            if out_of_time:
+                continue
+            background = _evaluate(ctx, record, run, min(remaining, EVALUATE_BUDGET_S))
             if background is not None:
                 return background
-    return _report(experiments.read(store, n))
+    note = "this call's time ran out; xp.status again evaluates the rest" if out_of_time else None
+    return _report(experiments.read(store, n), note=note)
 
 
 def _experiment_of_request(ctx: ToolContext, request_id: str) -> int:
@@ -483,12 +534,18 @@ def _refresh(ctx: ToolContext, record: dict, run: dict) -> dict:
     )
 
 
+def _evaluate_failed(run: dict) -> bool:
+    """The results are fine and our evaluate was not: repairing it makes the run good again."""
+    return run["validity"].startswith(EVALUATE_FAILED)
+
+
 def _needs_evaluate(run: dict) -> bool:
     results = run.get("results") or {}
-    return run["state"] == "completed" and run["validity"] == "valid" and "rows" not in results
+    eligible = run["validity"] == "valid" or _evaluate_failed(run)
+    return run["state"] == "completed" and eligible and "rows" not in results
 
 
-def _evaluate(ctx: ToolContext, record: dict, run: dict) -> dict | None:
+def _evaluate(ctx: ToolContext, record: dict, run: dict, budget_s: float) -> dict | None:
     """Download the results, run ``evaluate`` on them; the background result when it outlives
     the budget, else ``None`` once the rows (or the failure) are stored."""
     coworld = ctx.coworld()
@@ -516,7 +573,7 @@ def _evaluate(ctx: ToolContext, record: dict, run: dict) -> dict | None:
         "evaluate",
         cwd=coworld.code,
         env=env,
-        budget_s=EVALUATE_BUDGET_S,
+        budget_s=budget_s,
         log_dir=coworld.documents / "logs",
     )
     return _finish_evaluate(ctx, record, run, result, mixin)
@@ -566,7 +623,7 @@ def _finish_evaluate(
         _store_rows(ctx, run, results, f"invalid: evaluate output: {error}")
         return None
     results["rows"] = [asdict(row) for row in rows]
-    _store_rows(ctx, run, results, None)
+    _store_rows(ctx, run, results, "valid")
     return None
 
 
@@ -613,8 +670,10 @@ def _report(record: dict, note: str | None = None) -> dict:
     settled = all(
         run["state"] in TERMINAL_STATES
         and ("rows" in (run.get("results") or {}) or run["validity"] != "valid")
+        and not _evaluate_failed(run)
         for run in runs
     )
+    broken = sum(_evaluate_failed(run) for run in runs)
     report = {
         "experiment": record["id"],
         "runs": runs,
@@ -626,6 +685,10 @@ def _report(record: dict, note: str | None = None) -> dict:
     elif report["complete"]:
         report["next"] = (
             f"experiment.close {{experiment: {record['id']}}} applies the decision rule"
+        )
+    elif broken:
+        report["next"] = (
+            f"evaluate failed on {broken} runs; after the repair, xp.status evaluates them again"
         )
     elif pending:
         report["next"] = (
@@ -682,10 +745,14 @@ SPEC = tool(
                         "description": "Seeds to play (default 1..n_min of the rule, at most 20).",
                     },
                     "episodes": a.integer("Episodes per request (default 1)."),
-                    "league": a.string("A league id the platform fills the other seats from."),
+                    "league": a.string(
+                        "A league id: run its Coworld, and draw a random champion per episode for "
+                        "each seat opponents leaves open."
+                    ),
                     "opponents": a.strings(
-                        "Policy version ids for the other seats. For a comparison, always "
-                        "pin them, so both arms meet the same roster."
+                        "Policy version ids for the other seats: every other seat unless a league "
+                        "fills the rest. For a comparison, always pin them, so both arms meet the "
+                        "same roster."
                     ),
                     "arms": a.strings("candidate and/or baseline (default both)."),
                 },
