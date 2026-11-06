@@ -509,3 +509,30 @@ def test_full_toolset_mode_needs_the_hermes_source(monkeypatch):
     with pytest.raises(RuntimeError, match="IDE_HERMES_SRC"):
         harness.full_toolset("orchestrator", harness.ShippedSchemas(), "m/model")
     harness.hermes_sanitizers.cache_clear()
+
+
+def test_a_forced_turn_keeps_the_first_verdict_and_records_a_later_valid_call():
+    gateway = RealGateway(Path("/"), Path("h"), "k", "m", forcing=ForcingProxy(key="k"))
+    bad = {"id": "b", "function": {"name": "claim", "arguments": '{"action": "write"}'}}
+    good = {"id": "g", "function": {"name": "claim", "arguments": json.dumps(GOOD_CLAIM)}}
+    result = harness.Result("m", "h", "c", "wrong_tool")
+    assert gateway._judge_new_calls(CLAIM_WRITE, [{"tool_calls": [bad]}], result) is False
+    assert result.outcome == "invalid"
+    assert gateway._judge_new_calls(CLAIM_WRITE, [{"tool_calls": [bad, good]}], result) is True
+    assert result.outcome == "invalid"
+    assert result.later_attempts == ["valid"]
+
+
+def test_a_forced_turn_that_gives_up_after_a_bad_call_keeps_its_verdict():
+    gateway = RealGateway(Path("/"), Path("h"), "k", "m", forcing=ForcingProxy(key="k"))
+    result = harness.Result("m", "h", "c", "invalid")
+    gateway._judge_end(RunStatus("r", "completed", "s", None, None, terminal=True), [], result)
+    assert result.outcome == "invalid"
+
+
+def test_an_unforced_run_stops_at_the_first_verdict():
+    gateway = RealGateway(Path("/"), Path("h"), "k", "m")
+    bad = {"id": "b", "function": {"name": "claim", "arguments": '{"action": "write"}'}}
+    result = harness.Result("m", "h", "c", "wrong_tool")
+    assert gateway._judge_new_calls(CLAIM_WRITE, [{"tool_calls": [bad]}], result) is True
+    assert result.later_attempts == []

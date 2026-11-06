@@ -62,6 +62,8 @@ RUN_NUMBERS = itertools.count(100)
 # Calls before the judged one, as a Session makes them: reading a skill or the record first is
 # normal here, so this is wider than the direct tests' limit.
 MAX_DETOURS = 12
+# How many more calls of the judged action a forced turn may make after a bad first one.
+MAX_LATER_ATTEMPTS = 3
 FAKE_PLAYER_ID = "ply_model_tests"
 # How a run's error text gives a host's refusal: the SDK's "Error code: 400", or "HTTP 400".
 REFUSED_REQUEST = re.compile(r"(?:Error code:?|HTTP)\s*(4\d\d)\b")
@@ -396,6 +398,8 @@ class RealGateway:
     def _judge_new_calls(self, case: Case, stored: list[dict], result: harness.Result) -> bool:
         """True when the judged call was found or there were too many other calls first."""
         detours: list[str] = []
+        judged = False
+        later: list[str] = []
         for message in stored:
             for raw in message.get("tool_calls") or []:
                 call = harness._call(raw)
@@ -403,22 +407,40 @@ class RealGateway:
                     case.role, call.name, call.arguments or {}
                 )
                 if write_actions.is_judged(case, name, args):
-                    result.outcome, result.detail = write_actions.judge(case, call, args)
+                    outcome, detail = write_actions.judge(case, call, args)
+                    if judged:
+                        later.append(outcome)
+                        result.later_attempts = later
+                        if outcome == "valid" or len(later) == MAX_LATER_ATTEMPTS:
+                            return True
+                        continue
+                    judged = True
+                    result.outcome, result.detail = outcome, detail
                     result.reasoning_gaps = write_actions.gaps_in_reasoning(
                         case, args, harness.reasoning_of(message)
                     )
                     result.detours = detours
-                    return True
+                    # Only the first call sets the rate. A forced turn runs on after a bad one to
+                    # show whether the model gets there; other runs have no reason to spend more.
+                    if outcome == "valid" or not self.forcing:
+                        return True
+                    continue
+                if judged:
+                    continue
                 detours.append(f"{call.name} {call.raw[:120]}")
                 if len(detours) > MAX_DETOURS:
                     result.detours = detours
                     result.detail = f"never called {case.tool}.{case.action}; called {detours}"
                     return True
-        result.detours = detours
+        if not judged:
+            result.detours = detours
         return False
 
     def _judge_end(self, status, stored: list[dict], result: harness.Result) -> None:
-        """A run that ended without the judged call: text, or a host problem."""
+        """A run that ended without the judged call: text, or a host problem. A run that ended
+        after it, giving up on a bad call, keeps that call's verdict."""
+        if result.outcome == "invalid":
+            return
         if status.status != "completed":
             http_status = REFUSED_REQUEST.search(status.error or "")
             refused = http_status and harness._is_rejection(int(http_status[1]))
