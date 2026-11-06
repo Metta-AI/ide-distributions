@@ -68,9 +68,15 @@ money, so they run only on request and never in CI. An explicit `-m` replaces th
 `-m 'not hermes and not model'` rather than adding to it, so `uv run pytest -m "not hermes"` with
 `OPENROUTER_API_KEY` exported runs these tests too and spends money.
 
+Nothing in these tests caps spending, so set a limit on the key. The costs below are what past runs
+cost on Kimi K3.1 Pro, not a forecast: a longer tool list or prompt, or a model that retries, costs
+more.
+
 **Direct calls** (`test_write_actions.py`). `IDE_HERMES_SRC` names the pinned Hermes's source
-(`/opt/hermes` in the image), whose schema sanitizers shape the tool list as Hermes sends it. Narrow a run to one model and host: the
-default is four models on two hosts each, and one such column costs about $2 on Kimi K3.1 Pro.
+(`/opt/hermes` in the image), whose schema sanitizers shape the tool list as Hermes sends it. Narrow
+a run to one model and host: the default is four models on two hosts each. One such column is 165
+cases, noted at about $2 on Kimi K3.1 Pro on November 4. The captured context below costs more: a
+far longer prompt, and up to 8 requests per case instead of 3.
 
 ```bash
 OPENROUTER_API_KEY=... IDE_HERMES_SRC=/path/to/hermes-agent \
@@ -93,7 +99,8 @@ and `IDE_TOOL_CALL_CONTEXT` narrow or change a run (see `test_write_actions.py`)
 with the fake platform, so the system prompt, tool list, hooks and tools are the real ones. It ends
 with `test_the_agreed_rate`: at least 95% of calls valid on the first try, after one refusal and
 after three. This is the check to pass before calling the tools reliable. Run it in the pinned
-image, from the repository root (about $4 and 10 to 20 minutes at the default 10 repeats):
+image, from the repository root (at the default 10 repeats, one run on November 4 cost $3.92 and
+took 19 minutes):
 
 ```bash
 out=$(mktemp -d) && chmod 777 "$out"  # the container's user writes here
@@ -107,16 +114,26 @@ OPENROUTER_API_KEY=... docker run --rm --user 10000:10000 -e OPENROUTER_API_KEY 
 path. Give the same variable to the direct calls, pointing at `$out/context.json`, to send
 them in place of the short stand-in prompt.
 
+Docker passes on only the variables named with `-e`. An exported `IDE_TOOL_CALL_CASES` alone does
+nothing and the full run goes ahead, so narrow a run with, for example,
+`-e IDE_TOOL_CALL_CASES=orchestrator-task.create-recovery1 -e IDE_TOOL_CALL_REPEATS=2`.
+
 **Refused calls inside one turn** (`test_mid_turn_recovery.py`). The runs API can only continue a
 stored history with a new user message, and a model recovers far more often after one, so
 `test_real_session.py` does not measure this. Here a local proxy (`forcing_proxy.py`) answers a
 conversation's first requests with a broken call, so the refusals, hooks and loop guard are real
 and the model's next call is judged. It runs like the command above, with this file in place of
 `test_real_session.py` and `--add-host proxy.openrouter.ai:127.0.0.1` added to `docker run`: Hermes
-shapes a request by its base URL, and that name makes the proxy count as OpenRouter (about $1).
+shapes a request by its base URL, and that name makes the proxy count as OpenRouter. A full run is
+81 Sessions. Forced runs recently cost $1.02 per 100 on a control and $2.00 per 100 with a changed
+tool list.
 
-The rate counts that next call alone. After a bad one, the turn runs on for up to three more calls
-of the action, and the line `invalid, valid later` shows how many got there in the end.
+The rate counts that next call alone. After a bad one, the turn runs on until the model sends a
+valid call or three more calls to the tool that are not reads, the turn ends, or 600 seconds pass
+(which counts the run as `ERR`). Other calls along the way have no limit of their own. The line
+`invalid, valid later` counts the runs that reached a valid call. Hermes's loop guard halts a turn
+at 5 failures of one tool, so after three forced refusals only one more bad call is possible. Only
+this test runs on, so in any other test's table that line reads 0/N, which means not measured.
 
 Each request keeps only the latest of identical refused calls (`plugin/repeats.py`,
 `without_repeated_refusals`). A batch of calls stays, and so does a result carrying more than loop
@@ -173,9 +190,12 @@ uv run python tools/schema_drift.py /path/to/state.db --role orchestrator [--ses
 Kimi K3.1 Pro, with a session's real system prompt and tool list. It compares a run with
 `core/tests/model/usability_baseline.json` to show what a tools or skills change did;
 [`docs/reports/tool-usability-2026-11-05.md`](docs/reports/tool-usability-2026-11-05.md) is the
-latest run and what it did and did not show. A change in the test's fixtures can move these rates
-by itself, so judge a drop by running the same test code on both sides. The offline tests of its
-judging and read results run in the default `pytest`:
+latest run and what it did and did not show: 905 runs, $33.98. Ctrl-C does not stop a run, because
+queued requests keep going out until the process is killed. A change in the test's fixtures can move
+these rates by itself, so judge a drop by running the same test code on both sides. Fixtures have
+changed since that baseline, so until it is rewritten a comparison opens by saying the two are not
+comparable, and it leaves out `r-wait-credits` and `r-hard-wait-credits-args`. The offline tests of
+its judging and read results run in the default `pytest`:
 
 ```bash
 OPENROUTER_API_KEY=... IDE_HERMES_SRC=/path/to/hermes-agent \

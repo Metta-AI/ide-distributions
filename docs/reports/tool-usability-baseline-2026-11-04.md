@@ -3,13 +3,12 @@
 How easy the research tools and skills are to find, read and use for Kimi K3.1 Pro, measured
 before other branches change them. Measured at commit `f6a1e11c`. No tool or skill was changed.
 
-**Replaced by [`tool-usability-2026-11-05.md`](tool-usability-2026-11-05.md).** Kept for its method and how to read a run.
+**Replaced by [`tool-usability-2026-11-05.md`](tool-usability-2026-11-05.md).** Kept for its method
+and how to read a run. Its findings and file references describe the code at `f6a1e11c`, and were
+not updated as that code was fixed.
 
-**These numbers predate the test's realistic reads.** In this run every read got one placeholder
-line. The test now answers each read in the shape the real tool gives (`usability_reads.py`), but
-that was added afterwards and could not be measured, because the OpenRouter key has run out. **Rerun
-before comparing anything with this baseline.** Until then a difference may come from the test and
-not from the tools, and the comparison says so (see "Comparing a later run").
+**Do not compare these numbers with a later run.** In this run every read got one placeholder line.
+Later runs answer each read in the shape the real tool gives (`usability_reads.py`).
 
 ## The short version
 
@@ -483,10 +482,10 @@ counts, then only what passes Fisher's exact test (p < 0.01 for a situation, p <
 skill or tool, since about 180 situations would otherwise show differences by chance). Each situation
 and text carries a hash, so a changed one is reported as changed and not compared, and whole-skill
 and whole-tool totals are left out while any situation differs, because they would add up different
-situations. 42 situations are already marked this way, because later fixes changed them. `meta.reads` records
-which reads a run used: this baseline says `placeholder`, so the first comparison opens by saying the
-two are not comparable as a change in the tools. Write a new baseline from that rerun with
-`USABILITY_WRITE_BASELINE=1`, leaving tools and skills as they are, then compare later changes with it.
+situations. `meta.reads` records which reads a run used, and when two runs differ in it the comparison
+opens by saying they are not comparable as a change in the tools. Write a new baseline from such a
+run with `USABILITY_WRITE_BASELINE=1`, leaving tools and skills as they are, then compare later changes
+with it.
 
 `USABILITY_SITUATIONS` runs a few situations and `USABILITY_PARTS` runs some parts; `USABILITY_RUN_DIR`
 resumes a stopped run, and is refused if the tools, skills, situations or test changed since it
