@@ -83,6 +83,17 @@ def situation_row(situation: Situation, runs: list[dict]) -> dict:
         "args_right": sum(r.get("args_right") is True for r in counted),
         "attempted": len(attempts),
         "act_valid_first_try": sum(bool(r["act_valid"]) for r in attempts),
+        # Beside ``right``, not instead of it. Runs from before these fields count as none.
+        "wrong_attempted": sum(bool(r.get("wrong_attempts")) for r in counted),
+        "wrong_applied": sum(
+            r["outcome"] == "wrong_act" and r.get("act_applied") is True for r in counted
+        ),
+        "wrong_unchecked": sum(
+            r["outcome"] == "wrong_act" and r.get("act_applied") is None for r in counted
+        ),
+        "right_refused": sum(
+            r["outcome"] == "right" and r.get("act_applied") is False for r in counted
+        ),
         "mean_steps": _mean(_steps_before_act(r) for r in counted),
         "mean_preparation": _mean(_preparation_count(r) for r in counted),
         "mean_requests": _mean(r["requests"] for r in counted),
@@ -219,6 +230,10 @@ def totals(situations: list[Situation], rows: dict[str, dict]) -> dict:
             "act_valid_first_try": sum(r["act_valid_first_try"] for r in picked),
             "args_checked": sum(r["args_checked"] for r in picked),
             "args_right": sum(r["args_right"] for r in picked),
+            "wrong_attempted": sum(r["wrong_attempted"] for r in picked),
+            "wrong_applied": sum(r["wrong_applied"] for r in picked),
+            "wrong_unchecked": sum(r["wrong_unchecked"] for r in picked),
+            "right_refused": sum(r["right_refused"] for r in picked),
             "skill_n": sum(r["n"] for r in with_skill),
             "skill_opened": sum(r["skill_opened"] for r in with_skill),
             "skill_first": sum(r["skill_first"] for r in with_skill),
@@ -269,6 +284,16 @@ def _difference(
     return f"{label} {metric}: {old[0]}/{old[1]} -> {new[0]}/{new[1]} (p={p:.3f})"
 
 
+def _wrong_acts(total: dict) -> str:
+    """A baseline from before these counts did not measure them, which is not the same as zero."""
+    if "wrong_attempted" not in total:
+        return "wrong acts not measured"
+    return (
+        f"wrong acts tried {total['wrong_attempted']}, applied {total['wrong_applied']}, "
+        f"not checked {total['wrong_unchecked']}, right but refused {total['right_refused']}"
+    )
+
+
 def compare(old: dict, new: dict) -> list[str]:
     """What changed from baseline ``old`` to run ``new``, as lines for a person."""
     lines = [
@@ -289,7 +314,8 @@ def compare(old: dict, new: dict) -> list[str]:
             f"first try valid {before['act_valid_first_try']}/{before['attempted']} -> "
             f"{after['act_valid_first_try']}/{after['attempted']}; "
             f"arguments as the rule says {before['args_right']}/{before['args_checked']} -> "
-            f"{after['args_right']}/{after['args_checked']}"
+            f"{after['args_right']}/{after['args_checked']}; "
+            f"{_wrong_acts(before)} -> {_wrong_acts(after)}"
         )
     found: list[str] = []
     for name, row in new["situations"].items():
@@ -384,6 +410,10 @@ def _baseline_situation(row: dict) -> dict:
     }
     if "skill_opened" in row:
         kept["skill_opened"] = row["skill_opened"]
+    # Most rows have none of these, so most rows save the room.
+    for key in ("wrong_attempted", "wrong_applied", "wrong_unchecked", "right_refused"):
+        if row[key]:
+            kept[key] = row[key]
     missed = _endings_not_right(row)
     if missed:
         kept["ended_with"] = missed

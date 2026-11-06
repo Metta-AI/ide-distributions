@@ -12,14 +12,24 @@ every call in a reply, so a write later in the reply that settled a run makes it
 - ``situation.before`` names writes that may sensibly come first; they are answered and the run
   goes on;
 - any other call that passes the checks and changes something ends the run as ``wrong_act``:
-  production would have acted on it. One the checks refuse changes nothing, so it gets the refusal
-  and the run goes on.
+  production would have acted on it unless a store check not run here refuses it, as the last
+  paragraph but one says. One the checks refuse changes nothing, so it gets the refusal and the run
+  goes on.
 
 Outcomes: ``right`` (also words alone when ``"text"`` is in ``situation.acts``), ``wrong_act``,
 ``text`` (answered in words where a call was wanted, with or without earlier calls, or with
 nothing at all),
 ``limit`` (still preparing after ``MAX_REQUESTS``), ``rejected`` (the host refused the request),
 ``host_error`` (transport, 5xx, or account limit; not counted in any rate).
+
+Those outcomes are the strict measure, the one baselines compare. The checks above do not hold
+every store check, so ``wrong_act`` and ``right`` say what the model tried, not what would have
+happened: a ``task.complete`` with no ``merge`` or ``result`` passes the argument check and ends the
+run, though ``tasks.complete`` would refuse it and change nothing. Beside them,
+``Run.wrong_attempts`` lists the unwanted writes the model tried, refused ones included, and
+``Run.act_applied`` says whether the call that ended the run would have been applied
+(:func:`_would_apply`). A refused act does not make a run right: production would have answered the
+refusal, and what the model did next is not measured.
 
 ``usability_baseline.json`` was measured with ``usability_reads``; the first baseline was not, and
 ``docs/reports/tool-usability-baseline-2026-11-04.md`` marks what that did.
@@ -33,9 +43,12 @@ import time
 from dataclasses import asdict, dataclass, field
 
 from research_core.plugin.turn import render_context_block
+from research_core.store import tasks
 from research_core.task_types import load as load_task_type
 from research_core.tools import catalog
-from research_core.tools.base import error_payload
+from research_core.tools import task as task_tool
+from research_core.tools._args import record_number
+from research_core.tools.base import ToolError, coerce_args, error_payload
 from research_core.watcher import dispatch
 from research_core.watcher.wakes import TEMPLATES_DIR
 from tests.model import harness, usability_context, usability_reads, write_actions
@@ -95,6 +108,8 @@ class Run:
     act_attempts: int = 0  # calls naming an expected act
     args_right: bool | None = None  # whether the right call holds what ``situation.args`` asks
     act_args: dict | None = None  # the arguments of the call that ended the run
+    act_applied: bool | None = None  # :func:`_would_apply`; None too for a wanted read
+    wrong_attempts: list[str] = field(default_factory=list)  # unwanted writes, refused ones too
     problems: list[str] = field(default_factory=list)  # what the checks said, per refused call
     unknown_tools: list[str] = field(default_factory=list)
     uploaded: list[str] = field(default_factory=list)  # Versions an allowed ``upload`` sent
@@ -286,6 +301,61 @@ def _is_ide_tool(situation: Situation, name: str) -> bool:
     return any(spec.name == name for spec in catalog.tools_for(situation.role))
 
 
+class _OwnTaskRecords(write_actions.EveryRecordExists):
+    """The stand-in store for a completion: this Task also proposed every Task its checklist
+    names, for its own Goal."""
+
+    def __init__(self, row: dict):
+        self.row = row
+
+    def one(self, *_: object) -> dict:
+        return {"id": 1, "proposed_by": usability_reads.SESSION, "goal_id": self.row["goal_id"]}
+
+    def q(self, *_: object) -> list:
+        return [{"session_id": usability_reads.SESSION.removeprefix("session:")}]
+
+
+def _only_reads(name: str, args: dict | None) -> bool:
+    """:func:`is_preparation` for a call not yet checked: a malformed action reads nothing."""
+    action = (args or {}).get("action")
+    return (action is None or isinstance(action, str)) and is_preparation(name, args)
+
+
+def _task_complete_problems(situation: Situation, args: dict) -> list[str]:
+    """What ``tasks.complete``'s own checks refuse in this call, on the situation's Task. As in
+    ``write_actions.RECORD_CHECKS``, the records it names exist; so does a commit on the Task's
+    branch, as there is no repository here. It is not a ``RECORD_CHECKS`` entry because a refusal
+    there lets the run go on, which would change ``right`` and ``wrong_act``."""
+    own = int(TASK_ID.removeprefix("T-"))
+    try:
+        named = record_number(args.get("task"), "task", "task")
+    except ToolError as error:
+        return [str(error)]
+    if named != own:
+        return [f"T-{named} is not the Task this Session holds"]
+    row = {**usability_reads.own_task(situation), "id": own}
+    fields = task_tool._complete_fields(coerce_args(task_tool.SPEC, situation.role, args))
+    if fields["outcome"] == "failed":
+        return tasks._fail_problems(row, fields["failure"], fields["commit"])  # type: ignore[arg-type]
+    store = _OwnTaskRecords(row)
+    return tasks._completion_problems(store, row, **fields)[0]  # type: ignore[arg-type]
+
+
+def _would_apply(situation: Situation, call: harness.Call, problems: str) -> bool | None:
+    """Whether production would change something on the call that ended a run. False: a check
+    refuses it, or it only reads. True: the store's checks for that action pass. None: no store
+    check is run for that action here, only the argument check, so this run cannot say."""
+    args = call.arguments or {}
+    if problems or _only_reads(call.name, args):
+        return False
+    action = args.get("action")
+    if not isinstance(action, str):
+        return None
+    if (call.name, action) == ("task", "complete"):
+        return not _task_complete_problems(situation, args)
+    return True if (call.name, action) in write_actions.RECORD_CHECKS else None
+
+
 def _handle_call(
     situation: Situation, run: Run, call: harness.Call, schemas: harness.SchemaSet
 ) -> str | None:
@@ -301,17 +371,20 @@ def _handle_call(
     if call.name == "skill_view":
         run.skills.append(usability_context.bare_skill_name(str((args or {}).get("name"))))
         return _answer(situation, run, call, schemas)
-    if situation.stop and call.name != "skills_list":
-        run.outcome, run.act, run.act_args = "wrong_act", label, args
-        run.detail = call.raw[:300]
-        return None
     is_ide = _is_ide_tool(situation, call.name)
-    if not is_ide and call.name not in usability_context.builtin_names():
-        run.unknown_tools.append(call.name)
-        return json.dumps({"error": f"Unknown tool: {call.name}"})
     problems = refused or (
         _problems(situation, call) if is_ide or call.name == "delegate_task" else ""
     )
+    if situation.stop and call.name != "skills_list":
+        if not _only_reads(call.name, args):
+            run.wrong_attempts.append(label)
+        run.outcome, run.act, run.act_args = "wrong_act", label, args
+        run.act_applied = _would_apply(situation, call, problems)
+        run.detail = call.raw[:300]
+        return None
+    if not is_ide and call.name not in usability_context.builtin_names():
+        run.unknown_tools.append(call.name)
+        return json.dumps({"error": f"Unknown tool: {call.name}"})
     if problems:
         run.problems.append(f"{label}: {problems}"[:400])
     # A call to the wanted tool with no action is a try at the wanted act, refused as such.
@@ -325,17 +398,24 @@ def _handle_call(
             if run.outcome == "right":  # a second valid act in the reply: the first one is judged
                 return None
             run.outcome, run.act, run.act_args = "right", label, args
+            # A wanted read has nothing to apply, so False here can only mean refused.
+            if not _only_reads(call.name, args):
+                run.act_applied = _would_apply(situation, call, problems)
             if situation.args is not None:
                 run.args_right = args_hold(situation.args, args or {})
             return None
         return _answer(situation, run, call, schemas, problems)
-    if problems or is_preparation(call.name, args) or call.name == "skills_list":
+    prepares = _only_reads(call.name, args) or call.name == "skills_list"
+    if not prepares and label not in situation.before:
+        run.wrong_attempts.append(label)
+    if problems or prepares:
         return _answer(situation, run, call, schemas, problems)
     if label in situation.before:
         if label == "upload":
             run.uploaded.append(usability_reads.version_ref(args))
         return _answer(situation, run, call, schemas)
     run.outcome, run.act, run.act_args = "wrong_act", label, args
+    run.act_applied = _would_apply(situation, call, problems)
     run.detail = call.raw[:300]
     return None
 

@@ -770,40 +770,18 @@ def complete(
     with store.tx(actor) as tx:
         row = _row(store, n)
         _check_holder(store, row, actor)
-        problems: list[str] = []
-        require(problems, outcome == "succeeded", "outcome must be succeeded or failed")
-        require(problems, failure is None, "failure belongs to outcome failed")
-        require(
-            problems, row["status"] == "in-progress", f"{_t(n)} is {row['status']}, not in-progress"
+        problems, accepted, experiment_n = _completion_problems(
+            store,
+            row,
+            checklist=checklist,
+            commit=commit,
+            merge_request=merge_request,
+            merge_reason=merge_reason,
+            submission_candidate=submission_candidate,
+            result=result,
+            outcome=outcome,
+            failure=failure,
         )
-        require(
-            problems,
-            isinstance(checklist, Mapping),
-            "checklist is required: the type's deliverables",
-        )
-        require(problems, merge_request in ("yes", "no"), "merge must be yes or no")
-        if merge_request == "yes":
-            require(problems, commit, "merge yes needs the commit to merge")
-        if merge_request == "no":
-            require(problems, _text(merge_reason), "merge no needs merge_reason")
-        require(problems, _text(result), "result is required: what came of the Task")
-        if submission_candidate is not None:
-            require(
-                problems,
-                submission_candidate in ("yes", "no"),
-                "submission_candidate must be yes or no",
-            )
-        problems.extend(_commit_problems(commit))
-        accepted: dict[str, Any] = dict(checklist) if isinstance(checklist, Mapping) else {}
-        if commit is not None:
-            accepted.setdefault("commit", commit)
-        if submission_candidate is not None:
-            accepted.setdefault("submission_candidate", submission_candidate)
-        experiment_n = None
-        if isinstance(checklist, Mapping):
-            missing = task_types.check(row["type"], accepted, task_fields=dict(row))
-            problems.extend(f"checklist: {item}" for item in missing)
-            experiment_n = _reference_problems(store, row, accepted, problems)
         if problems:
             raise StoreError(problems)
         accepted["merge_request"] = merge_request
@@ -848,12 +826,7 @@ def fail(
     with store.tx(actor) as tx:
         row = _row(store, n)
         _check_holder(store, row, actor)
-        problems: list[str] = []
-        require(
-            problems, row["status"] == "in-progress", f"{_t(n)} is {row['status']}, not in-progress"
-        )
-        problems.extend(_failure_problems(failure))
-        problems.extend(_commit_problems(commit))
+        problems = _fail_problems(row, failure, commit)
         if problems:
             raise StoreError(problems)
         tx.execute(
@@ -1412,6 +1385,73 @@ def _question_row(
         problems.append(f"message {question_id} is not a question")
         return None
     return row
+
+
+def _completion_problems(
+    store: Store,
+    row: sqlite3.Row,
+    *,
+    checklist: Mapping[str, Any] | None,
+    commit: str | None,
+    merge_request: str | None,
+    merge_reason: str,
+    submission_candidate: str | None,
+    result: str | None,
+    outcome: str,
+    failure: Mapping[str, Any] | None,
+) -> tuple[_list[str], dict[str, Any], int | None]:
+    """What ``complete`` refuses for a succeeded Task, the checklist it would store, and the
+    Experiment that checklist names."""
+    problems: _list[str] = []
+    require(problems, outcome == "succeeded", "outcome must be succeeded or failed")
+    require(problems, failure is None, "failure belongs to outcome failed")
+    require(
+        problems,
+        row["status"] == "in-progress",
+        f"{_t(row['id'])} is {row['status']}, not in-progress",
+    )
+    require(
+        problems,
+        isinstance(checklist, Mapping),
+        "checklist is required: the type's deliverables",
+    )
+    require(problems, merge_request in ("yes", "no"), "merge must be yes or no")
+    if merge_request == "yes":
+        require(problems, commit, "merge yes needs the commit to merge")
+    if merge_request == "no":
+        require(problems, _text(merge_reason), "merge no needs merge_reason")
+    require(problems, _text(result), "result is required: what came of the Task")
+    if submission_candidate is not None:
+        require(
+            problems,
+            submission_candidate in ("yes", "no"),
+            "submission_candidate must be yes or no",
+        )
+    problems.extend(_commit_problems(commit))
+    accepted: dict[str, Any] = dict(checklist) if isinstance(checklist, Mapping) else {}
+    if commit is not None:
+        accepted.setdefault("commit", commit)
+    if submission_candidate is not None:
+        accepted.setdefault("submission_candidate", submission_candidate)
+    experiment_n = None
+    if isinstance(checklist, Mapping):
+        missing = task_types.check(row["type"], accepted, task_fields=dict(row))
+        problems.extend(f"checklist: {item}" for item in missing)
+        experiment_n = _reference_problems(store, row, accepted, problems)
+    return problems, accepted, experiment_n
+
+
+def _fail_problems(row: sqlite3.Row, failure: Any, commit: Any) -> _list[str]:
+    """What ``fail`` refuses."""
+    problems: _list[str] = []
+    require(
+        problems,
+        row["status"] == "in-progress",
+        f"{_t(row['id'])} is {row['status']}, not in-progress",
+    )
+    problems.extend(_failure_problems(failure))
+    problems.extend(_commit_problems(commit))
+    return problems
 
 
 def _commit_problems(commit: Any) -> list[str]:
