@@ -416,6 +416,8 @@ try:
     print("PASS native file read before and after agent resume")
 finally:
     server.shutdown();server.server_close();release(db)
+    from opentelemetry import trace
+    assert trace.get_tracer_provider().force_flush(timeout_millis=5000)
 """
     result = run(
         [hermes_python(hermes_bin), "-c", script, str(target), message.model_dump_json()],
