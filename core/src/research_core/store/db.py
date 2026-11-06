@@ -61,9 +61,8 @@ def quiesce_busy_timeout_ms(store_path: Path, now: datetime | None = None) -> in
 
     A store opened while ``research store quiesce`` holds the write locks waits the quiesce's
     ``max_hold_s`` plus the usual 5 s, so its first write lands after the release instead of
-    failing. ``Store.open`` sets this only after ``connect_writable``, so a restored copy not yet in
-    WAL mode still fails its switch after 5 s. The marker is looked for in the store's own
-    ``.state`` (the workspace store) and in
+    failing, and a restored copy not yet in WAL mode waits to make its switch. The marker is
+    looked for in the store's own ``.state`` (the workspace store) and in
     the workspace's ``.state`` two folders up (a Coworld store). A marker older than its own
     max hold is a leftover of a quiesce that did not clean up, and is ignored.
     """
@@ -158,12 +157,9 @@ class Store:
             raise ValueError(f"not a store kind: {kind!r}")
         path = Path(path)
         path.parent.mkdir(parents=True, exist_ok=True)
-        conn = migrate.connect_writable(path)
+        conn = migrate.connect_writable(path, quiesce_busy_timeout_ms(path))
         conn.row_factory = sqlite3.Row
         try:
-            quiesce_timeout = quiesce_busy_timeout_ms(path)
-            if quiesce_timeout is not None:
-                conn.execute(f"PRAGMA busy_timeout = {quiesce_timeout}")
             conn.execute("PRAGMA foreign_keys = ON")
             if migrate.user_version(conn) < migrate.latest_version(kind):
                 migrate.apply_migrations(conn, kind)

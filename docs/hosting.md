@@ -256,8 +256,8 @@ snapshot is one consistent recovery point across the databases. Nothing stops wr
 files, so a document or worktree may be mid-write from a tool process.
 Keep the hold short: a store connection opened before the hold began waits only its usual five
 seconds before reporting "database is locked", so initiate the snapshot within that time. Stores
-opened during the hold wait for the whole of it, except a restored copy not yet in WAL mode, whose
-switch to WAL fails after five seconds. Hermes retries its own writes to `state.db`, for 20 s by
+opened during the hold wait for the whole of it, including a restored copy not yet in WAL mode,
+which makes its switch to WAL after the release. Hermes retries its own writes to `state.db`, for 20 s by
 default. For a
 repository, the risk is bounded: git writes objects and refs through temporary files and renames, so such a snapshot
 still restores to a readable repository, at worst with a stale `.lock` file or an unfinished
