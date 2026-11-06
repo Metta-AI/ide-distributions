@@ -177,10 +177,10 @@ in its place. It ends with `test_ordinary_first_try_rate`, the same 95% rule on 
 the tool, which here the real tool must also accept. The `invalid, valid later` line is the natural
 recovery. Its sample is only the runs whose first call was bad, so a model that rarely gets it wrong
 gives few runs to read. These runs have their own column, `real session, unforced`, so they change
-no `test_the_agreed_rate`. Three cases at the default 10 repeats are 30 Sessions, not yet run: expect
-about $0.04 a run ($1.20), and up to twice that with a changed tool list. That is 3.2 requests a run
-(2.24 in the usability baseline, 1,968 over 880 runs, plus the one that may start while the tool's
-answer is awaited) at $0.013 a request ($25.63 over those 1,968).
+no `test_the_agreed_rate`. Three cases at the default 10 repeats are 30 Sessions: expect about $0.035
+a run ($1.05), and up to twice that with a changed tool list. Two 120-run measurements cost $4.11 and
+$4.18, at 2.7 requests a run
+([`docs/reports/tool-usability-2026-11-06.md`](docs/reports/tool-usability-2026-11-06.md)).
 
 **The other two.** `test_undeclared_fields.py` checks that a model on a closed schema sends a field
 only if it is declared, so a provider change is noticed. `test_tool_call_format.py` sends one
@@ -202,12 +202,11 @@ uv run python tools/schema_drift.py /path/to/state.db --role orchestrator [--ses
 `test_usability.py` measures how easy the research tools and skills are to find, read and use for
 Kimi K3.1 Pro, with a session's real system prompt and tool list. It compares a run with
 `core/tests/model/usability_baseline.json` to show what a tools or skills change did;
-[`docs/reports/tool-usability-2026-11-05.md`](docs/reports/tool-usability-2026-11-05.md) is the
-latest run and what it did and did not show: 905 runs, $33.98. Ctrl-C drops the queued requests,
+[`docs/reports/tool-usability-2026-11-06.md`](docs/reports/tool-usability-2026-11-06.md) is the
+latest run and what it did and did not show: 905 runs, $37.75. Ctrl-C drops the queued requests,
 and those already running finish and are billed. A change in the test's fixtures can move
-these rates by itself, so judge a drop by running the same test code on both sides. Fixtures have
-changed since that baseline, so until it is rewritten a comparison opens by saying the two are not
-comparable, and it leaves out `r-wait-credits` and `r-hard-wait-credits-args`. `right` and
+these rates by itself, so judge a drop by running the same test code on both sides. A comparison
+says so when the read results or a situation differ from the baseline's. `right` and
 `wrong_act` are the strict measure: `wrong_act` is what the model tried, and it counts a
 `task.complete` that `tasks.complete` would refuse. `compare` prints four run counts beside them:
 `wrong_attempted` (tried an unwanted write, even a refused one), `wrong_applied` and
