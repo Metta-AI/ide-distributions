@@ -58,6 +58,9 @@ def test_batch_retries_together_and_busy_does_not_burn_claim(tmp_path):
     owner.advance_events(ctx)
     assert [row["attempts"] for row in ctx.store.q("SELECT attempts FROM handled_events")] == [2, 2]
     ctx.hermes.set_busy(False)
+    # The refusal backs off for recovery.delivery_backoff_seconds; let that pass.
+    with ctx.wstore.tx(HARNESS) as tx:
+        tx.execute("UPDATE client_admissions SET retry_at=NULL")
     dispatch_inputs(ctx)
     assert len(ctx.hermes.runs) == 2
     last = list(ctx.hermes.runs.values())[-1]

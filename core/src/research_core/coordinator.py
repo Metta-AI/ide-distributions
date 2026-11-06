@@ -537,7 +537,7 @@ class Coordinator:
                     )
                 tx.execute(
                     "UPDATE client_admissions SET run_id=?,status=CASE WHEN status='queued'"
-                    " THEN 'running' ELSE status END,owner_instance=? WHERE op_id=?",
+                    " THEN 'running' ELSE status END,owner_instance=?,retry_at=NULL WHERE op_id=?",
                     (run_id, self.instance_id, op_id),
                 )
                 if current["status"] == "queued":

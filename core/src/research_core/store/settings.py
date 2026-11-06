@@ -185,7 +185,7 @@ SETTINGS: dict[str, SettingSpec] = {
             5,
             "workspace",
             "the coordinator",
-            "Delay before retrying a definitively refused transient steering delivery.",
+            "Delay before retrying a definitively refused transient start or steering delivery.",
             minimum=1,
         ),
         _s(

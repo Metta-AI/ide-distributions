@@ -493,3 +493,50 @@ def test_a_late_report_of_the_failed_run_does_not_hold_the_message_again(dispatc
         dispatch.store, op_id, dispatch.hermes.status(run_id, profile="orchestrator")
     )
     assert dispatch.admission(op_id) == held
+
+
+def test_a_refused_start_backs_off_and_does_not_keep_the_workspace_awake(dispatch):
+    """A retryable refusal records ``retry_at``: the dispatcher waits it out instead of retrying
+    on every pass, and neither it nor the message behind it counts as work."""
+    dispatch.hermes.set_busy(True)
+    first = dispatch.say("tune the policy")
+    dispatch.tick()
+    row = dispatch.store.one(
+        "SELECT status,retry_at FROM client_admissions WHERE op_id=?", (first,)
+    )
+    assert row["status"] == "queued" and row["retry_at"] is not None
+    attempts = len([c for c in dispatch.hermes.calls if c[0] == "start"])
+    dispatch.say("and then submit it")
+    dispatch.tick()
+    dispatch.tick()
+    assert len([c for c in dispatch.hermes.calls if c[0] == "start"]) == attempts
+    status = dispatch.server.status()
+    assert status["has_work"] is False and status["waiting_on"] == []
+    # Once the backoff has passed and the gateway takes runs, the message starts.
+    dispatch.hermes.set_busy(False)
+    with dispatch.store.tx(Actor.user("test")) as tx:
+        tx.execute(
+            "UPDATE client_admissions SET retry_at=? WHERE op_id=?",
+            ((datetime.now(UTC) - timedelta(seconds=1)).isoformat(), first),
+        )
+    dispatch.tick()
+    started = dispatch.store.one(
+        "SELECT status,retry_at FROM client_admissions WHERE op_id=?", (first,)
+    )
+    assert (started["status"], started["retry_at"]) == ("running", None)
+    assert f"admission:{first}:running" in dispatch.server.status()["waiting_on"]
+
+
+def test_an_admission_awaiting_resolution_does_not_keep_the_workspace_awake(dispatch):
+    """Resolution waits on the user, like a budget hold, so it must not hold the workspace up."""
+    op_id = dispatch.say("tune the policy")
+    assert f"admission:{op_id}:queued" in dispatch.server.status()["waiting_on"]
+    with dispatch.store.tx(Actor.user("test")) as tx:
+        tx.execute(
+            "UPDATE client_admissions SET resolution_required=1,error='needs resolution'"
+            " WHERE op_id=?",
+            (op_id,),
+        )
+    status = dispatch.server.status()
+    assert f"admission:{op_id}:queued" not in status["waiting_on"]
+    assert status["blocked_executions"][0]["op_id"] == op_id

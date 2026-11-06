@@ -31,7 +31,15 @@ Standalone orchestrator and researcher installations retain their normal plugin 
 The lifecycle adapter sends replies over the platform's authenticated outbound workspace
 connection. Explicit sleep starts the distribution command asynchronously; status reports
 ready for sleep only after its successful exit. The image also initiates sleep after fifteen
-minutes without work. Restart calls wake with the retained filesystem.
+minutes without work, timed by its own thirty-second check of the seam's `has_work`. After
+either preparation it reports with `POST /v2/workspaces/{id}/sleep` (body `{"pod": $HOSTNAME}`)
+and handles each answer: `accepted` ends the cycle; `intent_changed` is reported once more;
+`automatic_sleep_disabled` and a 403 undo the preparation and stop idle reports for this pod;
+`stale_pod` and `unknown_workspace` stop reporting. A failed report (transport error or 5xx)
+is retried with backoff; an idle sleep is undone first, so messages are served meanwhile, and a
+requested one stays prepared. A failed report never forces anything. The status `detail` names
+the `waiting_on` reasons that keep the workspace awake. Restart calls wake with the retained
+filesystem.
 
 The release dispatcher passes the distribution commit to Metta's generic build workflow.
 That workflow builds `image/Dockerfile`, runs `image/system_tests/start-stop.sh`, and publishes

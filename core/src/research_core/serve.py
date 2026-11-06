@@ -19,8 +19,10 @@ reports as ``waiting``, and the dispatcher resumes it with a continuation prompt
 Session once its hold has passed and the inference gate is open; other failures end ``failed``
 with an ``error_class`` beside Hermes's error (``research_core/contract/CONTRACT.md``, "Message
 admissions").
-Each resume holds longer than the last. ``GET /status``'s ``has_work`` counts neither a held
-message nor the messages queued behind it, on purpose: a budget wait lasts until the daily
+Each resume holds longer than the last. A start the gateway refuses as retryable records
+``retry_at`` and waits out ``recovery.delivery_backoff_seconds`` before the next try.
+``GET /status``'s ``has_work`` counts neither a held or refused message, nor the messages queued
+behind it, nor one that needs resolution, on purpose: a budget wait lasts until the daily
 refill and must not keep the workspace awake; the message resumes once the workspace is awake.
 
 The model routes (``GET /models``, ``GET /models/catalog``, ``POST /models``) show each
@@ -49,7 +51,7 @@ import traceback
 from collections.abc import Callable, Iterator
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -77,8 +79,8 @@ from research_core.store.errors import NotFound, StoreError
 from research_core.telemetry import propagator, span
 from research_core.tools.ui import coworld_conversation, pointer_token
 from research_core.watcher import context, hermes_api
-from research_core.watcher.heartbeat import HAS_WORK_KEY, HAS_WORK_REASONS_KEY, HEARTBEAT_KEY
-from research_core.watcher.hermes_api import HermesRuns, RunsBusy, RunsError
+from research_core.watcher.heartbeat import HAS_WORK_REASONS_KEY, HEARTBEAT_KEY
+from research_core.watcher.hermes_api import HermesRuns, RunsBusy, RunsError, RunsUnavailable
 from research_core.watcher.tick import PAUSED_DRAINED_KEY
 
 log = logging.getLogger(__name__)
@@ -376,22 +378,15 @@ class SeamServer:
                     )
                 finally:
                     store.close()
+            waiting_on = json.loads(
+                wstore.get_meta(HAS_WORK_REASONS_KEY) or "[]"
+            ) + admissions.work_reasons(wstore)
             return {
                 "ok": True,
                 "heartbeat": heartbeat,
                 "heartbeat_age_s": age_s,
-                "has_work": wstore.get_meta(HAS_WORK_KEY) == "1"
-                or bool(
-                    wstore.one(
-                        "SELECT 1 FROM client_admissions a WHERE a.status='running'"
-                        " OR a.resolution_required=1"
-                        " OR (a.status='queued' AND a.resume_after IS NULL AND NOT EXISTS"
-                        " (SELECT 1 FROM client_admissions held WHERE held.session_id=a.session_id"
-                        " AND held.status='queued' AND held.resume_after IS NOT NULL"
-                        " AND held.rowid<a.rowid)) LIMIT 1"
-                    )
-                ),
-                "waiting_on": json.loads(wstore.get_meta(HAS_WORK_REASONS_KEY) or "[]"),
+                "has_work": bool(waiting_on),
+                "waiting_on": waiting_on,
                 "paused": bool(settings.get(wstore, "paused")),
                 "paused_drained": wstore.get_meta(PAUSED_DRAINED_KEY) == "1",
                 "sleep_started": wstore.get_meta("sleep_started"),
@@ -654,6 +649,10 @@ class SeamServer:
                         )
                         tx.event("client.cancelled", row["op_id"], {})
                     continue
+                if row["retry_at"] and parse_iso(stores.wstore.now()) < parse_iso(row["retry_at"]):
+                    # A refused start waits out its backoff and keeps its Session's place.
+                    reserved.add(row["session_id"])
+                    continue
                 if settings.get(stores.wstore, "paused") and not row["dispatch_started"]:
                     continue
                 if not inference.available(self.inference_lease_file, self.clock()):
@@ -729,13 +728,24 @@ class SeamServer:
                         return_exceptions=True,
                     )
                 if isinstance(run_id, RunsError):
+                    backoff = int(settings.get(stores.wstore, "recovery.delivery_backoff_seconds"))
                     with stores.wstore.tx(actor) as tx:
+                        # A retryable refusal records when to try again, like a held message's
+                        # resume_after, so the dispatcher does not spin and has_work skips it.
+                        # A start that may have reached Hermes (no answer, or a malformed one)
+                        # replays at once; a gateway at its cap (429) refused it definitely.
                         tx.execute(
                             "UPDATE client_admissions SET error=?,"
+                            "retry_at=CASE WHEN ? OR dispatch_started=0 THEN ? END,"
                             "status=CASE WHEN status IN ('queued','running')"
                             " THEN ? ELSE status END WHERE op_id=?",
                             (
                                 run_id.detail,
+                                isinstance(run_id, RunsBusy)
+                                and not isinstance(run_id, RunsUnavailable),
+                                (parse_iso(tx.at) + timedelta(seconds=backoff)).isoformat()
+                                if run_id.retryable
+                                else None,
                                 "queued" if run_id.retryable else "failed",
                                 row["op_id"],
                             ),

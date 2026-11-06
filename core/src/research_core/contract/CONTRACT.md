@@ -132,9 +132,11 @@ resume. A client follows the admission's `status` until it is `completed`,
 `cancelled`, `failed` or `interrupted`, and tracks whichever run `run_id` names at the time, not
 the first run it saw.
 
-`GET /status`'s `has_work` counts `queued` and `running` admissions, but neither `waiting` ones
-nor the messages queued behind one in the same Session, on purpose: a budget wait lasts until the daily refill, and must not keep the workspace awake that
-long. The workspace may sleep; a waiting admission resumes once the workspace is awake again
+`GET /status`'s `has_work` counts `queued` and `running` admissions, each named in `waiting_on`
+as `admission:<op id>:<status>`, but not `waiting` ones, a start the gateway refused that waits
+for its `retry_at`, an admission that needs resolution, or the messages queued behind a waiting
+or refused one in the same Session, on purpose: a budget wait lasts until the daily refill, and
+must not keep the workspace awake that long. The workspace may sleep; a waiting admission resumes once the workspace is awake again
 (for example, when the user's next message wakes it).
 
 `error_class` names why a `waiting` or `failed` admission's run failed, when that is known
