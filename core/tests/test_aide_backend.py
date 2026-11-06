@@ -1633,13 +1633,11 @@ def test_frontend_closed_ends_its_subscriptions(system):
 
 
 def test_relay_failures_reconnect_without_touching_the_legacy_connection(monkeypatch):
-    import control
     from control import serve as legacy
     from websockets.asyncio.server import serve as websocket_server
 
     # No seam runs here, and an unreachable seam ends the backend.
     monkeypatch.setattr(aide.Backend, "watch", lambda self: asyncio.Event().wait())
-    monkeypatch.setattr(control.Lifecycle, "watch", lambda self, seam: asyncio.Event().wait())
 
     async def main():
         attempts, legacy_connections, bound = [], [], asyncio.Event()
@@ -1667,7 +1665,7 @@ def test_relay_failures_reconnect_without_touching_the_legacy_connection(monkeyp
             env = {"API_SERVER_KEY": "proof"}
             connected = asyncio.Event()
             control = asyncio.create_task(
-                legacy(**common, pod="pod", env=env, inference=Availability(), connected=connected)
+                legacy(**common, env=env, inference=Availability(), connected=connected)
             )
             backend = asyncio.create_task(aide.serve(**common, env=env, inference=Availability()))
             async with asyncio.timeout(10):

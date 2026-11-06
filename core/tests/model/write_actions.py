@@ -86,15 +86,19 @@ class Case:
     # The answer to reads before the judged call, for a case whose write needs what they return.
     read_result: str = RESULT
     refusals: int = 1
+    # Which plain request this is, for a case with nothing forced (``real_session.ORDINARY_CASES``).
+    ordinary: str = ""
 
     @property
     def id(self) -> str:
         suffix = f"-recovery{self.refusals}" if self.refused is not None else ""
+        suffix = f"-ordinary-{self.ordinary}" if self.ordinary else suffix
         return f"{self.role}-{self.tool}.{self.action}{suffix}"
 
     @property
     def label(self) -> str:
         suffix = f" (after {self.refusals} refused)" if self.refused is not None else ""
+        suffix = f" (ordinary {self.ordinary})" if self.ordinary else suffix
         return f"{self.role} {self.tool}.{self.action}{suffix}"
 
 

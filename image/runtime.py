@@ -262,7 +262,6 @@ async def run(stack: AsyncExitStack) -> None:
                     platform_url=bootstrap.platform_url,
                     workspace_id=bootstrap.workspace_id,
                     credential=bootstrap.credential.get_secret_value(),
-                    pod=os.environ["HOSTNAME"],
                     env=profile_env,
                     inference=inference,
                     connected=relay_connected,
@@ -295,7 +294,6 @@ async def run(stack: AsyncExitStack) -> None:
 async def main() -> None:
     logging.basicConfig()
     logging.getLogger("aide").setLevel(logging.INFO)
-    logging.getLogger("control").setLevel(logging.INFO)
     stopping = asyncio.Event()
     loop = asyncio.get_running_loop()
     for signum in (signal.SIGTERM, signal.SIGINT):

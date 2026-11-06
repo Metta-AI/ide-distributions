@@ -366,7 +366,7 @@ class Result:
     detours: list[str] = field(default_factory=list)  # other calls made before the judged one
     # Fields the judged call's reasoning names but its arguments omit (see ``reasoning_gaps``).
     reasoning_gaps: list[str] = field(default_factory=list)
-    # Outcomes of the later judged calls, after an invalid one in a forced turn.
+    # Outcomes of the later judged calls, after an invalid one in a forced turn or ordinary case.
     later_attempts: list[str] | None = None  # None: this run did not go on to measure them
 
 
@@ -471,8 +471,9 @@ def judged_rate(results: list[Result]) -> tuple[int, int]:
 
 
 def _recovered_later(results: list[Result]) -> str:
-    """Of the forced runs whose judged call was invalid, how many sent a valid one later in the
-    turn. The other runs stop at that call, so they say nothing either way."""
+    """Of the runs that go on (forced turns, ordinary cases) whose judged call was invalid, how many
+    sent a valid one later in the turn. The other runs stop at that call and say nothing either way.
+    """
     invalid = [r for r in results if r.outcome == "invalid" and r.later_attempts is not None]
     if not invalid:
         return "-"
@@ -559,8 +560,8 @@ def summary() -> list[str]:
         "host refused the request (4xx); ERR = transport error, 5xx or account limit, or through "
         "a real Session a time limit or a gateway that stopped (not counted). +N = N "
         "other calls first, answered as the tools would (refusal or plausible result). "
-        "Invalid, valid later: invalid calls followed by a valid one; only a forced turn goes "
-        "on after one, so elsewhere it reads -. "
+        "Invalid, valid later: invalid calls followed by a valid one; only a forced turn or an "
+        "ordinary case goes on after one, so elsewhere it reads -. "
         "Prompt tokens: mean of each case's first request (through a real Session, of its "
         "requests: Hermes stores totals). With repeats a cell is valid/judged "
         "and a rate is valid/judged, percent and [95% Wilson interval]. Intervals that do not "

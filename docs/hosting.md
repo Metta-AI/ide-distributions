@@ -134,12 +134,8 @@ The Hermes behaviour this depends on is listed in the module's docstring and exe
 - Turns must be serialised per Session, not per profile (Appendix G). The watcher never starts a
   second run on a Session that is live: it steers instead.
 - Automatic sleep belongs to the image: its lifecycle adapter (`image/control.py`) reads
-  `has_work` from `research serve`'s `/status` every thirty seconds, runs `research workspace
-  sleep` after fifteen minutes without work, and then reports it with
-  `POST /v2/workspaces/{id}/sleep` (Metta spec 0149). The platform releases compute or refuses
-  with a typed reason; an idle sleep it cannot take is undone with `research workspace wake`.
-  `waiting_on` names what keeps the workspace awake, and the control status `detail` repeats it.
-  *How* it goes to sleep and wakes is the cycle that follows.
+  `has_work` from `research serve`'s `/status` and starts `research workspace sleep` after fifteen
+  minutes without work. *How* it goes to sleep and wakes is the cycle that follows.
 - Container health stays as it is: the watcher reports through its heartbeat and
   `workspace.doctor`, never through container liveness, so a broken tool cannot crash-loop. A tool
   module that does not import takes its profile's plugin down, not the gateway: chats still run,
