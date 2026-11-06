@@ -28,6 +28,7 @@ from research_core.store._common import now_iso
 from research_core.store.actors import Actor
 from research_core.store.db import Store, quiesce_busy_timeout_ms
 from research_core.store.migrate import _copyable_tables
+from research_core.watcher import sleep
 
 COWORLD_ID = "cow-x"
 HARNESS = Actor.harness()
@@ -629,7 +630,7 @@ def test_quiesce_holds_a_writer_until_release_and_empties_the_wal(workspace):
     proc = start_quiesce("--max-hold", "2")
     try:
         held = json.loads(proc.stdout.readline())
-        assert held["quiesced"] == [str(workspace.ws.store_path), str(workspace.store.path)]
+        assert held["quiesced"] == [str(workspace.store.path), str(workspace.ws.store_path)]
         for report in held["checkpoints"].values():
             assert report["busy"] is False and report["wal_bytes"] == 0
         assert held["checkpoints"][str(workspace.store.path)]["wal_bytes_before"] > 0
@@ -662,6 +663,54 @@ def test_quiesce_holds_a_writer_until_release_and_empties_the_wal(workspace):
     assert_intact(workspace.store)
     assert_intact(workspace.wstore)
     assert_write_lock_free(workspace.store.path)
+
+
+def test_a_writer_inside_a_coworld_transaction_can_still_reach_the_workspace_store(workspace):
+    """A transition nests the workspace store's transaction in its Coworld store's. A quiesce that
+    took the workspace store first would hold what this writer needs while waiting for what it has,
+    and this connection's five seconds would end in ``database is locked``."""
+    marker = workspace.ws.state / "quiesce.json"
+    proc = start_quiesce("--max-hold", "0.2")
+    try:
+        with workspace.store.tx(HARNESS):
+            while not marker.exists():
+                assert proc.poll() is None
+                time.sleep(0.01)
+            time.sleep(0.5)  # long enough for a quiesce to have locked the store it takes first
+            with workspace.wstore.tx(HARNESS) as tx:
+                tx.event("test.nested", "writer", {})
+        assert proc.wait(timeout=30) == 0
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+        proc.communicate()
+    assert workspace.wstore.q("SELECT 1 FROM events WHERE kind='test.nested'")
+
+
+def test_every_holder_of_several_locks_takes_coworld_stores_before_the_workspace_store(
+    workspace, tmp_path
+):
+    hermes_home = tmp_path / "profiles" / "orchestrator"
+    hermes_home.mkdir(parents=True)
+    state = hermes_home / store_cli.HERMES_STATE_DB
+    sqlite3.connect(state).close()
+    env = {"HERMES_HOME": str(hermes_home)}
+    expected = [workspace.store.path, workspace.ws.store_path, state]
+    assert store_cli.lock_order(workspace.ws, env) == expected
+    assert sleep.sleep_databases(workspace.ws, env, ()) == expected
+
+
+def test_lock_order_settles_coworlds_registered_at_the_same_moment(workspace):
+    for coworld_id in ("cow-z", "cow-a"):
+        coworlds.register(
+            workspace.wstore, HARNESS, coworld_id, folder=coworld_id.replace("-", "_")
+        )
+        Store.open(workspace.ws.coworld(coworld_id).store_path, kind="coworld").close()
+    with workspace.wstore.tx(HARNESS) as tx:
+        tx.execute("UPDATE coworlds SET created = '2026-01-01T00:00:00+00:00'")
+    assert store_cli.lock_order(workspace.ws, {}) == [
+        workspace.ws.coworld(coworld_id).store_path for coworld_id in ("cow-a", "cow-x", "cow-z")
+    ] + [workspace.ws.store_path]
 
 
 def test_a_restored_copy_not_yet_in_wal_mode_waits_out_the_hold_to_switch(workspace):
@@ -699,7 +748,7 @@ def test_quiesce_then_runs_with_every_lock_held_and_reports_its_exit_code(
     state.commit()
     state.close()
     monkeypatch.setenv("HERMES_HOME", str(profile))
-    paths = [workspace.ws.store_path, workspace.store.path, profile / "state.db"]
+    paths = [workspace.store.path, workspace.ws.store_path, profile / "state.db"]
 
     probe = [sys.executable, "-c", LOCK_PROBE, *map(str, paths)]
     code, (held, released) = run_lines(capsys, "quiesce", "--max-hold", "10", "--then", *probe)

@@ -365,7 +365,8 @@ def apply(ctx, instance_id: str) -> None:
         if command["task_updated"]:
             args["task_updated"] = command["task_updated"]
         with CommandApplication(store, command["id"]):
-            # Lock order is admission lock, then Coworld writer, everywhere.
+            # Lock order is admission lock, then Coworld writer, then workspace writer, everywhere;
+            # ``store.cli.lock_order`` follows it.
             with admissions.dispatch_lock(ctx.wstore), store.atomic(actor) as tx:
                 effect = ctx.wstore.one(
                     "SELECT result FROM transition_effects WHERE command_id=?", (command["id"],)
