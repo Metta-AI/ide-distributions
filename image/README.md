@@ -247,27 +247,38 @@ All timing/tracing uses the OpenTelemetry Python SDK. The locked workspace packa
 native build requirements select version 1.45.1, already shipped in the pinned Hermes image.
 No packages install at runtime. Standalone profile installations need the same native SDK.
 
-Every process uses the SDK's `ConsoleSpanExporter` to emit one standard span JSON object per
-line on stderr. This is enabled without a feature flag or collector. Span `start_time` and
-`end_time` replace custom elapsed fields. Existing dashboards querying `workspace_startup`,
-`workspace_intake`, or `workspace_tool` need migration to these spans; old events are removed.
-Console JSON is diagnostic output, not the OTLP wire format.
-A tool of an action's own reports as the grouped tool and action it stands for: `claim_write` as
-`gen_ai.tool.name` `claim` and `tool.action` `write`, the same as a `claim` call naming `write`.
+Long-lived workspace processes use standard `BatchSpanProcessor` instances for both the
+SDK's `ConsoleSpanExporter` and the optional OTLP/HTTP exporter. Each has its own bounded
+queue and background worker. A slow console or collector cannot hold up span completion;
+full queues drop telemetry. Console output remains standard span JSON, one object per line.
+Span `start_time` and `end_time` replace custom elapsed fields.
 
-To export to any OTLP/HTTP backend or an OpenTelemetry Collector, configure
-`OTEL_EXPORTER_OTLP_ENDPOINT` (base URL) or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (full trace URL)
-on the workspace container. The SDK handles protobuf, batching, retry, TLS and shutdown.
-Standard `OTEL_EXPORTER_OTLP_HEADERS`, timeout, certificate and batch-processor settings apply.
-The supervisor inherits these settings into both interpreters. Long-lived processes export
-asynchronously with a bounded SDK queue. A `research tool` subprocess exports directly when
-its span ends, so returning a tool result does not wait for a batch flush at process exit.
-These short-lived processes default to a 250 ms local-collector export budget. Explicit
-`OTEL_EXPORTER_OTLP_TRACES_TIMEOUT` or `OTEL_EXPORTER_OTLP_TIMEOUT` settings retain their
-standard precedence, including for remote collectors that need a larger budget.
-Backend outages or abrupt process termination can lose OTLP spans. Console output remains
-independent, including when the tool export deadline expires. `OTEL_SERVICE_NAME` defaults to
-`ide-distributions`.
+The native `execute_tool` span covers the complete tool invocation, including subprocess
+startup, handler work and process exit. One-shot `research tool` commands set the standard
+`OTEL_SDK_DISABLED=true`: they do not initialize exporters, write console spans or flush at
+exit. There is no separate distribution-handler span for a workspace subprocess. In-process
+handlers retain their nested distribution span. A tool of an action's own still reports its
+grouped tool/action, such as `claim_write` as `claim` / `write`.
+
+Application logs and SDK self-diagnostics use Python's standard bounded `QueueHandler` and
+`QueueListener`. Existing root handlers run on the listener thread. Production logging
+failure handling (`logging.raiseExceptions=false`) drops records if that queue is full.
+The image sets `PYTHONUNBUFFERED=1` for both interpreters, so a blocked background write
+cannot hold the standard stream's buffered-writer lock during interpreter exit.
+
+No request, tool, readiness check, sleep operation or process exit waits for a telemetry
+flush. The provider disables automatic shutdown flushing; Python logging's automatic
+handler-flush callback is also unregistered. Pending tail spans/logs can be lost on exit.
+This is best-effort diagnostics, not a durable audit trail.
+
+To export through an existing collector, configure `OTEL_EXPORTER_OTLP_ENDPOINT` (base URL)
+or `OTEL_EXPORTER_OTLP_TRACES_ENDPOINT` (full trace URL). Standard exporter timeout, header,
+TLS and batch settings apply to background delivery. Invalid SDK configuration disables
+tracing; invalid remote-exporter configuration preserves console tracing and records
+`telemetry.exporter.disabled`. Resource metadata comes from the standard environment
+resource detector plus explicit workspace/service identity; automatic resource-discovery
+plugins do not run on the application path.
+
 
 Hosting must configure an accessible, authorized endpoint before claiming remote trace delivery.
 The distribution neither provisions a collector nor assumes a Datadog endpoint. Changing
@@ -285,7 +296,7 @@ Spans and boundaries:
 | `invoke_agent` | Observed pre-LLM callback to session-end callback |
 | `chat` | One observed physical model attempt; retries have separate spans |
 | `execute_tool`, `tool.boundary=native` | Native pre/post-tool callbacks, including built-ins |
-| `execute_tool`, `tool.boundary=distribution` | Distribution validation, execution, rendering and scrubbing |
+| `execute_tool`, `tool.boundary=distribution` | In-process distribution validation, execution, rendering and scrubbing |
 | `workspace.run.observed` | Durable acceptance to coordinator terminal observation, including polling delay |
 
 Native model/tool spans are children of the turn. Hermes isolates tool workers, so distribution
