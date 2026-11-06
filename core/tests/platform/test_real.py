@@ -811,7 +811,7 @@ def test_episodes(platform, server):
     server.on(
         "GET", "/observatory/v2/episode-requests/ereq_1/artifacts/replay", reply(content=b"\x00z")
     )
-    assert platform.episodes_for_policy(PV_ID)[0]["id"] == "ereq_1"
+    assert platform.episodes_for_policy(PV_ID).entries[0]["id"] == "ereq_1"
     assert platform.episode("ereq_1")["game_config"] == {"seed": 7}
     assert platform.episode_artifact("ereq_1", "replay") == b"\x00z"
 

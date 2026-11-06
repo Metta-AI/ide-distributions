@@ -313,7 +313,7 @@ def test_episodes_by_policy_version_by_league_and_one_episode(call, platform):
 
 def test_replay_writes_the_file_and_a_pin_once(call, platform, ctx_factory):
     version = upload(platform)
-    episode_id = platform.episodes_for_policy(version.id)[0]["id"]
+    episode_id = platform.episodes_for_policy(version.id).entries[0]["id"]
     result = call("platform", {"action": "replay", "episode": episode_id}, role="researcher")
     assert result["ok"] is True
     path = documents(ctx_factory) / "replays" / f"{episode_id}.replay"
@@ -330,7 +330,7 @@ def test_replay_writes_the_file_and_a_pin_once(call, platform, ctx_factory):
 
     elsewhere = call(
         "platform",
-        {"action": "replay", "episode": platform.episodes_for_policy(version.id)[1]["id"],
+        {"action": "replay", "episode": platform.episodes_for_policy(version.id).entries[1]["id"],
          "dest": "scratch/"},
     )  # fmt: skip
     assert elsewhere["path"].startswith(str(documents(ctx_factory) / "scratch"))

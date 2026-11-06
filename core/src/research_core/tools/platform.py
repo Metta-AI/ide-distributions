@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import asdict
+from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -283,13 +284,19 @@ def episodes(call: ToolCall, platform: Platform) -> dict:
     pv, league_id = _id(call.get("policy_version")), _id(call.get("league"))
     if not pv and not league_id:
         raise ToolError("episodes needs a policy_version or a league")
+    limit = call.get("limit", 20)
+    if limit not in range(1, 101):
+        raise ToolError("limit must be between 1 and 100")
+    cursor = call.get("cursor")
+    if cursor and not pv:
+        raise ToolError("cursor needs a policy_version; use a league result's next_cursors")
     if pv:
-        rows = _call(
+        page = _call(
             call,
             f"GET /v2/policy-versions/{pv}/episode-requests",
-            lambda: platform.episodes_for_policy(pv),
+            lambda: platform.episodes_for_policy(pv, limit=limit, cursor=cursor),
         )
-        return {"policy_version": pv, "episodes": rows}
+        return {"policy_version": pv, "episodes": page.entries, "next_cursor": page.next_cursor}
     memberships = _call(
         call,
         "GET /v2/league-policy-memberships",
@@ -300,15 +307,24 @@ def episodes(call: ToolCall, platform: Platform) -> dict:
         if membership.policy_version.id not in policies:
             policies.append(membership.policy_version.id)
     seen: dict[str, dict] = {}
+    next_cursors: dict[str, str] = {}
     for policy in policies[:LEAGUE_EPISODE_POLICIES]:
         route = f"GET /v2/policy-versions/{policy}/episode-requests"
-        for row in _call(call, route, partial(platform.episodes_for_policy, policy)):
+        page = _call(call, route, partial(platform.episodes_for_policy, policy, limit=limit))
+        if page.next_cursor:
+            next_cursors[policy] = page.next_cursor
+        for row in page.entries:
             seen.setdefault(row["id"], row)
     return {
         "league": league_id,
         "policy_versions": policies[:LEAGUE_EPISODE_POLICIES],
         "truncated": len(policies) > LEAGUE_EPISODE_POLICIES,
-        "episodes": list(seen.values()),
+        "episodes": sorted(
+            seen.values(),
+            key=lambda row: datetime.fromisoformat(row["created_at"]),
+            reverse=True,
+        ),
+        "next_cursors": next_cursors,
     }
 
 
@@ -584,9 +600,17 @@ SPEC = tool(
             ),
             ActionSpec(
                 "episodes",
-                "Episodes of a policy version, or of up to ten of a league's active policies "
-                "(truncated says more exist), wherever they played; give one of them.",
-                {"policy_version": a.string("A policy version id."), "league": LEAGUE},
+                "Recent episodes, newest first: one page per policy, default 20, maximum 100. "
+                "Give policy_version, or league for up to ten active policies "
+                "wherever they played. "
+                "Continue a policy with next_cursor; league next_cursors names each policy's "
+                "continuation, and truncated says more policies exist.",
+                {
+                    "policy_version": a.string("A policy version id."),
+                    "league": LEAGUE,
+                    "limit": a.integer("Episodes per policy (default 20, between 1 and 100)."),
+                    "cursor": a.string("A policy's next_cursor from the previous page."),
+                },
                 example_fields=("league",),
             ),
             ActionSpec(

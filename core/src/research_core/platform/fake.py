@@ -69,6 +69,7 @@ from research_core.platform.errors import (
 from research_core.platform.protocol import (
     AutoChampion,
     Credits,
+    EpisodePage,
     Identity,
     League,
     Membership,
@@ -1042,12 +1043,17 @@ class FakePlatform:
             "league_episodes", lambda state: self._league_episodes(state, limit), persist=False
         )
 
-    def episodes_for_policy(self, policy_version_id: str) -> list[dict]:
-        return self._operate(
+    def episodes_for_policy(
+        self, policy_version_id: str, *, limit: int = 20, cursor: str | None = None
+    ) -> EpisodePage:
+        rows = self._operate(
             "episodes_for_policy",
             lambda state: self._policy_episodes(state, policy_version_id),
             persist=False,
         )
+        offset = int(cursor) if cursor else 0
+        end = offset + limit
+        return EpisodePage(rows[offset:end], str(end) if end < len(rows) else None)
 
     def _find_episode(self, state: dict, episode_request_id: str) -> dict:
         candidates = self._league_episodes(state, 30)

@@ -339,7 +339,7 @@ def test_leagues_divisions_episodes_and_standings(tmp_path):
     assert all(e["policy_version_ids"][1] == fake.LEAGUE_HOUSE for e in episodes)
 
     version = platform.upload_file_policy(name="starter", content=policy_bytes(3, 5))
-    mine = platform.episodes_for_policy(version.id)
+    mine = platform.episodes_for_policy(version.id).entries
     assert len(mine) == 10 and all(e["policy_version_ids"][0] == version.id for e in mine)
     assert platform.episode(mine[0]["id"])["seed"] == mine[0]["seed"]
     results = json.loads(platform.episode_artifact(mine[0]["id"], "results"))
