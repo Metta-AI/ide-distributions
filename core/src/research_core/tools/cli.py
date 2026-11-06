@@ -14,8 +14,10 @@ import sys
 
 
 def run(args: argparse.Namespace) -> int:
+    from research_core import telemetry
     from research_core.tools.base import ToolContext, run_tool
 
+    telemetry.tracer(tool_process=True)
     try:
         tool_args = json.loads(args.args) if args.args else {}
     except ValueError as error:
