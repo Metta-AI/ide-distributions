@@ -626,6 +626,51 @@ def test_an_interrupted_request_places_its_outcome_once_after_what_was_retained(
     run(system, scenario)
 
 
+def test_only_a_chat_cancel_ends_a_running_request_cancelled(system):
+    async def scenario(backend, gateway, ctx, hermes):
+        session_id = await opened(backend)
+        gateway.script = lambda run_id: [
+            {"event": "run.started"},
+            {"gate": True},
+            {"event": "run.cancelled"},
+        ]
+        params = {"session_id": session_id, "messages": say("hi"), "scope": WORKSPACE}
+        outcomes = {}
+        for how in ("workspace stop", "chat.cancel"):
+            request_id = str(uuid4())
+            await call(backend, "chat.send", params, request_id=request_id)
+            await until(lambda: len(hermes.runs) == len(outcomes) + 1)
+            run_id = list(hermes.runs)[-1]
+            if how == "chat.cancel":
+                cancel = {"session_id": session_id, "request_id": request_id, "scope": WORKSPACE}
+                assert (await call(backend, "chat.cancel", cancel))["result"] == {"requested": True}
+            else:
+                # A drain or shutdown stops the run natively; nobody cancelled the request.
+                hermes.stop(run_id, profile="orchestrator")
+            gateway.gate.set()
+            await until(lambda: len(backend.socket.notes("chat.finished")) == len(outcomes) + 1)
+            gateway.gate = asyncio.Event()
+            got = await call(
+                backend, "state.get", {"resource": "requests", "id": request_id, "scope": WORKSPACE}
+            )
+            outcomes[how] = got["result"]["item"]
+        stopped, cancelled = outcomes["workspace stop"], outcomes["chat.cancel"]
+        assert stopped["status"] == "interrupted"
+        assert stopped["error"] == {
+            "class": None,
+            "code": "interrupted",
+            "message": "The workspace stopped the run",
+        }
+        assert (cancelled["status"], cancelled["error"]) == ("cancelled", None)
+        finished = backend.socket.notes("chat.finished")
+        assert [(f["status"], f.get("error")) for f in finished] == [
+            ("interrupted", stopped["error"]),
+            ("cancelled", None),
+        ]
+
+    run(system, scenario)
+
+
 def test_chat_send_forwards_optional_context_and_instructions_to_the_admission(system):
     view = {"id": "league-standings", "label": "League standings"}
     sent = {}
@@ -830,6 +875,9 @@ def test_tasks_goals_cancellation_and_pending_input(system):
         assert (
             code(await call(backend, "task.cancel", {**cancel, "scope": WORKSPACE})) == "forbidden"
         )
+        unregistered = {**LEAGUE, "coworld": "cow_unregistered"}
+        stray = {"task_id": "cow_unregistered:T-1", "scope": unregistered}
+        assert code(await call(backend, "task.cancel", stray)) == "not_found"
 
         session_id = await opened(backend)
         hermes.script = lambda run: gateway.controls.__setitem__(
@@ -870,10 +918,20 @@ def test_tasks_goals_cancellation_and_pending_input(system):
             answer | {"response": {"kind": "clarification", "answer": "x"}},
         )
         assert code(wrong) == "conflict"
-        applied = await call(
-            backend, "input.respond", answer | {"response": {"kind": "approval", "choice": "once"}}
-        )
+        once = answer | {"response": {"kind": "approval", "choice": "once"}}
+        respond_id = str(uuid4())
+        applied = await call(backend, "input.respond", once, request_id=respond_id)
         assert applied["result"] == {"applied": True}
+        # An identical retry replays the result, also from a rebuilt backend, without answering
+        # the resolved prompt again; other input under that id is refused.
+        again = await call(backend, "input.respond", once, request_id=respond_id)
+        assert again["result"] == {"applied": True}
+        backend = backend.restart()
+        again = await call(backend, "input.respond", once, request_id=respond_id)
+        assert again["result"] == {"applied": True}
+        deny = answer | {"response": {"kind": "approval", "choice": "deny"}}
+        reused = await call(backend, "input.respond", deny, request_id=respond_id)
+        assert code(reused) == "id_reused"
         assert gateway.answers == [
             ("approval", {"request_id": "p1", "execution_generation": 3, "choice": "once"})
         ]

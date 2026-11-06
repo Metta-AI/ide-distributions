@@ -113,7 +113,9 @@ it until the platform routes a frontend to it. The contract stays in Metta; this
 bundle or validate it, the relay does.
 
 Each method maps to the same seam and gateway calls as the legacy adapter. The AIDE request id
-is the seam `op_id` or gateway `Idempotency-Key`, so retries need no new tables. Notifications
+is the seam `op_id` or gateway `Idempotency-Key`, so retries need no new tables. The gateway
+forgets a prompt once it is resolved, so an applied `input.respond` is also recorded at the
+seam's `/input-response`, which an identical retry replays. Notifications
 go to the frontends that named a session in the last ten minutes: run output from the gateway's
 resumable run stream (`chat.chunk`, `chat.message`, `chat.finished`) and session changes from
 the seam's event stream (`state.changed`). Coworld sessions without a league have no AIDE scope

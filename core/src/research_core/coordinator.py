@@ -1066,6 +1066,11 @@ class Coordinator:
             return
         if not status.terminal:
             return
+        outcome, error = status.status, status.error
+        if outcome == "cancelled" and not row["cancel_requested"]:
+            # Only a /message-cancel cancels an input. A run stopped without one (a drain, a
+            # task abandon, a gateway shutdown) was interrupted under the input.
+            outcome, error = "interrupted", error or "The workspace stopped the run"
         error_class = None
         if status.status == "failed" and row["origin"] == "client":
             error_class = self._classify(row, status)
@@ -1081,12 +1086,12 @@ class Coordinator:
             tx.execute(
                 "UPDATE client_admissions SET status=?,error=?,error_class=?,"
                 "run_id=COALESCE(run_id,?) WHERE op_id=?",
-                (status.status, status.error, error_class, status.run_id, row["op_id"]),
+                (outcome, error, error_class, status.run_id, row["op_id"]),
             )
             tx.event(
                 "client.finished",
                 row["op_id"],
-                {"status": status.status, "error_class": error_class},
+                {"status": outcome, "error_class": error_class},
             )
         self.observe_terminal(row, status)
 
