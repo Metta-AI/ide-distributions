@@ -245,15 +245,24 @@ A snapshot taken after `research workspace sleep` exited 0 needs nothing more. F
 of a workspace that stays awake, run `research store quiesce --then <snapshot command>`, or
 run `research store quiesce` in the background and initiate the snapshot when its first JSON
 line appears. It checkpoints each database's WAL into its file, takes and holds the write lock
-on the workspace store, every Coworld store and (with `HERMES_HOME` set) that profile's Hermes
-`state.db`, fsyncs each file and its directory, and holds for at most 30 seconds (`--max-hold`;
-a `--then` command still running is killed). Without `--then` it holds for all of that time.
+on every Coworld store, the workspace store and (with `HERMES_HOME` set) that profile's Hermes
+`state.db`, in that order (a transition nests its workspace write inside its Coworld write, so the
+reverse would let the two wait on each other), fsyncs each file and its directory, and holds for at
+most 30 seconds (`--max-hold`; a `--then` command still running is killed). Without `--then` it holds for all of that time.
 Do not raise `--max-hold` above the default on a workspace running chats: the AIDE backend's seam
 calls outlast the default hold by a few seconds, and a longer one can time out an append, which
 recycles the runtime (`image/README.md`).
-Readers continue and database writers wait, so the
-snapshot is one consistent recovery point across the databases. Nothing stops writes to ordinary
-files, so a document or worktree may be mid-write from a tool process.
+Readers continue and database writers wait, so the databases it locked stop at one moment: a
+transaction spanning stores has either finished or not begun. That recovery point has limits:
+
+- The list of Coworlds is read before the first lock, so a Coworld registered after that is not
+  locked or checkpointed: it keeps taking writes, and is in the snapshot as a crash would leave it.
+- Only the `state.db` of the `HERMES_HOME` profile is locked. Other profiles' transcripts are also
+  as a crash would leave them.
+- Work done as several transactions in a row can be caught between them, as it can by a crash.
+- Nothing stops writes to ordinary files, so a document or worktree may be mid-write from a tool
+  process.
+
 Keep the hold short: a store connection opened before the hold began waits only its usual five
 seconds before reporting "database is locked", so initiate the snapshot within that time. Stores
 opened during the hold wait for the whole of it, including a restored copy not yet in WAL mode,

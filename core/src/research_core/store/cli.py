@@ -464,7 +464,10 @@ def backup_sources(ws: layout.Workspace, env: Mapping[str, str]) -> list[tuple[s
     sources = [("workspace.db", "workspace", ws.store_path)]
     conn = _read_only(ws.store_path)
     try:
-        ids = [row[0] for row in conn.execute("SELECT coworld_id FROM coworlds ORDER BY created")]
+        ids = [
+            row[0]
+            for row in conn.execute("SELECT coworld_id FROM coworlds ORDER BY created, coworld_id")
+        ]
     finally:
         conn.close()
     for coworld_id in ids:
@@ -476,6 +479,18 @@ def backup_sources(ws: layout.Workspace, env: Mapping[str, str]) -> list[tuple[s
         if hermes_state.exists():
             sources.append(("hermes-state.db", "hermes", hermes_state))
     return sources
+
+
+def lock_order(ws: layout.Workspace, env: Mapping[str, str]) -> list[Path]:
+    """The databases ``backup`` covers, in the order every holder of several write locks takes them.
+
+    A transition writes to its Coworld store's transaction and then, inside it, to the workspace
+    store, so anything locking both must take a Coworld store first. The other order lets the
+    two wait on each other until one of them fails ``database is locked``. Hermes's ``state.db``
+    comes last: nothing here writes it inside a store's transaction.
+    """
+    rank = {"coworld": 0, "workspace": 1, "hermes": 2}
+    return [path for _, kind, path in sorted(backup_sources(ws, env), key=lambda s: rank[s[1]])]
 
 
 def copy_database(
@@ -606,7 +621,7 @@ def run_quiesce(args: argparse.Namespace) -> int:
         return _fail("--then needs a command to run while the locks are held")
     ws = layout.from_env()
     try:
-        databases = [path for _, _, path in backup_sources(ws, os.environ)]
+        databases = lock_order(ws, os.environ)
     except (sqlite3.Error, OSError) as error:
         return _fail(f"quiesce failed: {error}")
     return quiesce(ws, databases, max_hold_s=args.max_hold, then=args.then)
@@ -617,9 +632,11 @@ def quiesce(
 ) -> int:
     """Checkpoint, write-lock and fsync every database, hold, then release the locks.
 
-    The databases are those ``backup`` copies, in that fixed order, so two quiesces cannot
-    deadlock each other. Readers continue throughout; a writer waits on its busy timeout, which
-    the marker file raises for stores opened during the hold (``Store.open``). The hold is the
+    The databases are those ``backup`` copies, in ``lock_order``, so a quiesce cannot deadlock
+    with another one or with a cross-store writer. No commit lands anywhere once the last lock is
+    held, so the order does not change what a snapshot taken after that contains. Readers
+    continue throughout; a writer waits on its busy timeout, which the marker file raises for
+    stores opened during the hold (``Store.open``). The hold is the
     ``--then`` command bounded by ``max_hold_s`` (killed when it runs over) or a plain sleep of
     ``max_hold_s``. The locks are released however the hold ends: a failing or killed command,
     SIGTERM, or Ctrl-C.

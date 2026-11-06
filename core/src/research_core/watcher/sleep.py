@@ -226,7 +226,7 @@ def sleep_databases(
     ws: layout.Workspace, env: Mapping[str, str], researcher_profiles: tuple[str, ...]
 ) -> list[Path]:
     """The databases ``backup`` covers, plus each Researcher profile's Hermes ``state.db``."""
-    databases = [path for _name, _kind, path in store_cli.backup_sources(ws, env)]
+    databases = store_cli.lock_order(ws, env)
     if env.get("HERMES_HOME"):
         profiles_root = Path(env["HERMES_HOME"]).expanduser().parent
         for profile in researcher_profiles:
