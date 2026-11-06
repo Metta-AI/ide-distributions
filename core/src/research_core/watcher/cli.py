@@ -91,12 +91,15 @@ def run_status(args: argparse.Namespace) -> int:
         age_s = None
         if heartbeat is not None:
             age_s = round((datetime.now(UTC) - parse_iso(heartbeat)).total_seconds(), 1)
+        waiting_on = json.loads(
+            wstore.get_meta("has_work_reasons") or "[]"
+        ) + admissions.work_reasons(wstore)
         payload = {
             "ok": True,
             "heartbeat": heartbeat,
             "heartbeat_age_s": age_s,
-            "has_work": wstore.get_meta("has_work") == "1",
-            "waiting_on": json.loads(wstore.get_meta("has_work_reasons") or "[]"),
+            "has_work": bool(waiting_on),
+            "waiting_on": waiting_on,
             "paused": bool(settings.get(wstore, "paused")),
             "paused_drained": wstore.get_meta(PAUSED_DRAINED_KEY) == "1",
             "sleep_started": wstore.get_meta("sleep_started"),

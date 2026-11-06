@@ -57,10 +57,17 @@ class Lifecycle:
             self.sleep_task = asyncio.create_task(self.prepare_sleep())
         sleeping = self.sleep_task is not None
         complete = sleeping and self.sleep_task.done()
+        if sleeping and not complete:
+            detail = "Preparing for sleep"
+        elif activity["waiting_on"]:
+            # Why the workspace stays awake, so hosting can see it; the platform caps detail.
+            detail = ("Awake for " + ", ".join(activity["waiting_on"]))[:1024]
+        else:
+            detail = ""
         return {
             "ready": True,
             "ready_for_sleep": complete and self.sleep_task.result() == 0,
-            "detail": "Preparing for sleep" if sleeping and not complete else "",
+            "detail": detail,
         }
 
 

@@ -299,6 +299,9 @@ def test_busy_wake_keeps_its_claim_and_immutable_admission(tmp_path):
     assert ctx.store.one("SELECT attempts FROM handled_events WHERE seq=?", (seq,))[0] == 1
     assert ctx.wstore.one("SELECT count(*) FROM client_admissions")[0] == 1
     ctx.hermes.set_busy(False)
+    # The refusal backs off for recovery.delivery_backoff_seconds; let that pass.
+    with ctx.wstore.tx(HARNESS) as tx:
+        tx.execute("UPDATE client_admissions SET retry_at=NULL")
     dispatch_inputs(ctx)
     assert ctx.wstore.one("SELECT run_id FROM client_admissions WHERE op_id=?", (row["op_id"],))[0]
     assert len(ctx.hermes.runs) == 1
