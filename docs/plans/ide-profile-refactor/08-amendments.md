@@ -210,9 +210,10 @@ and task it changes. Implementers read this file with their entry.
   event acknowledged once, the chat run not blocked), `test_submissions_mode_ask` (autonomous
   candidate → Orchestrator asks via `ui.ask` → UI answer → submit), `test_orchestrator_change_is_
   reviewed_and_merged` and its conflict path.
-- A5.11 `has_work` keeps the narrowed reading ("an open autonomous-submission window **with a
-  candidate**"), because `submissions.until = null` is always open; record the reason in the
-  docstring.
+- A5.11 *Superseded:* `has_work` no longer counts an autonomous-submission candidate. The
+  `submission.candidate` event queues the management wake that acts on it, which counts as
+  `wake:queued` while pending; a candidate with no such wake (a baseline arm, a Version below the
+  submission bar) has nothing to run and would keep the workspace awake forever.
 
 ## Seam (entry 6)
 

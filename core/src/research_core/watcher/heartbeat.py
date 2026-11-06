@@ -5,8 +5,8 @@ Every tick writes ``meta.heartbeat`` (the tick's time) and ``meta.has_work`` (``
 since …" and hosting reads the second as a reason to stay awake. A ``watcher.heartbeat``
 event is appended only every :data:`EVENT_INTERVAL`, so the events log stays readable.
 
-"has work" is ``drain.has_work`` (a running Researcher run, a background process a Task waits
-on, an open autonomous-submission window with a candidate) or a queued wake; a Task waiting on
+"has work" is ``drain.has_work`` (a running Researcher run, a transition command ready to apply,
+a background process a Task waits on) or a queued wake; a Task waiting on
 the platform does not count. Until ``drain`` is built, queued wakes alone decide.
 """
 

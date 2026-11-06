@@ -9,14 +9,14 @@ waits up to a minute for the stopped runs to end and emits ``drain.done``. After
 dispatch step resumes drained Sessions first, with their own session ids.
 
 ``has_work`` is the signal hosting reads to keep the workspace awake. It is true only for work
-that is running or ready to run: a live Researcher run, a background process a Task waits on (it
-runs on this machine, so a sleep would kill it), an open autonomous-submission window **with a
-candidate**, or a queued wake. A Task waiting on the platform (XP, credits, a submission) does
-not keep the workspace awake: the platform keeps working while it sleeps, and the first tick
-after the wake reads the result. The window alone is not
-work (A5.11): ``submissions.until`` is null by default, so an "open window" would hold every
-workspace awake forever; a candidate is a succeeded Task that answered ``submission_candidate:
-yes`` with a tested Version no ``version.submitted`` event names yet.
+that is running or ready to run: a live Researcher run, a transition command the coordinator can
+apply now, a background process a Task waits on (it runs on this machine, so a sleep would kill
+it), or a queued wake. A Task waiting on the platform (XP, credits, a submission) does not keep
+the workspace awake: the platform keeps working while it sleeps, and the first tick after the
+wake reads the result. Neither does a transition command waiting out its ``retry_at`` backoff:
+the coordinator applies it on the first tick after that time, awake or after the next wake. A
+submission candidate is acted on by the management wake its ``submission.candidate`` event
+queues, so it counts as ``wake:queued`` while that wake is pending.
 """
 
 from __future__ import annotations
@@ -28,9 +28,8 @@ from collections.abc import Callable
 from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
-from research_core.store import coworlds, sessions, settings, tasks
+from research_core.store import coworlds, sessions, tasks
 from research_core.store._common import parse_iso
-from research_core.store.db import Store
 from research_core.watcher import dispatch, wakes
 from research_core.watcher.context import _open_coworld_store
 from research_core.watcher.hermes_api import RunsError
@@ -143,42 +142,25 @@ def has_work(ctx: TickContext) -> bool:
 
 def work_reasons(ctx: TickContext) -> list[str]:
     """Why the workspace must stay awake, one short reason per cause, in a fixed order: live
-    Researcher runs (``session:<id>:running``), queued transitions (``transition:queued``), Tasks
-    waiting on a background process (``task:T-n:waiting:process``), an autonomous-submission
-    candidate (``submission:candidate``) and queued wakes (``wake:queued``). Empty means sleep is
-    fine. The heartbeat records the list; ``research watcher status`` shows it."""
+    Researcher runs (``session:<id>:running``), transition commands the coordinator can apply now
+    (``transition:queued``), Tasks waiting on a background process (``task:T-n:waiting:process``)
+    and queued wakes (``wake:queued``). Empty means sleep is fine. The heartbeat records the list;
+    ``research watcher status`` shows it."""
     reasons = [f"session:{sid}:running" for sid in dispatch.live_task_sessions(ctx)]
     if ctx.store is not None:
-        if ctx.store.one("SELECT 1 FROM transition_commands WHERE result IS NULL LIMIT 1"):
+        now = parse_iso(ctx.store.now())
+        if any(
+            row["retry_at"] is None or parse_iso(row["retry_at"]) <= now
+            for row in ctx.store.q("SELECT retry_at FROM transition_commands WHERE result IS NULL")
+        ):
             reasons.append("transition:queued")
         for task in tasks.list(ctx.store, status="in-progress"):
             kind = (task["waiting_on"] or {}).get("kind")
             if kind in RUNNING_WAIT_KINDS:
                 reasons.append(f"task:{task['id']}:waiting:{kind}")
-        if autonomous_candidate(ctx):
-            reasons.append("submission:candidate")
     if wakes.has_queued_wakes(ctx):
         reasons.append("wake:queued")
     return reasons
-
-
-def autonomous_candidate(ctx: TickContext) -> bool:
-    """An open autonomous-submission window with a Version waiting to be submitted (A5.11)."""
-    store = ctx.store
-    if settings.get(store, "submissions.mode") != "autonomous":
-        return False
-    until = settings.get(store, "submissions.until")
-    if until is not None and parse_iso(until) <= ctx.now:
-        return False
-    submitted = _submitted_versions(store)
-    for task in tasks.list(store, status="complete"):
-        checklist = task["checklist"] or {}
-        if task["outcome"] != "succeeded" or checklist.get("submission_candidate") != "yes":
-            continue
-        tested = checklist.get("versions") or []
-        if any(version not in submitted for version in tested):
-            return True
-    return False
 
 
 # --- helpers ----------------------------------------------------------------------------------
@@ -193,11 +175,6 @@ def still_running(ctx: TickContext, session: dict[str, Any] | None) -> bool:
     except RunsError:
         return False  # an unreachable gateway cannot be waited on; it is not our run any more
     return not status.terminal
-
-
-def _submitted_versions(store: Store) -> set[str]:
-    rows = store.q("SELECT DISTINCT subject FROM events WHERE kind = 'version.submitted'")
-    return {row["subject"] for row in rows}
 
 
 def _pid(ref: Any) -> int | None:

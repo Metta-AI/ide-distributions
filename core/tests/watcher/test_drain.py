@@ -8,15 +8,17 @@ import os
 import signal
 import subprocess
 import sys
+from datetime import timedelta
 
 from research_core.store import sessions, tasks
+from research_core.store._common import parse_iso
 from research_core.store.actors import Actor
 from research_core.watcher import drain
 from tests.watcher._support import (
+    advance,
     events_of,
     make_ctx,
     make_task,
-    set_setting,
     task_number,
     working_session,
 )
@@ -104,21 +106,30 @@ def test_has_work_cases(tmp_path):
     assert drain.has_work(ctx) is True
 
 
-def test_has_work_autonomous_window_needs_a_candidate(tmp_path):
+def test_submission_candidate_is_work_only_through_its_wake(tmp_path):
     ctx = make_ctx(tmp_path)
-    assert drain.has_work(ctx) is False  # the window is open (until is null) but empty
-    candidate_task(ctx, versions=["V-1"])
-    assert drain.has_work(ctx) is True
+    candidate_task(ctx, versions=["V-1"])  # never submitted: a baseline arm, or below the bar
+    assert drain.work_reasons(ctx) == []  # nothing runs for it, so it cannot hold sleep off
+    with ctx.store.tx(ctx.actor) as tx:  # the merge queues the management wake that acts on it
+        tx.event("submission.candidate", "T-1", {"task": "T-1", "versions": ["V-1"]})
+    assert drain.work_reasons(ctx) == ["wake:queued"]
+
+
+def test_transition_is_work_only_while_runnable(tmp_path):
+    ctx = make_ctx(tmp_path)
     with ctx.store.tx(ctx.actor) as tx:
-        tx.event("version.submitted", "V-1", {"league_id": "league_fake"})
-    assert drain.has_work(ctx) is False
-    candidate_task(ctx, versions=["V-2"])
-    assert drain.has_work(ctx) is True
-    set_setting(ctx, "submissions.mode", "ask")
-    assert drain.has_work(ctx) is False
-    set_setting(ctx, "submissions.mode", "autonomous")
-    set_setting(ctx, "submissions.until", "2026-10-01T00:00:00Z")  # the window closed
-    assert drain.has_work(ctx) is False
+        tx.execute(
+            "INSERT INTO transition_commands(id,tool,args,role,actor,created_at)"
+            " VALUES ('cmd-1','task_complete','{}','researcher','harness',?)",
+            (tx.at,),
+        )
+    assert drain.work_reasons(ctx) == ["transition:queued"]  # the coordinator applies it now
+    retry_at = (parse_iso(ctx.store.now()) + timedelta(seconds=60)).isoformat()  # as transitions
+    with ctx.store.tx(ctx.actor) as tx:
+        tx.execute("UPDATE transition_commands SET retry_at=? WHERE id='cmd-1'", (retry_at,))
+    assert drain.work_reasons(ctx) == []  # backing off: the first tick after the wake retries it
+    advance(ctx, 60)
+    assert drain.work_reasons(ctx) == ["transition:queued"]  # due again
 
 
 def candidate_task(ctx, *, versions: list[str]) -> None:
