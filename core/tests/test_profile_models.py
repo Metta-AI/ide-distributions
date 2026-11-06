@@ -140,7 +140,7 @@ def test_the_shipped_defaults_per_role(seam):
 
 
 def test_no_manifest_asks_the_host_for_a_model():
-    for manifest in ("orchestrator", "researcher", "play", "play/builder"):
+    for manifest in ("orchestrator", "researcher"):
         text = (REPO / manifest / "distribution.yaml").read_text()
         assert "OPENROUTER_MODEL" not in text, manifest
 

@@ -17,7 +17,6 @@ jobs:
       pull-requests: read
     outputs:
       core: ${{ steps.filter.outputs.core }}
-      play: ${{ steps.filter.outputs.play }}
     steps:
       - uses: dorny/paths-filter@v4
         id: filter
@@ -28,11 +27,7 @@ jobs:
               - '**'
               - '!docs/**'
               - '!README.md'
-              - '!play/**'
               - '!.github/workflows/release-*.yml'
-            play:
-              - 'play/**'
-              - '.github/workflows/ci.yml'
 
   core:
     needs: changes
@@ -91,45 +86,3 @@ jobs:
       - name: Unit and scenario tests
         if: env.RUN_TESTS == 'true'
         run: uv run pytest -q
-
-  play:
-    needs: changes
-    if: ${{ !cancelled() }}
-    runs-on: ubuntu-latest
-    container:
-      image: nousresearch/hermes-agent@sha256:d27689bc6e8581ec884a7227c9101fdaebf6c853cff8859020dac14f21452b4d
-      options: --user 0
-    env:
-      GIT_AUTHOR_NAME: IDE CI
-      GIT_AUTHOR_EMAIL: ide-ci@example.invalid
-      GIT_COMMITTER_NAME: IDE CI
-      GIT_COMMITTER_EMAIL: ide-ci@example.invalid
-      HERMES_PYTHON: /opt/hermes/.venv/bin/python
-      RUN_TESTS: ${{ github.event_name != 'pull_request' || needs.changes.result != 'success' || needs.changes.outputs.play == 'true' }}
-    defaults:
-      run:
-        working-directory: play
-    steps:
-      - name: Skip when this change cannot affect play
-        if: env.RUN_TESTS != 'true'
-        working-directory: /
-        run: echo "No change in this pull request affects play; skipping its tests."
-      - uses: actions/checkout@v4
-        if: env.RUN_TESTS == 'true'
-      - uses: astral-sh/setup-uv@v6
-        if: env.RUN_TESTS == 'true'
-        with:
-          python-version: "3.12"
-      - name: Expose the installed Hermes runtime
-        if: env.RUN_TESTS == 'true'
-        run: echo /opt/hermes/.venv/bin >> "$GITHUB_PATH"
-      - run: uv sync --frozen
-        if: env.RUN_TESTS == 'true'
-      - name: Lint
-        if: env.RUN_TESTS == 'true'
-        run: uv run ruff check .
-      - run: uv run pytest -q
-        if: env.RUN_TESTS == 'true'
-      - name: Validate real Hermes plugin registration
-        if: env.RUN_TESTS == 'true'
-        run: uv run pytest -q -m hermes tests/test_hermes.py
