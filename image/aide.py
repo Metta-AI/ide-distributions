@@ -827,18 +827,19 @@ class Backend:
         )
         if Opening.model_validate_json(opening).pending:
             return []
-        try:
-            page = await self.call(
-                self.gateway,
-                "GET",
-                f"api/sessions/{quote(session_id, safe='')}/messages",
-                params={"order": "latest", "limit": limit, "offset": offset},
-            )
-        except Refusal as refusal:
-            if refusal.code == "not_found":
-                return []
-            raise
-        native = NativePage.model_validate_json(page).data[::-1]
+        headers: dict[str, str] = {}
+        propagator.inject(headers)
+        response = await self.gateway.get(
+            f"api/sessions/{quote(session_id, safe='')}/messages",
+            params={"order": "latest", "limit": limit, "offset": offset},
+            headers=headers,
+            timeout=30,
+        )
+        if response.status_code == 404:
+            return []
+        if not response.is_success:
+            raise Refusal("unavailable", response.text)
+        native = NativePage.model_validate_json(response.content).data[::-1]
         if not native:
             return []
         annotated = await self.call(
