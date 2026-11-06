@@ -158,9 +158,13 @@ def run(system, scenario):
                 async with asyncio.timeout(30):
                     await scenario(backend, gateway, ctx, hermes)
             finally:
-                watcher.cancel()
                 for bridge in list(backend.bridges.values()):
                     bridge.cancel()
+                # A cancel can be lost while the watcher reads the seam stream (cause not yet
+                # known), and the task group would then wait forever. Repeat it until it lands.
+                while not watcher.done():
+                    watcher.cancel()
+                    await asyncio.sleep(0.05)
 
     asyncio.run(main())
 
