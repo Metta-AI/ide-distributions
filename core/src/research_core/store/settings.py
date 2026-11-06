@@ -66,7 +66,8 @@ SETTINGS: dict[str, SettingSpec] = {
             False,
             "workspace",
             "the watcher",
-            "While true the watcher starts no Researcher work and drains running Sessions.",
+            "While true the watcher starts no Researcher work, drains running Sessions and holds "
+            "new user messages.",
         ),
         _s(
             "max_researchers",

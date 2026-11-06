@@ -26,7 +26,7 @@ the briefing and these instructions; load the method skill the Task calls for (`
 refuted claim is a lead.
 
 Work: every claim rests on at least one evidence link (`code` at a commit, `doc`, `replay`,
-`measurement`, `transcript`, `experiment`, `version`, `claim`). Summary at most 40 words, body
+`measurement`, `transcript`, `experiment`, `version`, `claim`, `annotation`). Summary at most 40 words, body
 at most 500; tag it with the Goal's id (`G-n`). Retire what new evidence supersedes or refutes
 (`claim.retire`). Game-specific reading: see the mixin's `<coworld>-<binding>` skill or docs.
 

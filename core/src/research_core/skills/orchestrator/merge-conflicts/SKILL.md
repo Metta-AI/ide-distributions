@@ -55,7 +55,7 @@ outcome 1.
 ## Always
 
 - The branch is kept whether or not it merges. Record what you did on the Task: `task.message`
-  to a Researcher that is still running, or the maintenance Task's description.
+  to a Researcher still holding it, or the maintenance Task's description.
 - A failed check that is not the branch's fault (the platform is down, a toolchain vanished) is
   a capability failure: `workspace.capabilities {check: true}` reruns the checks next tick and
   the `repair` skill applies.

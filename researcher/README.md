@@ -1,7 +1,7 @@
 # researcher
 
-A research worker of the Softmax IDE. `research serve` starts one Session per Task in
-this profile. The Session claims its Task (which creates its git worktree), works only there,
+A research worker of the Softmax IDE. `research serve` starts Sessions of this profile to work Tasks, one
+at a time per Task. The Session claims its Task (which creates its git worktree), works only there,
 records what it learns as claims and Experiment runs, proposes follow-up Tasks and submissions
 through its Task, waits through `task_wait` when something outside its control must happen, and
 ends by completing the Task. It speaks only to the Orchestrator (`task_ask`), never to the user.
@@ -22,7 +22,7 @@ Hermes distribution shell:
 ## Tools
 
 22 tools, listed in `plugins/researcher/plugin.yaml`; `goal` and `directive` are read-only. A
-Researcher cannot create Goals, submit or notify the user, and has no `github` or attachment tool;
+Researcher cannot create Goals, submit or notify the user, and has no `github` tool;
 it proposes Tasks and submissions through its own Task.
 
 ## Install

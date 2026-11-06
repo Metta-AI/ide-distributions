@@ -21,7 +21,7 @@ A claim is one finding with typed evidence. Everything you learn that someone wi
 
 - `summary`: at most 40 words, one sentence, the finding with its number and condition ("V-7 wins 58% against the champion over 40 paired seeds (CI 52–64), at the cost of 9% more timeouts").
 - `body`: at most 500 words. Detail, numbers with their n and comparison, the conditions, what you did not observe, and a closing paragraph "what would change our mind": the evidence that reopens or retires this finding. Negative and inconclusive results get the same care; they stop the next person repeating the work.
-- `tags`: words from the shared vocabulary and the records it belongs to: the Goal (`G-n`), the lever, the League or policy version id, the game version, and a kind such as `mechanism`, `opponent`, `standings`, `noise`, `lesson`. The result carries `new_tags`: for each tag no claim uses yet, the nearest existing tags. Reuse the existing one unless yours means something different; single-use tags are listed as housekeeping.
+- `tags`: words from the shared vocabulary and the records it belongs to: the Goal (`G-n`), the lever, the League or policy version id, the game version, and a kind such as `mechanism`, `opponent`, `standings`, `noise`, `lesson`. The result carries `new_tags`: for each tag no claim uses yet, the nearest existing tags. Reuse the existing one unless yours means something different.
 - `evidence`: at least one link `{type, ref, stance, note}`; `stance` is `supports`, `contradicts` or `qualifies`. Every reference is validated, and a record it names must exist.
 
 ## Evidence types and reference formats

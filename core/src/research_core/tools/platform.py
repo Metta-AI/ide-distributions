@@ -528,9 +528,9 @@ SPEC = tool(
         name="platform",
         description=(
             "Read the Softmax platform: leagues, standings, policies, results, episodes and "
-            "replays, credits, the champion, the forum and wiki, a Coworld's manifest. Reads "
-            "only; writes have their own tools. A persistent platform error makes a task "
-            "Session wait on it."
+            "replays, credits, the champion, the forum and wiki, a Coworld's manifest. Never "
+            "changes the platform; writes have their own tools. A persistent platform error makes "
+            "a task Session wait on it."
         ),
         handler=handle,
         roles=BOTH,

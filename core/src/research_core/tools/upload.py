@@ -315,7 +315,7 @@ SPEC = tool(
     ToolSpec(
         name="upload",
         description=(
-            "Upload a Version's exact built artifact to the platform as a policy version, once."
+            "Upload a Version's exact built artifact to the platform as a policy version."
             " An earlier attempt whose answer was lost is looked up, never sent again blindly."
             " Returns the Version with its status."
         ),

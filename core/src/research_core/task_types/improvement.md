@@ -46,7 +46,7 @@ before the first claim. Game-specific metrics, floors and rosters: see the mixin
 and `<coworld>-eval-design` skills or docs.
 
 Work, in order:
-1. When the Task names an Experiment (`experiment: X-n` in `task.read`), that is the one: finish
+1. When the Task names an Experiment (`experiment_id` in `task.read`), that is the one: finish
    its design with `experiment.update`. Otherwise `experiment_create {summary, task, hypothesis,
    methods}`. The hypothesis, metrics and decision rule (with `n_min`) are pre-registered. Then
    `experiment.start`; they lock.

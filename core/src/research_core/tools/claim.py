@@ -216,8 +216,9 @@ SPEC = tool(
             ),
             ActionSpec(
                 "retire",
-                "Supersede a claim with another (superseded_by), or refute it with killing "
-                "evidence given as type, ref and note; the claim is kept and stays findable.",
+                "Supersede a claim with another (status superseded needs superseded_by), or refute "
+                "it with killing evidence (status refuted needs type and ref); the claim is kept "
+                "and stays findable.",
                 {
                     "claim": CLAIM,
                     "status": a.string(

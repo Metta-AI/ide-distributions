@@ -3,11 +3,11 @@
 ``request`` creates one experience request per (seed, arm) for a running Experiment and
 records each as a run the moment the platform accepts it. The roster sets the player count, so
 ``_open_seats`` checks it against the game's manifest before any request is sent. ``status``
-refreshes the runs, downloads the results of completed requests, runs the mixin's ``evaluate`` command on them
-and stores the per-seat rows on the run, in the results-row contract the ``experiment`` tool
-closes on (``tools/experiment.py``: ``results.rows`` objects with ``episode_id``,
-``game_version``, ``policy_version`` as the Version's record id, ``seed``, ``seats``,
-``opponents``, ``metrics``, ``status``, ``reason``).
+refreshes the runs, downloads the results of completed requests, runs the mixin's ``evaluate``
+command on them and stores the per-seat rows on the run, in the results-row contract the
+``experiment`` tool closes on (``tools/experiment.py``: ``results.rows`` objects with
+``episode_id``, ``game_version``, ``policy_version`` as the Version's record id, ``seed``,
+``seats``, ``opponents``, ``metrics``, ``status``, ``reason``).
 
 Rules the tool keeps (A4.4): it puts a Task on a wait only when the platform stays down (below);
 a Researcher calls

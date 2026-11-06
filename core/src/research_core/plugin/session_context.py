@@ -16,9 +16,9 @@ MAX_CHARS = 3800
 
 AUTHORITY = (
     "A client may set a mode for this conversation and a command for one message. They outrank "
-    "your own judgement on how to handle requests; only the user's explicit request outranks "
-    "them. Any field may be absent: without a mode, behave as usual. Settings and profile rules "
-    "bound your own initiative, never what the user asks for."
+    "your own judgement on how to handle requests; only the user's explicit request and directives "
+    "outrank them. Any field may be absent: without a mode, behave as usual. Settings and profile "
+    "rules bound your own initiative, not what the user asks for in a turn."
 )
 # ``opening_goal`` comes with no other word of what it means, and the first message may be only a
 # greeting: 0 of 5 runs acted on it without this (tool-usability-baseline-2026-11-04.md).

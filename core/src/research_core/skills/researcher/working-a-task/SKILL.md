@@ -14,7 +14,7 @@ The assignment prompt names the Task and your first call: `task.claim {task: T-n
 workspace reserved ownership before starting you. This call renews that lease, creates
 `worktrees/task-<n>/` on branch `task/<n>` from `main`, and returns the Task, its Goal's id, the
 type's instructions and the Orchestrator's messages. A refused claim names its reason (ownership,
-an unset repository, a git failure, an unfinished dependency): end your run without writing anything.
+an unset repository, an unfinished dependency): end your run without writing anything.
 
 ## 2. Read before working
 
@@ -51,10 +51,10 @@ Anything outside your control is a wait: `task_wait {task, kind, detail, ref}` w
 (`ref`: the request ids from `xp.request`), `credits` (after a 402), `process` (`ref`: the pid of
 a background build or evaluate), `permit` (`ref`: the route to read), `submission` (`ref`: the
 policy version id), `platform` (set for you when a route keeps failing), `user` (`ref`: the setting
-or T-n their answer changes) or `dependency`. Then stop: end the run with no further tool call. That
+or T-n their answer changes) or `dependency` (`ref`: the T-n). Then stop: end the run with no further tool call. That
 is not quitting: the watcher continues the Task when the wait resolves, usually in a new Session.
 Never poll in a loop and never sleep. On resume, call the tool you were waiting for
-(`xp.status {experiment}` for XP) and `directive.list`, since your briefing does not update.
+(`xp.status {experiment}` for XP) and `directive.list`, since directives may have changed while you waited.
 
 ## 6. Complete
 
@@ -73,8 +73,8 @@ path; tried and it did not work is `outcome: "failed"`. End your run afterward. 
 
 ## 7. What happens next
 
-A review wake reads your Task, Experiment and claims. It accepts, and the watcher merges your
-commit after the mixin's build and check pass again, or it reopens the Task with a reason: this
-Session resumes with that reason, so read it and act on it rather than defending the first
+A review wake reads your Task, Experiment and claims. It accepts, and if the merge is on the watcher merges your
+commit after the mixin's build and check pass again, or it reopens the Task with a reason: the
+Task resumes with that reason, so read it and act on it rather than defending the first
 attempt. A proposed submission is decided by the Orchestrator under the user's settings; you
 never submit.
