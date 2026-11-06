@@ -115,9 +115,12 @@ class Gateway:
             session_id = path.split("/")[2]
             if session_id not in self.hermes.sessions:
                 return httpx.Response(404, json={"error": "Session not found"})
+            # Hermes ``order=latest``: offset and limit count back from the newest, and the page
+            # comes back oldest first.
+            assert request.url.params["order"] == "latest"
             rows = list(reversed(self.transcripts.get(session_id, [])))
             offset, limit = int(request.url.params["offset"]), int(request.url.params["limit"])
-            return httpx.Response(200, json={"data": rows[offset : offset + limit]})
+            return httpx.Response(200, json={"data": rows[offset : offset + limit][::-1]})
         run_id = path.split("/")[2]
         if run_id in self.retired:
             return httpx.Response(404, json={"error": "Run not found"})
@@ -731,14 +734,14 @@ def test_history_pages_by_a_stable_boundary_reads_forward_and_bounds_each_reply(
         for text in ("a", "b", "c", "d", "e"):
             gateway.say(session_id, role="assistant", content=text)
         params = {"session_id": session_id, "scope": WORKSPACE, "limit": 2}
-        seen, cursor_, arrived = [], None, False
+        pages, cursor_, arrived = [], None, False
         while True:
             page = (
                 await call(
                     backend, "chat.history", params | ({"cursor": cursor_} if cursor_ else {})
                 )
             )["result"]
-            seen = [i["message"]["content"] for i in page["items"]] + seen
+            pages.append([i["message"]["content"] for i in page["items"]])
             cursor_ = page["next_cursor"]
             if not arrived:
                 # New messages do not move a boundary already issued.
@@ -746,15 +749,17 @@ def test_history_pages_by_a_stable_boundary_reads_forward_and_bounds_each_reply(
                 arrived = True
             if cursor_ is None:
                 break
-        assert seen == ["a", "b", "c", "d", "e"]
+        # The newest records first, each page oldest first, no record repeated or skipped.
+        assert pages == [["d", "e"], ["b", "c"], ["a"]]
         first = await call(backend, "chat.history", {"session_id": session_id, "scope": WORKSPACE})
         sequences = [i["sequence"] for i in first["result"]["items"]]
+        assert sequences == sorted(sequences)
         forward = await call(
             backend,
             "chat.history",
-            {"session_id": session_id, "scope": WORKSPACE, "after_sequence": sequences[-3]},
+            {"session_id": session_id, "scope": WORKSPACE, "after_sequence": sequences[0]},
         )
-        assert [i["sequence"] for i in forward["result"]["items"]] == sequences[-2:]
+        assert [i["sequence"] for i in forward["result"]["items"]] == sequences[1:]
         assert forward["result"]["next_cursor"] is None
         for _ in range(3):
             gateway.say(session_id, role="assistant", content="x" * 400_000)
