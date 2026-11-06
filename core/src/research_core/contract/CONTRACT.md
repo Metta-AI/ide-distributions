@@ -124,7 +124,8 @@ messages stay `queued` behind it until it resumes, and a text message among them
 resumed run, as any follow-up joins a live run. A message that had joined the run that failed
 ends `failed` with the class rather than waiting: the one resume continues the whole
 conversation, that message included. `POST /message-cancel` cancels a `waiting` admission at
-once; a cancelled message never waits.
+once; a cancelled message never waits. It answers `409` for a message that joined another
+admission's live run, since stopping that run would end the other admission too.
 
 `run_id` is the admission's current run: `null` while it is `waiting`, and a new run on each
 resume. A client follows the admission's `status` until it is `completed`,

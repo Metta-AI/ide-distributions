@@ -99,7 +99,8 @@ def requests(store: Store, session_ids: list[str]) -> list[dict]:
 
     Beside :func:`snapshot`'s fields: ``origin``; ``resumes``; ``revision`` and ``updated_at``,
     the seq and time of the latest event about it; ``runs``, each run it started with its
-    ``attempt`` (the resumes before that run, from ``client.resumed``); and ``logged``, the last
+    ``attempt`` (the resumes before that run, from ``client.resumed``) and whether it was
+    ``steered`` (another admission's live run this one's message joined); and ``logged``, the last
     row of its event log (:func:`append_event`), once it has one. ``input`` is the user's
     message, or ``None`` for runtime work.
     """
@@ -132,7 +133,11 @@ def requests(store: Store, session_ids: list[str]) -> list[dict]:
             attempts[event["subject"]] = payload["resume"]
         elif payload["run_id"] not in {run["run_id"] for run in runs[event["subject"]]}:
             runs[event["subject"]].append(
-                {"attempt": attempts[event["subject"]], "run_id": payload["run_id"]}
+                {
+                    "attempt": attempts[event["subject"]],
+                    "run_id": payload["run_id"],
+                    "steered": "steered" in payload,
+                }
             )
     return [
         {
