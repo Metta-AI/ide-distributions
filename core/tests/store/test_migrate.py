@@ -163,8 +163,8 @@ def test_second_apply_is_a_noop():
 
 def test_apply_migrations_returns_the_version_it_reached():
     conn = sqlite3.connect(":memory:", isolation_level=None)
-    assert migrate.apply_migrations(conn, "workspace") == 10
-    assert conn.execute("PRAGMA user_version").fetchone()[0] == 10
+    assert migrate.apply_migrations(conn, "workspace") == 11
+    assert conn.execute("PRAGMA user_version").fetchone()[0] == 11
 
 
 def test_admission_waiting_migration_keeps_rows_and_adds_no_hold():
@@ -182,7 +182,7 @@ def test_admission_waiting_migration_keeps_rows_and_adds_no_hold():
         " VALUES (7,'op','message','{}','s','hi',?,'failed','run_1',1,'boom','t',42,'client')",
         (payload,),
     )
-    assert migrate.apply_migrations(conn, "workspace") == 10
+    assert migrate.apply_migrations(conn, "workspace") == 11
     row = conn.execute("SELECT rowid, * FROM client_admissions").fetchone()
     assert (row["rowid"], row["op_id"], row["status"], row["error"]) == (7, "op", "failed", "boom")
     assert (row["payload"], row["native_message_id"], row["origin"]) == (payload, 42, "client")
@@ -190,6 +190,25 @@ def test_admission_waiting_migration_keeps_rows_and_adds_no_hold():
     assert (
         migrate.schema_diff(migrate.expected_schema("workspace"), migrate.actual_schema(conn)) == []
     )
+
+
+def test_terminal_admissions_flagged_for_resolution_are_settled():
+    """0011 clears the resolution flag 0006 left on admissions that had already ended; one
+    that is still queued keeps it for the coordinator to close."""
+    conn = sqlite3.connect(":memory:", isolation_level=None)
+    conn.row_factory = sqlite3.Row
+    for number, path in migrate.migration_files("workspace")[:10]:
+        migrate._run_migration(conn, number, path)
+    for op_id, status in (("ended", "failed"), ("open", "queued")):
+        conn.execute(
+            "INSERT INTO client_admissions (op_id,kind,request,session_id,message,payload,status,"
+            "dispatch_started,resolution_required,created_at)"
+            " VALUES (?,'message','{}','s','hi','{}',?,1,1,'t')",
+            (op_id, status),
+        )
+    assert migrate.apply_migrations(conn, "workspace") == 11
+    flags = dict(conn.execute("SELECT op_id, resolution_required FROM client_admissions"))
+    assert flags == {"ended": 0, "open": 1}
 
 
 def test_scoped_notices_upgrade_keeps_existing_workspace_notices():
@@ -201,7 +220,7 @@ def test_scoped_notices_upgrade_keeps_existing_workspace_notices():
         "INSERT INTO notices(text,refs,urgency,created,created_by)"
         " VALUES ('Existing news','[]','normal','t','harness')"
     )
-    assert migrate.apply_migrations(conn, "workspace") == 10
+    assert migrate.apply_migrations(conn, "workspace") == 11
     row = conn.execute("SELECT * FROM notices").fetchone()
     assert row["text"] == "Existing news" and row["coworld_id"] is None
 

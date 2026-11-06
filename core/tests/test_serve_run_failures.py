@@ -540,3 +540,46 @@ def test_an_admission_awaiting_resolution_does_not_keep_the_workspace_awake(disp
     status = dispatch.server.status()
     assert f"admission:{op_id}:queued" not in status["waiting_on"]
     assert status["blocked_executions"][0]["op_id"] == op_id
+
+
+def test_a_finished_legacy_admission_flagged_for_resolution_is_settled(dispatch):
+    """0006 flagged legacy admissions whatever their status. A finished one has nothing to
+    resolve: the dispatcher's reconciliation clears it, so it neither reserves Researcher
+    capacity nor blocks sleep."""
+    from research_core.store import sessions
+
+    actor = Actor.user("test")
+    sessions.register(
+        dispatch.store,
+        actor,
+        session_id="worker-1",
+        profile="researcher",
+        kind="task",
+        coworld_id="world",
+        task_id=1,
+    )
+    op_id = admissions.enqueue(
+        dispatch.store,
+        actor,
+        key="legacy",
+        session_id="worker-1",
+        profile="researcher",
+        text="Repair",
+        origin="assignment",
+    )
+    with dispatch.store.tx(actor) as tx:
+        tx.execute(
+            "UPDATE client_admissions SET status='failed',dispatch_started=1,"
+            "resolution_required=1,error='legacy admission requires reconciliation'"
+            " WHERE op_id=?",
+            (op_id,),
+        )
+    assert admissions.reserved_workers(dispatch.store) == 1
+    dispatch.tick()
+    row = dispatch.store.one(
+        "SELECT status,resolution_required FROM client_admissions WHERE op_id=?", (op_id,)
+    )
+    assert (row["status"], row["resolution_required"]) == ("failed", 0)
+    assert admissions.reserved_workers(dispatch.store) == 0
+    status = dispatch.server.status()
+    assert status["blocked_executions"] == [] and status["has_work"] is False
