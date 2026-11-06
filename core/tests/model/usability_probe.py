@@ -14,7 +14,9 @@ every call in a reply, so a write later in the reply that settled a run makes it
 - any other call that passes the checks and changes something ends the run as ``wrong_act``:
   production would have acted on it unless a store check not run here refuses it, as the last
   paragraph but one says. One the checks refuse changes nothing, so it gets the refusal and the run
-  goes on.
+  goes on;
+- where ``situation.stop`` is set, any call but opening a skill ends the run as ``wrong_act``, even
+  a read or a refused call.
 
 Outcomes: ``right`` (also words alone when ``"text"`` is in ``situation.acts``), ``wrong_act``,
 ``text`` (answered in words where a call was wanted, with or without earlier calls, or with
@@ -108,7 +110,8 @@ class Run:
     act_attempts: int = 0  # calls naming an expected act
     args_right: bool | None = None  # whether the right call holds what ``situation.args`` asks
     act_args: dict | None = None  # the arguments of the call that ended the run
-    act_applied: bool | None = None  # :func:`_would_apply`; None too for a wanted read
+    # :func:`_would_apply`; None too when a wanted read ended the run, or no call did.
+    act_applied: bool | None = None
     wrong_attempts: list[str] = field(default_factory=list)  # unwanted writes, refused ones too
     problems: list[str] = field(default_factory=list)  # what the checks said, per refused call
     unknown_tools: list[str] = field(default_factory=list)
@@ -324,8 +327,9 @@ def _only_reads(name: str, args: dict | None) -> bool:
 def _task_complete_problems(situation: Situation, args: dict) -> list[str]:
     """What ``tasks.complete``'s own checks refuse in this call, on the situation's Task. As in
     ``write_actions.RECORD_CHECKS``, the records it names exist; so does a commit on the Task's
-    branch, as there is no repository here. It is not a ``RECORD_CHECKS`` entry because a refusal
-    there lets the run go on, which would change ``right`` and ``wrong_act``."""
+    branch, as there is no repository here. The holder check is not run. It is not a
+    ``RECORD_CHECKS`` entry because a refusal there lets the run go on, which would change ``right``
+    and ``wrong_act``."""
     own = int(TASK_ID.removeprefix("T-"))
     try:
         named = record_number(args.get("task"), "task", "task")

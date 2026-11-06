@@ -197,10 +197,12 @@ these rates by itself, so judge a drop by running the same test code on both sid
 changed since that baseline, so until it is rewritten a comparison opens by saying the two are not
 comparable, and it leaves out `r-wait-credits` and `r-hard-wait-credits-args`. `right` and
 `wrong_act` are the strict measure: `wrong_act` is what the model tried, and it counts a
-`task.complete` that `tasks.complete` would refuse. Beside them, `wrong_attempted`, `wrong_applied`,
-`wrong_unchecked` and `right_refused` say what would have happened; the docstring of
-[`usability_probe.py`](core/tests/model/usability_probe.py) defines them. The offline tests of its
-judging and read results run in the default `pytest`:
+`task.complete` that `tasks.complete` would refuse. `compare` prints four run counts beside them:
+`wrong_attempted` (tried an unwanted write, even a refused one), `wrong_applied` and
+`wrong_unchecked` (a `wrong_act` whose call would apply, or that no store check here covers), and
+`right_refused` (a `right` the store would refuse). The docstring of
+[`usability_probe.py`](core/tests/model/usability_probe.py) defines the run fields behind them. The
+offline tests of its judging and read results run in the default `pytest`:
 
 ```bash
 OPENROUTER_API_KEY=... IDE_HERMES_SRC=/path/to/hermes-agent \

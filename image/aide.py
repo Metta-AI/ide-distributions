@@ -6,8 +6,9 @@ progress from each request's event log in the workspace store, messages from the
 history. One consumer per open request is that log's only writer: it translates the gateway's
 run events, appends each, and only then pushes it, so a push carries the cursor of the read
 returning the same event. Consumers start with the backend and resume from their log's last
-row, so a restart loses nothing the log holds. A frontend is subscribed to a session from its
-first request naming it until the relay reports ``frontend.closed``.
+row, so a restart keeps what the log holds and loses what had not reached it, along with pushes
+not yet sent. A frontend is subscribed to a session from its first request naming it until the
+relay reports ``frontend.closed``.
 """
 
 import asyncio
@@ -1049,7 +1050,7 @@ class Backend:
 
         Returns whether the run is done here (terminal, or gone from the gateway) and the newest
         announced message id. A pending text merge is logged when it is due and whenever the
-        stream ends, so nothing read stays unlogged.
+        stream ends; a failure that ends the consumer loses it.
         """
         session_id, request_id = request.session_id, request.op_id
         last_seq = progress.consumed.setdefault(run.run_id, -1)
@@ -1115,7 +1116,8 @@ class Backend:
         outcome as the log's last event once the seam settles it.
 
         It resumes after the log's last row, so a restarted backend neither repeats nor skips
-        an event the log holds; the gateway's buffer covers only what happened in between.
+        an event the log holds. The gateway restarts with the backend, so its buffer does not
+        cover the gap. Any failure here but a dropped run stream ends the backend's task group.
         """
         wake = self.wakes[request_id]
         request = await self.request(session_id, scope, request_id)
@@ -1536,7 +1538,8 @@ async def serve(
     env: dict[str, str],
     inference: Availability,
 ) -> None:
-    """Hold the platform's AIDE backend socket forever; failures only delay reconnection."""
+    """Hold the platform's AIDE backend socket forever: a lost connection only delays reconnection.
+    A failed consumer or event watcher ends this, and ``runtime.py`` then recycles the runtime."""
     url = f"{platform_url.rstrip('/')}/v2/workspaces/{workspace_id}/aide/1.0.0/backend"
     url = "ws" + url.removeprefix("http")
     async with (

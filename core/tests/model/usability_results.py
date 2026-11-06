@@ -1,7 +1,8 @@
 """Turning the raw runs into the baseline file, and comparing two baselines.
 
 ``usability_baseline.json`` holds counts, not rates, so a later run can be tested against it:
-:func:`compare` runs Fisher's exact test on each count. With about 180 situations some will differ
+:func:`compare` runs Fisher's exact test on each count but the wrong-act ones, which it only
+prints. With about 180 situations some will differ
 by chance, so a single situation is listed only below p = 0.01 and a whole skill or tool below
 p = 0.05. Each situation and item carries a short hash of its text: a changed hash says the test
 or the text changed, which is what a before/after comparison needs to show.
@@ -83,7 +84,8 @@ def situation_row(situation: Situation, runs: list[dict]) -> dict:
         "args_right": sum(r.get("args_right") is True for r in counted),
         "attempted": len(attempts),
         "act_valid_first_try": sum(bool(r["act_valid"]) for r in attempts),
-        # Beside ``right``, not instead of it. Runs from before these fields count as none.
+        # Beside ``right``, not instead of it. A run from before these fields counts in none of
+        # them but ``wrong_unchecked``, where its ``wrong_act`` has no ``act_applied``.
         "wrong_attempted": sum(bool(r.get("wrong_attempts")) for r in counted),
         "wrong_applied": sum(
             r["outcome"] == "wrong_act" and r.get("act_applied") is True for r in counted
