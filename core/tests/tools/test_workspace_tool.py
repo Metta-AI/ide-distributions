@@ -227,6 +227,6 @@ def test_change_complete_makes_a_reviewed_maintenance_task(call, ctx_factory):
 
 
 def test_coworld_switch_offers_the_source_a_listed_coworld_does_not_need():
-    """The working-with-the-ide skill sends these for a fork; a closed schema drops what it hides."""
+    """The working-with-the-ide skill sends these for a fork; a closed schema drops hidden ones."""
     spec = research_core.tools.workspace.SPEC
     assert {"source", "commit"} <= set(spec.properties("orchestrator"))
