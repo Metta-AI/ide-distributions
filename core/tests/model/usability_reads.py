@@ -1206,7 +1206,8 @@ PLATFORM: dict[str, Callable[[Situation, dict], dict]] = {
     },
     "policy_file": lambda s, a: {
         "policy_version": a["policy_version"],
-        "path": f"/opt/data/workspace/cow_cogs/documents/policies/{a['policy_version']}.bin",
+        "path": f"/opt/data/workspace/cow_cogs/documents/policies/{a['policy_version']}.txt",
+        "content_type": "text/plain; charset=utf-8",
         "size_bytes": 2048,
         "sha256": "0" * 64,
         "identity": "player",

@@ -9,13 +9,15 @@ route, status and request id. Both roles have the tool; the Researcher acts as t
 (``identity: user`` and ``exclude_user`` are refused with the reason, and ``policy_file`` does not
 fall back to the User identity).
 
-Files land under the Coworld's ``documents/`` folder: ``policies/<policy version id>.bin`` and
+Files land under the Coworld's ``documents/`` folder: ``policies/<policy version id>.txt``
+for UTF-8 text (``.bin`` for binary files) and
 ``replays/<episode>.replay`` (pinned as ``replay`` / ``episode:<id>``). Results are plain dicts.
 Runs in the workspace environment (``executor="workspace"``).
 """
 
 from __future__ import annotations
 
+import codecs
 import hashlib
 from dataclasses import asdict
 from datetime import datetime
@@ -168,7 +170,7 @@ def policy_versions(call: ToolCall, platform: Platform) -> dict:
 def policy_file(call: ToolCall, platform: Platform) -> dict:
     """Download a policy version's file, which only its owner can read: the Player first, the User
     when the Player is refused (A4.6; the Orchestrator only). Written to
-    ``documents/policies/<id>.bin``."""
+    ``documents/policies/<id>.txt`` for UTF-8 text, or ``.bin`` for binary files."""
     ref = _id(call.get("policy_version"))
     tried: list[str] = []
     content: bytes | None = None
@@ -211,11 +213,22 @@ def policy_file(call: ToolCall, platform: Platform) -> dict:
         else:
             problems.append(f"refused as {' and as '.join(tried)}")
         raise ToolError(problems, **last.context, tried=tried)
-    path = _documents(call.ctx) / "policies" / f"{pv}.bin"
+    block_size = 64 * 1024
+    chunks = (
+        content[offset : offset + block_size] for offset in range(0, len(content), block_size)
+    )
+    is_text = all(
+        character.isprintable() or character in "\t\n\r"
+        for text in codecs.iterdecode(chunks, "utf-8-sig", errors="surrogateescape")
+        for character in text
+    )
+    suffix = ".txt" if is_text else ".bin"
+    path = _documents(call.ctx) / "policies" / f"{pv}{suffix}"
     _write(path, content)
     return {
         "policy_version": pv,
         "path": str(path),
+        "content_type": "text/plain; charset=utf-8" if is_text else "application/octet-stream",
         "size_bytes": len(content),
         "sha256": hashlib.sha256(content).hexdigest(),
         "identity": used,
@@ -589,7 +602,8 @@ SPEC = tool(
             ActionSpec(
                 "policy_file",
                 "Download the file of a policy version you own into documents/policies/ and "
-                "return the path; an image policy has none.",
+                "return its path and content_type. UTF-8 text is saved as .txt for read_file; "
+                "binary files use .bin. An image policy has none.",
                 {"policy_version": a.string("The policy version id or name:v3 label.")},
                 ("policy_version",),
             ),
