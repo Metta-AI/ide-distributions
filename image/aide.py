@@ -209,6 +209,7 @@ class SessionRow(BaseModel):
 class Run(BaseModel):
     attempt: int
     run_id: str
+    steered: bool  # another request's live run, which that request's consumer logs
 
 
 class Logged(BaseModel):
@@ -973,7 +974,7 @@ class Backend:
         after: int | None = None
         while True:
             try:
-                if after is None:  # recover once the seam answers
+                if after is None:  # the runtime starts this backend once the seam is healthy
                     await self.recover()
                     after = await self.start
                 async with self.seam.stream(
@@ -1144,7 +1145,8 @@ class Backend:
         It resumes after the log's last row, so a restarted backend neither repeats nor skips
         an event the log holds. The gateway restarts with the backend, so its buffer does not
         cover the gap. Any failure here but a dropped run stream or a failed read for a push ends
-        the backend's task group.
+        the backend's task group. A steered request's run is another request's, whose log holds
+        the stream: this log holds only the outcome.
         """
         wake = self.wakes[request_id]
         request = await self.request(session_id, scope, request_id)
@@ -1160,7 +1162,7 @@ class Backend:
             while True:
                 wake.clear()
                 request = await self.request(session_id, scope, request_id)
-                runs = [r for r in request.runs if r.run_id not in done]
+                runs = [r for r in request.runs if r.run_id not in done and not r.steered]
                 if runs:
                     run = runs[0]
                     progress = attempts.setdefault(run.attempt, Progress(run.attempt))
@@ -1171,7 +1173,10 @@ class Backend:
                         await asyncio.sleep(1)
                     continue
                 if request.status in TERMINAL:
-                    after = await self.publish(request_id, session_id, after)
+                    # A steered request's messages are its host run's, which that consumer
+                    # announces; read from this watermark they would repeat under this id.
+                    if not any(r.steered for r in request.runs):
+                        after = await self.publish(request_id, session_id, after)
                     final = attempts.get(request.resumes, Progress(request.resumes))
                     outcome = Finished(
                         attempt=request.resumes,
@@ -1542,6 +1547,9 @@ class Backend:
             max_size=2 * MAX_BYTES,
         ) as socket:
             Bound.model_validate_json(await socket.recv())
+            # Frontends subscribe through one binding; after a rebind they subscribe again by
+            # reading their sessions, so the last binding's frontends are stale.
+            self.subscribers.clear()
             self.socket = socket
             try:
                 async with asyncio.TaskGroup() as replies:

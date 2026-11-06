@@ -877,6 +877,113 @@ def test_a_run_gone_after_a_full_restart_ends_interrupted_with_its_events_readab
     run(system, scenario)
 
 
+def test_a_steered_follow_up_logs_only_its_outcome_and_leaves_the_host_run_alone(system):
+    async def scenario(backend, gateway, ctx, hermes):
+        session_id = await opened(backend)
+        script = gateway.script
+        gateway.script = lambda run_id: [*script(run_id)[:5], {"gate": True}, *script(run_id)[5:]]
+        first, follow_up = str(uuid4()), str(uuid4())
+        params = {"session_id": session_id, "messages": say("hi"), "scope": WORKSPACE}
+        await call(backend, "chat.send", params, request_id=first)
+        await until(lambda: started(backend))
+        await call(backend, "chat.send", params | {"messages": say("also")}, request_id=follow_up)
+        (run_id,) = hermes.runs
+        await until(lambda: hermes.steered.get(run_id) == ["also"])
+        # The follow-up rides the earlier request's run: cancelling it must not stop that run.
+        cancel = {"session_id": session_id, "request_id": follow_up, "scope": WORKSPACE}
+        assert code(await call(backend, "chat.cancel", cancel)) == "conflict"
+        assert "stop" not in [name for name, _ in hermes.calls]
+        gateway.gate.set()
+        await until(lambda: len(backend.socket.notes("chat.finished")) == 2)
+        finished = {f["request_id"]: f["status"] for f in backend.socket.notes("chat.finished")}
+        assert finished == {first: "completed", follow_up: "completed"}
+        hosted = (await events_read(backend, session_id, first))["result"]["events"]
+        assert [e["kind"] for e in hosted] == [
+            "reasoning",
+            "text.delta",
+            "tool.started",
+            "tool.completed",
+            "text.delta",
+            "finished",
+        ]
+        # The host run's stream is the first request's; the follow-up's log holds its outcome.
+        (outcome,) = (await events_read(backend, session_id, follow_up))["result"]["events"]
+        assert (outcome["kind"], cursor(outcome)) == ("finished", (0, 1))
+        pushed = {n["request_id"] for n in backend.socket.notes("chat.event")}
+        assert pushed == {first, follow_up}
+        assert len(backend.socket.notes("chat.event")) == len(hosted) + 1
+        # The host run's messages are announced once, under the request that started it.
+        messages = backend.socket.notes("chat.message")
+        assert messages and {m["request_id"] for m in messages} == {first}
+
+    run(system, scenario)
+
+
+def test_a_seam_error_while_logging_ends_the_backend_and_a_restart_resumes_the_log(system):
+    gateways = []
+
+    async def failing(backend, gateway, ctx, hermes):
+        gateways.append(gateway)
+        session_id = await opened(backend)
+        request = backend.seam.request
+
+        async def busy(method, path, **kwargs):
+            # The seam times out on the second event of the log; the gateway stream is healthy.
+            if (
+                path == "/message-events"
+                and method == "POST"
+                and kwargs["json"]["event"]["seq"] == 2
+            ):
+                raise httpx.ReadTimeout("seam busy")
+            return await request(method, path, **kwargs)
+
+        backend.seam.request = busy
+        params = {"session_id": session_id, "messages": say("hi"), "scope": WORKSPACE}
+        await call(backend, "chat.send", params)
+        await asyncio.Event().wait()  # until the consumer's failure ends the backend
+
+    with pytest.raises(ExceptionGroup) as ended:
+        run(system, failing)
+    (refusal,) = ended.value.exceptions
+    assert isinstance(refusal, aide.Refusal) and str(refusal) == "ReadTimeout"
+    assert isinstance(refusal.__cause__, httpx.ReadTimeout)
+    # Not taken for a gateway drop: the run's stream was opened once and nothing was skipped.
+    ((_, last_seq),) = gateways[0].event_requests
+    assert last_seq == "-1"
+
+    async def restarted(backend, gateway, ctx, hermes):
+        # The container restarts: a new seam client, gateway and backend, the same store.
+        request_id, session_id = ctx.wstore.one(
+            "SELECT op_id,session_id FROM client_admissions WHERE kind='message'"
+        )
+        await until(lambda: request_id in backend.finished)
+        read = (await events_read(backend, session_id, request_id))["result"]
+        assert [cursor(e) for e in read["events"]] == [(0, n) for n in range(1, 7)]
+        assert read["events"][-1]["status"] == "completed"
+
+    run(system, restarted)
+
+
+def test_a_relay_rebind_ends_the_last_bindings_subscriptions(system):
+    from websockets.asyncio.server import serve as websocket_server
+
+    async def scenario(backend, gateway, ctx, hermes):
+        session_id = await opened(backend)
+        assert backend.subscribers[session_id].frontends == {FRONTEND}
+        binding = {"backend_id": str(uuid4()), "version": "1.0.0", "max_message_bytes": 1048576}
+
+        async def relay(socket):
+            await socket.send(json.dumps({"binding": binding}))
+
+        async with websocket_server(
+            relay, "127.0.0.1", 0, select_subprotocol=lambda _, offered: offered[0]
+        ) as server:
+            await backend.connect(f"ws://127.0.0.1:{server.sockets[0].getsockname()[1]}", "proof")
+        assert backend.subscribers == {}
+
+    run(system, scenario)
+
+
 def test_only_a_chat_cancel_ends_a_running_request_cancelled(system):
     async def scenario(backend, gateway, ctx, hermes):
         session_id = await opened(backend)
@@ -1448,9 +1555,12 @@ def test_frontend_closed_ends_its_subscriptions(system):
     run(system, scenario)
 
 
-def test_relay_failures_reconnect_without_touching_the_legacy_connection():
+def test_relay_failures_reconnect_without_touching_the_legacy_connection(monkeypatch):
     from control import serve as legacy
     from websockets.asyncio.server import serve as websocket_server
+
+    # No seam runs here, and an unreachable seam ends the backend.
+    monkeypatch.setattr(aide.Backend, "watch", lambda self: asyncio.Event().wait())
 
     async def main():
         attempts, legacy_connections, bound = [], [], asyncio.Event()

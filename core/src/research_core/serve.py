@@ -831,6 +831,9 @@ class SeamServer:
             )
             if row is None:
                 raise Refused(HTTPStatus.NOT_FOUND, "Unknown message admission")
+            if row["dispatch_started"] and row["delivery_mode"] == "steer":
+                # Its run is another admission's: stopping it would end that request too.
+                raise Refused(HTTPStatus.CONFLICT, "The message was merged into a live run")
             if row["status"] in {"queued", "running"}:
                 with stores.wstore.tx(_actor(body.get("actor"))) as tx:
                     tx.execute(
