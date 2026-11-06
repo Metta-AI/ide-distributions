@@ -1,11 +1,12 @@
 """Compare the tool schemas frozen in a Session with what the deployed validator accepts.
 
 Hermes freezes a Session's tool list in its ``state.db`` (``sessions.tool_names`` points at a row
-of ``system_prompts`` holding ``{"version", "tools"}``) and keeps those bytes while Hermes's own
-code stays the same, so a Session opened before one of our deploys can be told to send arguments
-the deployed tools refuse. That cannot be fixed by a clearer refusal: a model on a closed schema
-does not send a field the schema leaves out. This reads the frozen list, offline, and names every
-disagreement that makes a correct call impossible or a shown option useless:
+of ``system_prompts`` holding ``{"version", "tools"}``). A boot clears those bytes when a release
+changes them (``frozen_sessions``), but until then a Session opened before one of our deploys can
+be told to send arguments the deployed tools refuse. That cannot be fixed by a clearer refusal: a
+model on a closed schema does not send a field the schema leaves out. This reads the frozen
+list, offline, and names every disagreement that makes a correct call impossible or a shown
+option useless:
 
 - a deployed tool or action missing from the frozen list (the model cannot choose it);
 - a frozen tool or action the role's validator refuses;
@@ -130,9 +131,10 @@ def _compare_tool(role: catalog.Role, spec: ToolSpec, parameters: dict) -> list[
         frozen_actions = (frozen.get("action") or {}).get("enum") or []
         for action in spec.actions_for(role):
             if action.name not in frozen_actions:
-                found.append(
-                    Drift(spec.name, action.name, "deployed action not in the frozen enum")
-                )
+                if not action.own_tool:  # no longer offered here, so a newer enum lacks it
+                    found.append(
+                        Drift(spec.name, action.name, "deployed action not in the frozen enum")
+                    )
                 continue
             found.extend(
                 Drift(spec.name, action.name, f"{f}: {MISSING}")
@@ -145,7 +147,7 @@ def _compare_tool(role: catalog.Role, spec: ToolSpec, parameters: dict) -> list[
             for name in frozen_actions
             if name not in allowed
         )
-    deployed = spec.properties(role)
+    deployed = spec.checked_fields(role)
     known = set(deployed) | {name for action in spec.actions or () for name in action.params}
     for name, schema in frozen.items():
         if name not in known:

@@ -7,12 +7,14 @@ decisions is `docs/plans/ide-profile-refactor/`.
 
 ## Two environments
 
-- **Hermes's interpreter** imports the stdlib-only base of this package (the plugin shim in each
-  profile puts `core/src` on `sys.path`, from the path `prepare.py` records). Everything the plugin
-  touches in process must import without third-party packages: `layout`, `refs`, `store/*`,
+- **Hermes's interpreter** imports a base of this package (the plugin shim in each profile puts
+  `core/src` on `sys.path`, from the path `prepare.py` records). It has the stdlib and OpenTelemetry,
+  which the image build installs there, and no Softmax client. Everything the plugin touches in
+  process must import with only those: `layout`, `refs`, `store/*`,
   `plugin/*`, `tools/base.py` and the in-process tools (`goal`, `task`, `directive`, `claim`,
-  `settings`, `ui`). `core/tests/test_tool_budget.py` enforces it. The catalog imports every tool
-  module, and a module that fails to import stops whatever asked for the tools: the prompt build,
+  `settings`, `ui`, and those split from their actions; `experiment_create` is not, as `experiment`
+  is not). `core/tests/test_package.py` imports the plugin and catalog without the Softmax client.
+  The catalog imports every tool module, and a module that fails to import stops whatever asked for the tools: the prompt build,
   the tests or, on a gateway, the plugin (`test_broken_tool_module_real.py`: Hermes logs "Failed to
   load plugin" and serves on, with none of that profile's tools or hooks).
 - **The workspace environment** (`$IDE_WORKSPACE/tools/venv`, built by `prepare.py` from the
@@ -29,7 +31,7 @@ decisions is `docs/plans/ide-profile-refactor/`.
 | `refs.py` | The one reference parser: `G-3`, `T-42#failure`, platform ids, policy labels, URLs. |
 | `store/` | The record store: SQLite per Coworld plus a workspace store; numbered migrations; token-marked transactions with an append-only `events` table and `change_log` detection; schema check and rebuild. One module per record kind (`goals`, `tasks`, `claims`, `experiments`, `versions`, `champion`, `directives`, `settings`, `capabilities`, `intents`, `sessions`, `ui_state`, `notices`, `pins`, `coworlds`), the field `registry`, `events.KINDS`, and `cli.py` (`research store apply|export|snapshot|events|backup|restore-check|quiesce`). |
 | `tools/` | The profile tools. `base.py` defines `ToolSpec`/`ActionSpec`/`ToolContext` and `run_tool` (validates every problem at once, never raises, scrubs store paths); `catalog.py` lists the modules and the role sets; one module per tool. |
-| `plugin/` | The Hermes plugin: `register.py` (tools, hooks, prompt sections per role), `executor.py` (in-process or workspace subprocess), `briefing.py` and `session_context.py` (prompt sections), `turn.py` (the Orchestrator's chat-turn hook: context block, notices, changed-since, away summary), `advisory.py` + `rules.py` (the never-blocking advisory hook and the last-error hook), `repeats.py` (each request keeps only the latest of identical refused calls, a short refusal in place of a repeated identical one, and a notice when Hermes's loop guard halts a turn), `inference_hook.py` (the `api_request_error` hook that records failed model calls in the inference state). |
+| `plugin/` | The Hermes plugin: `register.py` (tools, hooks, prompt sections per role), `executor.py` (in-process or workspace subprocess), `briefing.py` and `session_context.py` (prompt sections), `turn.py` (the Orchestrator's chat-turn hook: context block, notices, changed-since, away summary), `advisory.py` + `rules.py` (the never-blocking advisory hook and the last-error hook), `repeats.py` (each request keeps only the latest of identical refused calls, a short refusal in place of a repeated identical one, and a notice when Hermes's loop guard halts a turn), `inference_hook.py` (the `api_request_error` hook that records failed model calls in the inference state, and `bound_output_request`, the `llm_request` middleware that caps output). |
 | `platform/` | The Softmax platform behind one `Platform` protocol: `real.py` on the official clients, `fake.py` (a persistent test double with fault injection), `identity.py`, `errors.py`, `wait.py` (retries, then a Task wait), `submission.py` (status ladder and the autonomous quality bar), `xp.py`, `credits.py`, `cli.py` (`research softmax`, `research platform check`). |
 | `stats/` | Evaluation design, pairing, the decision rule (`confirmed`/`refuted`/`inconclusive`), noise and power. |
 | `inference.py` | The inference gate every run start passes: the lease file (the installed key's expiry, fingerprint and when it changed) and the inference state (`.inference-state` beside it: why model work is blocked and until when, which key ran out, and the last failed model call). A budget block ends when the lease file names a different key. Stdlib only; the plugin hook, the image's lease loop and the runs client share it. |
@@ -45,7 +47,7 @@ decisions is `docs/plans/ide-profile-refactor/`.
 | `prompts/` | The SOUL parts per role, `vocabulary.md` (from metta) and `build.py`; `tools/build_prompts.py` renders `orchestrator/SOUL.md` and `researcher/SOUL.md` and syncs the plugin manifests. |
 | `skills/` | The shipped skills: `common/<category>/<skill>/`, `orchestrator/<skill>/`, `researcher/<skill>/`; `prepare.py` points `skills.external_dirs` at them. |
 | `task_types/` | The four Task types with their completion checklists and Researcher instructions. |
-| `prepare.py` | Profile preparation after install or update: core path marker, protected and retired config keys, every profile's skill and trusted-project directories, shipped values over earlier defaults (not the model settings, but for one Orchestrator migration off `kimi-k3`), stores, retiring the watcher job, the workspace environment. |
+| `prepare.py` | Profile preparation after install or update: core path marker, protected and retired config keys, the profile's skill and trusted-project directories, shipped values over earlier defaults (not the model settings, but for one Orchestrator migration off `kimi-k3`), stores, retiring the watcher job, the workspace environment. |
 | `frozen_sessions.py` | Called by `prepare.py`: when a release changes the tool schemas or the instructions, open chats drop their stored copies and take the new ones on their next turn (`docs/hosting.md`, "Open chats after a release"). |
 | `cli.py` | The `research` command; each subcommand module registers itself. |
 
@@ -104,8 +106,8 @@ nowhere.
 ## Add a tool, a record or a skill
 
 - **Tool:** a module under `tools/` with `SPEC = tool(ToolSpec(...))`, listed in
-  `catalog.TOOL_MODULES`; in-process tools stay stdlib only; `core/tests/test_tool_budget.py`
-  pins the role sets (17 Orchestrator, 14 Researcher) and the executor table; run
+  `catalog.TOOL_MODULES`; in-process tools import only what Hermes's interpreter has; `core/tests/test_tool_budget.py`
+  pins the role sets (24 Orchestrator, 22 Researcher) and the executor table; run
   `uv run python tools/build_prompts.py --write --manifests`. Describe the tool, every field
   and every key, shortly: every request carries the whole list. Build field schemas with
   `tools/_args.py`: an object field lists its keys (`obj`, `objects`; `free_object` only for
@@ -114,11 +116,29 @@ nowhere.
   In a multi-action tool a field shared by actions keeps one shape, and `ToolSpec.properties`
   adds which actions require or take it, and lists each action with its required fields in the
   `action` description; `core/tests/tools/test_tool_schemas.py` checks all of this.
+- **An action with a tool of its own:** `own_tool=True` on its `ActionSpec` registers
+  `<tool>_<action>`, a flat tool with the action's fields, whose schema marks the required ones
+  required, which a multi-action schema cannot. It runs the same handler, as the same grouped call.
+  The grouped tool stops offering the action and still runs a call that names it, because stored
+  chats show that shape; refusing such a call, it shows the flat tool. Prompts and skills name the
+  flat tool (`test_tool_signatures.py` checks), and telemetry reports the grouped tool and action.
+  Twelve actions have one: the ones weak models got wrong and `claim_write`. It costs prompt size
+  and counts against `catalog.TOOL_BUDGET`, so add one only for a measured failure. Measured on
+  2026-11-05 against the grouped form, 6 to 10 repeats per case: Kimi K3 first try 81/216 against
+  185/216, Kimi K3.1 Pro no difference (160/162 against 161/162, findability 91/100 against 94/100),
+  about 1,200 more prompt tokens per request.
+  Some Kimi K3 `experiment_create` calls repeat text inside `hypothesis.statement` until the output
+  limit (`MAX_RESPONSE_TOKENS`). Measured at that limit on Moonshot on 2026-11-05: Kimi K3 2/14,
+  and 2/8 with a description asking for one short sentence per key, so the description was not
+  kept; Kimi K3.1 Pro 0/12. Each costs about $0.27. Hermes v0.22.6 sends a cut-off call again up to
+  4 times, then ends the turn with nothing run, so one call costs at most about $1.35.
 - **Record:** a migration (`store/migrations/<kind>/NNNN_*.sql`), a module under `store/`, a
   `RecordSpec` in `store/registry.py`, its event kinds in `store/events.py`, and a tool action.
-- **Skill:** `skills/<root>/<category>/<name>/SKILL.md` with `name` equal to the directory and a
-  one-sentence `description` of at most 60 characters; `tools/check_prompts.py` checks it.
+- **Skill:** `skills/common/<category>/<name>/SKILL.md` or `skills/<role>/<name>/SKILL.md`, with
+  `name` equal to the directory and a one-sentence `description` of at most 60 characters;
+  `core/tests/test_skills.py` and `test_skills_common.py` check it.
 - **A call shown in a prompt, skill, task type or wake:** write it as
-  `tool.action {a, b: value, c?, d | e, f {g, h}}`, in backticks. Every name must exist on that action,
+  `tool.action {a, b: value, c?, d | e, f {g, h}}`, or `tool_action {...}` for an action with a
+  tool of its own, in backticks. Every name must exist on that action,
   and the signature must name every required field and key; end it with `...` when it shows only
   part of the call on purpose. `core/tests/test_tool_signatures.py` checks this, and that example values fit a field's enum, and says the rules in full.

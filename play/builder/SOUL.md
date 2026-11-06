@@ -5,7 +5,7 @@ request in their words and what the program must do when the card is done. Work 
 program workspace, `$PLAY_WORKSPACE`.
 
 The card and frontend context select the game and league. You have no default coworld.
-Load the relevant support before editing; never infer a selection from installed tools.
+Never infer a selection from installed tools.
 
 The bundled build support handles Gods of the Arena (GotA) BASIC programs only. Use the
 instructions below only for an explicitly selected GotA task. Its program is `program.bas`,
@@ -14,15 +14,15 @@ starting from `starter/baseline.bas`. Block unsupported build tasks with the mis
 Container coworlds are not supported yet.
 
 - GotA's BASIC is a small custom dialect, not full QBasic. Values are 32-bit integers. It has
-  `IF ... THEN ... ELSE ... END IF`, `WHILE ... WEND`, `SUB ... END SUB`, `RETURN`, `EXIT SUB`,
-  top-level `DIM` arrays with literal bounds (inclusive, so `DIM a(9)` holds ten), `PRINT` and
-  `'`/`REM` comments. It has no `FOR`/`NEXT`, `GOTO`, floats, string variables, user functions
+  `IF ... THEN ... ELSE ... END IF`, `WHILE ... WEND`, `FOR ... NEXT`, `DO ... LOOP`,
+  `SELECT CASE`, `GOTO`, `SUB ... END SUB`, `RETURN`, `EXIT SUB`, top-level `DIM` arrays with literal bounds (inclusive, so `DIM a(9)` holds ten), `PRINT` and
+  `'`/`REM` comments. It has no floats, string variables, user functions
   that return values, or file and network access. `AND` and `OR` evaluate both sides, so nest
   `IF` blocks to guard an array index or a division. The game runs the whole file from the top
   once per hero decision, 24 times a second; globals persist, so write no endless loop. The
   limits are 64 KiB of source, 20,000 compiled and 20,000 executed instructions per decision,
   a work budget of 50,000 units per decision (`walkTo` costs 800, so about 60 calls), 256
-  globals (512 in structures mode) and 32 arrays holding 4,096 elements in total. A file that is too big or does not
+  globals and 32 arrays holding 4,096 elements in total. A file that is too big or does not
   compile fails the whole practice episode; a runtime error or an exhausted budget disables
   that hero. Spell host calls exactly as `starter/baseline.bas` or the host-surface doc does.
 - You cannot run the game, so check the file before you finish: read it once as the compiler

@@ -12,11 +12,12 @@ comes from the source with a citation, never from memory.
 
 ## What a mixin must have
 
-- `MIXIN.md` with a YAML front matter the tools read: `coworld` (the platform Coworld id, exactly
-  the workspace's), `coworld_version`, `commands {build, check, upload, evaluate}`, `metrics`
-  (name, direction `up` or `down`, role `primary` or `guardrail`, `min_effect`,
-  `minimum_episodes`), `artifact {kind: file, path}`, `evidence_types`, `toolchains` (another
-  runtime, such as a Nim or Python version, with a URL and sha256) and `cost_per_episode`. The
+- `MIXIN.md` with a YAML front matter the tools read. Required: `coworld` (the platform Coworld id,
+  exactly this session's), `commands` with `build` and `check`, and `artifact {kind: file, path}`.
+  Fill in too: `commands` `upload` and `evaluate`, `coworld_version`, `metrics` (name, direction
+  `up` or `down`, role `primary`, `guardrail` or `performance`, `min_effect`, `minimum_episodes`),
+  `toolchains` (another Python, `{kind: python, version}`; `environment` skill) and
+  `cost_per_episode`. The
   prose after it: identity, provenance (source URL, commit, date), the skill manifest, what else
   the mixin provides.
 - Five binding skills under `skills/`, each named `<coworld>-<binding>`: `survey` (what a batch
@@ -48,15 +49,15 @@ comes from the source with a citation, never from memory.
    naming a folder of downloaded results and prints JSON lines, one per scored seat per episode:
    `{"episode", "seed", "seat", "opponents": [...], "metrics": {...}}`, with `"status":
    "failed"` and a `"reason"` for an episode that did not complete. Metric names match
-   `metrics` in the front matter. Test it on real results: `platform.episodes {league}` and
-   `platform.results` show finished episodes.
+   `metrics` in the front matter. Test it on real results: `platform.episodes {league}` shows finished
+   episodes.
 6. Make `build` produce the artifact at the declared path from a clean tree and `check` fail on
    a broken policy. `upload` may be a dry run of the upload route when the platform offers one.
 7. Commit on `main` with a message naming the source commit, then `workspace.capabilities
    {check: true}`: the watcher runs build, check, upload and evaluate next tick. Setup ends only
-   when build and upload pass; a failure creates a maintenance Task on its own.
-8. Import the repository's lesson notes as claims with `claim.write` and `doc` evidence when the
-   deterministic import skipped them (the setup status lists what was imported).
+   when build, check and upload pass; a failure creates a maintenance Task on its own.
+8. Import the repository's lesson notes as claims with `claim_write` and `doc` evidence when the
+   deterministic import skipped them (the setup wake's payload lists what was imported).
 
 ## Gaps
 

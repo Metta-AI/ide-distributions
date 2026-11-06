@@ -3,28 +3,42 @@ version: 1.0.0
 description: Record, platform and ui tools of the IDE Orchestrator, its briefing and advisory hook.
 author: ide-distributions
 kind: standalone
-requires_hermes: ">=0.21.6"
+requires_hermes: ">=0.22.6"
 # Kept in sync with the tool catalog by `python tools/build_prompts.py --manifests`.
 provides_tools:
   - claim
+  - claim_add_evidence
+  - claim_write
   - directive
   - experiment
+  - experiment_create
   - forum_post
   - github
   - goal
+  - goal_set_status
   - platform
   - settings
+  - settings_update
   - softmax_api
   - submit
   - task
+  - task_abandon
   - ui
+  - ui_panel_set
   - upload
   - version
   - wiki_edit
   - workspace
   - xp
 provides_hooks:
-  - transform_tool_result
-  - post_tool_call
+  - api_request_error
+  - on_session_delete
   - on_session_end
+  - on_session_finalize
+  - on_session_reset
+  - post_api_request
+  - post_tool_call
+  - pre_api_request
   - pre_llm_call
+  - pre_tool_call
+  - transform_tool_result

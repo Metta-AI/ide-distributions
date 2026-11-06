@@ -82,7 +82,7 @@ def test_researcher_refusal_points_at_the_orchestrator():
     text = json.loads(hook(tool_name="goal", args={"y": 1}, result=refusal, session_id="s-r"))
     assert text["error"] == (
         "This exact call was refused 2 times. Fix what the refusal names (unknown field 'y'), "
-        "or report the problem to the Orchestrator with task.ask and end the run."
+        "or report the problem with task_ask if you hold a Task and end the run."
     )
 
 
@@ -273,8 +273,7 @@ def test_halt_writes_one_notice_naming_the_session_kind_and_tool(workspace):
     [notice] = _notices(wstore)
     assert notice["text"] == (
         "Hermes's loop guard stopped the orchestrator's wake Session s-wake for champion.changed"
-        " after repeated calls (most failures: claim). Its work may be unfinished, and nothing"
-        " retries it."
+        " after repeated calls (most failures: claim). Its work may be unfinished."
     )
     assert notice["urgency"] == "high"
 

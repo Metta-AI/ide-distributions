@@ -1,16 +1,16 @@
 name: orchestrator
 version: 1.0.0
 description: >-
-  The research lead of the Softmax IDE. Speaks to the user, manages Goals and Tasks, makes and
-  submits policy Versions, and runs the watcher that keeps the Researchers working.
+  The research lead of the Softmax IDE. Speaks to the user, manages Goals and Tasks, and makes
+  and submits policy Versions.
 hermes_requires: ">=0.22.6"
 env_requires:
   - name: OPENROUTER_API_KEY
     required: true
-    description: OpenRouter API key for the model.
+    description: OpenRouter API key for the model. The hosted image leases one and writes it here.
   - name: SOFTMAX_PLAYER_ID
-    required: true
-    description: The Player this workspace acts as (selected when the workspace was created).
+    required: false
+    description: The id of the Player this workspace acts as. Without it, the platform's whoami answers.
   - name: SOFTMAX_PLAYER_CREDENTIAL
     required: true
     description: >-
@@ -26,7 +26,8 @@ env_requires:
     default: https://softmax.com/api
     description: Softmax API server.
   - name: IDE_WORKSPACE
-    required: true
+    required: false
+    default: $HERMES_REAL_HOME/workspace
     description: >-
       Absolute path of the one workspace root of this sandbox, shared by every profile. It holds
       the workspace environment, the workspace store and one folder per Coworld.
@@ -43,6 +44,8 @@ env_requires:
     required: false
     default: real
     description: '"real", or "fake" to run against the test double of the Softmax platform.'
-  - name: TMPDIR
-    required: false
-    description: Scratch directory for builds; hosting sets it to a disk path because /tmp is small.
+  - name: API_SERVER_KEY
+    required: true
+    description: >-
+      The Hermes API server's key, the same in every profile: Hermes authenticates
+      /p/<profile>/v1/runs with that profile's key.

@@ -141,7 +141,7 @@ def test_only_a_chat_is_told_to_ask_in_chat(tmp_path):
     assert f"Work only in {ctx.coworld().root}." in wake
     researcher = ToolContext.from_env("researcher", ctx.env)
     text = session_context.render(researcher, "unknown")
-    assert "ui." not in text and "task.ask" in text
+    assert "ui." not in text and "task_ask" in text
 
 
 def test_reactions_reach_the_agent_at_its_next_turn(tmp_path):
@@ -179,3 +179,15 @@ def test_an_opening_goal_is_said_to_be_the_first_request():
     block = turn.render_context_block({"opening_goal": "Reach the top 10"})
     assert "opening_goal: Reach the top 10" in block and session_context.OPENING_GOAL in block
     assert session_context.OPENING_GOAL not in turn.render_context_block({"league": "league_x"})
+
+
+def test_context_block_prints_the_guide_and_the_agent_profile():
+    text = turn.render_context_block(
+        {
+            "contract_version": 1,
+            "client": {"id": "aide", "kind": "ide", "guide": "client-web-ide"},
+            "agent_profile": {"name": "Ada", "focus": "openings"},
+        }
+    )
+    assert "(guide skill: client-web-ide)" in text
+    assert "agent profile:" in text and "Ada" in text

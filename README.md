@@ -6,9 +6,9 @@ a third, `play/`, stands alone.
 | Folder | What it is |
 |---|---|
 | [`core/`](core/) | `research-core`, the shared package: the record store, the record and platform tools, the Hermes plugin wiring, the watcher, the platform client (real and fake), the `research` CLI, the prompt parts and the skills. |
-| [`orchestrator/`](orchestrator/README.md) | The research lead: the profile the user talks to. Plans Goals and Tasks, answers the Researchers, makes and submits policy Versions, runs the watcher. |
+| [`orchestrator/`](orchestrator/README.md) | The research lead: the profile the user talks to. Plans Goals and Tasks, answers the Researchers, makes and submits policy Versions. |
 | [`researcher/`](researcher/README.md) | A research worker. Each Session does one Task in the background and speaks only to the Orchestrator. |
-| [`play/`](play/README.md) | Play: the user's own program on one coworld. Independent of the research profiles; it keeps its own vendored copy of the former shared code. |
+| [`play/`](play/README.md) | Play: the user's own program, not hosted now (see its README). Independent of the research profiles; it keeps its own vendored copy of the former shared code. |
 
 The research profiles follow the
 [IDE profile refactor design](docs/designs/ide-profile-refactor-2026-10-28-final.html) (open it
@@ -16,7 +16,7 @@ in a browser). The implementation plan, one file per stack entry, is in
 [`docs/plans/ide-profile-refactor/`](docs/plans/ide-profile-refactor/00-overview.md); the
 overview fixes the architecture decisions the design leaves open.
 
-The rebuild landed on October 28, 2026 (Pacific). What hosting needs from these profiles, and
+The rebuild merged on October 29, 2026 (Pacific). What hosting needs from these profiles, and
 what they guarantee, is in [`docs/hosting.md`](docs/hosting.md); the retired profiles' notes
 under `docs/` carry a banner saying so.
 
@@ -26,8 +26,8 @@ under `docs/` carry a banner saying so.
   a plugin shim, scripts and profile configuration. Hermes copies the folder on
   install; the shim imports `research_core` from the release checkout, whose path `prepare.py`
   records.
-- Two Python environments exist: Hermes's own interpreter runs the plugin (the stdlib-only base
-  of `research_core`), and one *workspace environment* under `$IDE_WORKSPACE/tools/venv` runs
+- Two Python environments exist: Hermes's own interpreter runs the plugin (a base of `research_core`
+  that needs only the stdlib and OpenTelemetry), and one *workspace environment* under `$IDE_WORKSPACE/tools/venv` runs
   the `research` CLI, the watcher and every tool that needs the Softmax client. The repository
   root `pyproject.toml` and `uv.lock` define that environment; `prepare.py` builds it.
 - Every profile of one sandbox shares one workspace (`IDE_WORKSPACE`): a workspace store, and one
@@ -40,7 +40,8 @@ git clone https://github.com/softmax-universe/ide-distributions.git ~/ide-distri
 hermes profile install ~/ide-distributions/orchestrator --name orchestrator --yes
 hermes profile install ~/ide-distributions/researcher --name researcher --yes
 # write each profile's .env (distribution.yaml lists the variables; IDE_WORKSPACE must be the
-# same path for both), then prepare each profile with Hermes's Python:
+# same path for both), then prepare each profile with Hermes's Python. The installed script
+# finds its profile and reads that .env:
 <hermes python> ~/.hermes/profiles/orchestrator/scripts/prepare.py \
   --source ~/ide-distributions/orchestrator --hermes $(command -v hermes)
 <hermes python> ~/.hermes/profiles/researcher/scripts/prepare.py \
@@ -148,15 +149,6 @@ what was sent since the earlier copy (35,600 tokens against 500 in the third row
 Requests after it hit the cache again. Six real Hermes sessions per arm agree: 97.7% cached
 without a refusal coming back (97.6% with the middleware unregistered), 97.8% with one (97.9%).
 
-Hermes's loop warnings stay on. On three different refused calls, where its "Do not switch to
-text-only replies; keep using tools" line fires, the next call was valid 59/60 with its warnings and
-58/62 with `warnings_enabled: false`, so nothing showed the text prolonging a loop.
-
-Rewording the repeat refusal did not help: a full refusal, a filled-in example from the model's own
-arguments, naming the field, the field first, and no way out all fell between 46% and 60%, with
-overlapping intervals. A schema that lacks the required field stays at 0/60 whatever the text says,
-and the loop guard ends nearly all of those turns (52 to 58 of 60).
-
 **The other two.** `test_undeclared_fields.py` checks that a model on a closed schema sends a field
 only if it is declared, so a provider change is noticed. `test_tool_call_format.py` sends one
 instruction per tool, on the shipped models and pins.
@@ -194,6 +186,6 @@ interactive session, or inside the hosted image), see [`docs/local-end-to-end.md
 
 Softmax hosting runs these distributions in its sandboxes. [`docs/hosting.md`](docs/hosting.md)
 is the handoff: the image, `prepare.py`, the environment variables, the gateway, sleep and
-drain, the bridge's seam, storage and releases. Changes to `core/`, `orchestrator/`,
-`researcher/` or the root lock on `main` dispatch Metta's image release workflow
-(`.github/workflows/release-hermes.yml`); a nightly workflow runs the read-only platform check.
+drain, the bridge's seam, storage and releases. A push to `main` that changes what the image
+holds dispatches Metta's image release workflow (`.github/workflows/release-hermes.yml` lists the
+paths); a nightly workflow runs the read-only platform check.

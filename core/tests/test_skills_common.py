@@ -14,6 +14,7 @@ from pathlib import Path
 import pytest
 
 import research_core
+from research_core.stats.decision_rule import REFUTING_CODES
 from research_core.store.settings import SETTINGS
 from research_core.tools.catalog import ROLES, TOOL_MODULES, tools_for
 
@@ -95,16 +96,6 @@ def test_the_expected_skills_exist():
     assert found == EXPECTED
 
 
-def test_every_category_has_a_description():
-    categories = sorted(p for p in COMMON.iterdir() if p.is_dir())
-    assert {p.name for p in categories} == set(EXPECTED)
-    for category in categories:
-        fields, _ = parse_front_matter((category / "DESCRIPTION.md").read_text())
-        description = fields.get("description", "")
-        assert description.endswith("."), f"{category.name}: {description!r}"
-        assert ":" not in description, f"{category.name}: a colon breaks YAML front matter"
-
-
 @pytest.mark.parametrize("skill", SKILLS, ids=SKILL_IDS)
 def test_front_matter(skill: Path):
     fields, _ = parse_front_matter((skill / "SKILL.md").read_text())
@@ -156,3 +147,21 @@ def test_game_specific_steps_point_at_the_mixin(skill: Path):
         assert "<coworld>-" in text, (
             "game-specific steps say: see the mixin's <coworld>-<binding> skill"
         )
+
+
+def test_every_named_skill_exists():
+    """``the `credits` skill`` in any shipped text names a skill a Session can load."""
+    root = COMMON.parent
+    shipped = {path.parent.name for path in root.rglob("SKILL.md")}
+    package = root.parent
+    named = {}
+    for folder in ("prompts", "skills", "task_types", "watcher/wakes"):
+        for file in sorted((package / folder).rglob("*.md")):
+            for name in re.findall(r"`([a-z][a-z-]*)` skill", file.read_text()):
+                named.setdefault(name, file.name)
+    assert {name: file for name, file in named.items() if name not in shipped} == {}
+
+
+def test_the_experiment_skill_names_every_refuting_code():
+    text = (COMMON / "method" / "experiment" / "SKILL.md").read_text()
+    assert [code for code in sorted(REFUTING_CODES) if f"`{code}`" not in text] == []

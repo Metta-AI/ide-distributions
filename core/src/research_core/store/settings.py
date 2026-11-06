@@ -120,7 +120,8 @@ SETTINGS: dict[str, SettingSpec] = {
             True,
             "coworld",
             "the submit tool and the management wake",
-            "Autonomous submissions need a Version merged into main and a confirming Experiment.",
+            "Autonomous submissions need a Version merged into main and an Experiment confirming "
+            "it against the champion; with no champion, a passing mixin check.",
         ),
         _s(
             "submissions.min_margin_over_champion",
@@ -154,7 +155,8 @@ SETTINGS: dict[str, SettingSpec] = {
             None,
             "coworld",
             "the xp tool",
-            "Above this many XP requests per Experiment the tool asks first; null means no limit.",
+            "Above this many XP requests per Experiment a Researcher must ask the Orchestrator "
+            "and the Orchestrator is warned; null means no limit.",
             nullable=True,
             minimum=0,
         ),
@@ -163,7 +165,7 @@ SETTINGS: dict[str, SettingSpec] = {
             "int",
             3,
             "coworld",
-            "the watcher",
+            "the management wake",
             "Ideation rounds without progress after which a Goal is parked.",
             minimum=1,
         ),

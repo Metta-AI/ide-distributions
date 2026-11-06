@@ -1,11 +1,11 @@
 # Shipped defaults. Hermes keeps this file on `hermes profile update` (--force-config resets it).
 # The play profile has only its own tools and memory: it changes the program through
-# program_change (a checked write of one file), never with raw file or terminal tools, and it
+# program_change and program_edit (checked writes of one file), never with raw file or terminal tools, and it
 # hands no work to another profile. The `memory` toolset is its notes about the user and itself.
 model:
   default: moonshotai/kimi-k3
   provider: openrouter
-# Memory is how the lead knows this user and itself across conversations (MEMORY.md = its own
+# Memory is how the cogent knows this user and itself across conversations (MEMORY.md = its own
 # notes, USER.md = the user profile, both under this profile's memories/ folder).
 memory:
   memory_enabled: true

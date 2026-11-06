@@ -11,8 +11,8 @@ you anything.
 
 ## Proposed Tasks
 
-`task.propose {goal, type, title, description, reasoning, for_human, end_condition, end_detail,
-priority, depends_on, experiment, ideation_round}`.
+`task_propose {goal, type, title, description, reasoning, for_human, end_condition, end_detail,
+priority, depends_on, experiment}`.
 
 - `description`: what to do and what to deliver, concrete enough that another Researcher starts
   cold: the lever, the metric, the design, the episodes.
@@ -26,8 +26,8 @@ priority, depends_on, experiment, ideation_round}`.
 - `depends_on` when one must finish first.
 
 An ideation Task delivers two to five proposals: `task.complete {task, proposed_tasks: ["T-7", "T-8"], result, merge: "no", merge_reason}`
-with the ids `task.propose` returned. Ground every proposal in the Goal's claims and in what was
-tried: `claim.search` with the Goal's tags and `include_retired: true`, `experiment.search` for
+with the ids `task_propose` returned. Ground every proposal in the Goal's claims and in what was
+tried: `claim.search {query, tags: ["G-n"], include_retired: true}`, `experiment.search` for
 the refuted and inconclusive Experiments too, then `platform.standings` and
 `platform.active_policies {league, exclude_player: true}` for what the league looks like now.
 Game-specific levers: see the mixin's `<coworld>-diagnosis` and `<coworld>-ab` skills or docs.
@@ -38,7 +38,7 @@ second lever, a surprising opponent behaviour): one or two at most, named in you
 
 ## Proposed submissions
 
-`task.propose_submission {task, version, reason}` after an Experiment confirmed its decision rule
+`task_propose_submission {task, version, reason}` after an Experiment confirmed its decision rule
 for that Version: `experiment.close` returned `confirmed`, the candidate beat the baseline by the
 pre-registered effect at the mixin's minimum episodes, and the guardrail metrics held. `reason`
 gives the numbers: the effect, the episodes, the baseline (the champion, by id) and the
@@ -49,6 +49,7 @@ the change, or that is not committed on your branch. In an improvement Task also
 `submission_candidate` and `submission_reason` in `task.complete`; the proposal and the answer
 must agree.
 
-The Orchestrator applies the user's settings and the quality bar (a merged Version and a
-confirmed Experiment against the champion) and may ask the user; the outcome shows on the Task.
+The Orchestrator applies the user's settings and the quality bar (a merged Version whose
+Experiment against the champion confirmed its rule by `submissions.min_margin_over_champion`) and
+may ask the user; the outcome shows on the Version and in a notice.
 A refusal is not a verdict on your work.

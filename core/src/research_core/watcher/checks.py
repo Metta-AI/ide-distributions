@@ -1,16 +1,18 @@
 """Step 9: tool checks and repair Tasks (design B.15, B.14; amendments A3.2, A3.4, A4.1, A7.8).
 
 When a check runs. A *full* check is due when none ran yet, when the last one is a day old,
-when a tool marked them due (``workspace.capabilities {check: true}`` writes the Coworld store's
-meta ``checks_due``) or when the release changed (meta ``checks_version`` differs from
-``research_core.__version__``). A *quick* check (logins and CLIs, no builds) is due an hour
-after the last one or when a Session started since it (A3.4: the briefing never runs checks, it
-reads what this step stored). A full run also counts as a quick one.
+when something marked them due (``workspace.capabilities {check: true}``, or a merge while a
+capability is broken, writes the Coworld store's meta ``checks_due``) or when the release
+changed (meta ``checks_version`` differs from ``research_core.__version__``). A *quick* check
+(logins and CLIs, no builds) is due an hour after the last one or when a Session started since
+it (A3.4: the briefing never runs checks, it reads what this step stored). A full run also
+counts as a quick one.
 
 What is checked, each a capability row (``capabilities.mark``):
 
-* ``login:player`` through ``platform.whoami("player")``; ``login:user`` only when
-  ``SOFTMAX_USER_CREDENTIAL`` is set (an absent User identity is a fact, not a failure);
+* ``login:player`` through ``platform.whoami("player")``, which also stores the Player's id as
+  the workspace store's meta ``player_id`` for the briefing and the guide; ``login:user`` only
+  when ``SOFTMAX_USER_CREDENTIAL`` is set (an absent User identity is a fact, not a failure);
 * ``cli:coworld`` and ``cli:softmax``: ``<venv>/bin/<cli> --help`` when the workspace
   environment has the binary, else the distribution installed in this interpreter (the watcher
   runs in that environment); the installed versions are compared with ``uv.lock`` of the core
@@ -19,7 +21,8 @@ What is checked, each a capability row (``capabilities.mark``):
   never a broken capability);
 * credits: ``platform.credits`` into the Coworld store's meta ``credits`` for the briefing (a
   fact, not a capability);
-* full runs only: the mixin's ``build``, ``check`` and ``evaluate`` commands in a temporary
+* full runs only: the mixin's toolchains are installed, then its ``build``, ``check`` and
+  ``evaluate`` commands run in a temporary
   worktree of ``main`` (``evaluate`` on downloaded results under ``documents/xp`` when there are
   any, else skipped with "no results to evaluate"), and ``upload``: the mixin's own ``upload``
   command if it has one, then the starter artifact is sent through ``upload_file_policy`` as the
@@ -59,12 +62,13 @@ from research_core import environment_guide, gitops
 from research_core import mixin as mixin_module
 from research_core.platform import credits as credits_module
 from research_core.platform.errors import PlatformError
-from research_core.platform.protocol import with_retries
+from research_core.platform.protocol import WhoAmI, with_retries
 from research_core.store import capabilities, coworlds, notices, tasks
 from research_core.store._common import now_iso, parse_display_id, parse_iso
 from research_core.store.db import Store
 from research_core.store.errors import StoreError
-from research_core.watcher.merge import temporary_worktree
+from research_core.tools.base import PLAYER_ID_META
+from research_core.watcher.merge import CHECKS_DUE, install_toolchains, temporary_worktree
 from research_core.watcher.resume import emit_event
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -76,7 +80,6 @@ QUICK_INTERVAL = timedelta(hours=1)
 CHECKS_AT = "checks_at"
 CHECKS_QUICK_AT = "checks_quick_at"
 CHECKS_VERSION = "checks_version"
-CHECKS_DUE = "checks_due"
 CREDITS_KEY = "credits"
 CLI_VERSIONS_KEY = "cli_versions"
 REPAIR_FAILURES = "repair_failures:"
@@ -185,7 +188,7 @@ def login_checks(ctx: TickContext) -> list[dict[str, Any]]:
         _platform_check(
             "login:player",
             "GET /whoami (player)",
-            lambda: ctx.platform.whoami("player"),
+            lambda: _read_player(ctx),
             lambda who: f"{who.kind} {who.subject_id}",
         )
     ]
@@ -199,6 +202,14 @@ def login_checks(ctx: TickContext) -> list[dict[str, Any]]:
             )
         )
     return results
+
+
+def _read_player(ctx: TickContext) -> WhoAmI:
+    """``whoami``, keeping the Player's id for the briefing and the guide, which cannot ask."""
+    who = ctx.platform.whoami("player")
+    if who.kind == "player" and who.subject_id:
+        ctx.wstore.set_meta(PLAYER_ID_META, who.subject_id)
+    return who
 
 
 def cli_checks(ctx: TickContext) -> tuple[list[dict[str, Any]], dict[str, Any]]:
@@ -261,6 +272,7 @@ def mixin_checks(ctx: TickContext) -> tuple[list[dict[str, Any]], mixin_module.M
         output = "MIXIN.md is not usable: " + "; ".join(error.problems)
         return [_result("build", "command", False, output, capability="build")], None
     results: list[dict[str, Any]] = []
+    install_toolchains(ctx, loaded)
     main_sha = _main_sha(code)
     with temporary_worktree(code, coworld.worktrees / CHECK_WORKTREE, main_sha) as tree:
         for name in ("build", "check"):
@@ -357,7 +369,7 @@ def _upload_check(
         "route",
         True,
         "\n".join(outputs),
-        command="POST /v2/policy-versions/upload",
+        command="POST /stats/policies/files/upload",
         capability="upload",
         policy_version_id=version.id,
     )
@@ -465,11 +477,31 @@ def link_dependents(store: Store, ctx: TickContext, name: str, repair: int) -> l
 
 def handle_task_failed(ctx: TickContext, event: Event, store: Store) -> dict[str, Any]:
     """``task.failed``: count failed repairs per capability; the second raises
-    ``repair.failed_twice``."""
+    ``repair.failed_twice``. Any other failed Task raises ``task.failure_review``, so someone reads
+    what its Researcher wrote, unless the watcher's own give-up already woke the Orchestrator."""
     task = tasks.read(store, event.subject)
     name = task["capability"]
     if not name:
-        return {"skipped": f"{task['id']} is not a repair Task"}
+        gave_up = ctx.wstore.one(
+            "SELECT 1 FROM events WHERE kind = 'recovery.failed' AND subject = ?"
+            " AND json_extract(payload, '$.coworld_id') = ?",
+            (task["id"], ctx.coworld.coworld_id),
+        )
+        if gave_up:
+            return {"skipped": f"recovery.failed covers {task['id']}"}
+        failure = task["failure"] or {}
+        emit_event(
+            store,
+            ctx.actor,
+            "task.failure_review",
+            task["id"],
+            {
+                "task": task["id"],
+                "what_failed": failure.get("what_failed"),
+                "next_step": failure.get("next_step"),
+            },
+        )
+        return {"review": task["id"]}
     key = f"{REPAIR_FAILURES}{name}"
     count = int(store.get_meta(key) or 0) + 1
     store.set_meta(key, str(count))

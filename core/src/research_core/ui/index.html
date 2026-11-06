@@ -280,7 +280,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
   </div>
   <dl class="health" id="health" aria-live="polite">
     <div><dt>Profile</dt><dd id="h-profile">…</dd></div>
-    <div><dt>Active Coworld</dt><dd id="h-coworld">…</dd></div>
+    <div><dt>Session scope</dt><dd id="h-coworld">…</dd></div>
     <div><dt>Contract</dt><dd id="h-contract">…</dd></div>
     <div><dt>Watcher heartbeat</dt><dd id="h-heartbeat">…</dd></div>
     <div><dt>Has work</dt><dd id="h-work">…</dd></div>
@@ -330,10 +330,10 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
       <details>
         <summary>Try these against the scripted Orchestrator (tools/ui_dev.py)</summary>
         <ul>
-          <li><strong>Submit the starter as my champion.</strong> Switches to the fake Coworld; the setup wake uploads and submits the starter within a few watcher ticks and sends a notice.</li>
+          <li><strong>Submit the starter as my champion.</strong> On the session of a Coworld (<code>?coworld=cow_fake</code>), the setup wake uploads and submits the starter within a few watcher ticks and sends a notice.</li>
           <li>A message containing <strong>ask me</strong> opens a question with two options; answer it under Asks.</li>
           <li>A message containing <strong>notify</strong> sends a notice.</li>
-          <li>A message containing <strong>goal</strong> creates a Goal (once a Coworld is active), brings it into view under Now showing and sets a markdown panel about it.</li>
+          <li>A message containing <strong>goal</strong> creates a Goal (on the session of a Coworld), brings it into view under Now showing and sets a markdown panel about it.</li>
           <li>Anything else is answered with <strong>Noted: …</strong>. A real Orchestrator (Options A to C in docs/local-end-to-end.md) answers as the model sees fit.</li>
         </ul>
       </details>
@@ -374,7 +374,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
   <div class="columns even">
     <section aria-labelledby="h-edits">
       <h2 id="h-edits">Edits as user:local</h2>
-      <p class="hint">Each goes through POST /store/apply, the user-edit allow-list; the store answers with the record or a refusal.</p>
+      <p class="hint">Each goes through POST /store/apply, the user-edit allow-list; the store answers with the record, a pending command or a refusal.</p>
       <form id="edit-form">
         <div class="fields">
           <label for="edit-op"><span>Operation</span>
@@ -415,7 +415,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
         </label>
         <div class="actions">
           <button type="submit" class="btn" id="raw-send">Send request</button>
-          <span class="muted">session_id is filled in when the body leaves it empty.</span>
+          <span class="muted">session_id is filled in for /message and /ui-action when the body leaves it empty.</span>
         </div>
         <p class="result" id="raw-result" role="status"></p>
       </form>
@@ -600,7 +600,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
       input.value = "";
       addMessage({role: "user", text, run_id: reply.run_id, delivered: reply.delivered, context});
       const problems = (reply.problems || []).length ? ` Problems: ${reply.problems.join("; ")}.` : "";
-      setText("composer-status", `Delivered as <strong>${esc(reply.delivered)}</strong> to <span class="mono">${esc(reply.run_id)}</span> (workspace seq ${esc(reply.seq)}).${esc(problems)}`);
+      setText("composer-status", `<strong>${esc(reply.delivered)}</strong> (workspace seq ${esc(reply.seq)}).${esc(problems)}`);
       followAdmission(reply.op_id);
     } catch (error) {
       setText("composer-status", `<span class="err-text">Not sent: ${esc(error.message)}</span>`);
@@ -752,7 +752,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
   }
 
   function applyOps(doc, ops) {
-    // RFC 6902 add, replace, remove and test on a copy, as the store applies them.
+    // RFC 6902 add, replace and remove on a copy; the store already checked any test.
     doc = JSON.parse(JSON.stringify(doc));
     for (const op of ops) {
       if (op.op === "test") continue;
@@ -836,8 +836,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
     try {
       const reply = await api("POST", "/ui-action", {session_id: state.session, action: "answer", payload: {ask_id: askId, value}, actor: ACTOR});
       addMessage({role: "user", text: `Answer to ${askId}: ${value}`, run_id: reply.run_id, delivered: reply.delivered, context: {}});
-      const admission = await awaitAdmission(reply.op_id);
-      trackRun(admission.run_id);
+      followAdmission(reply.op_id);
     } catch (error) {
       if (status) { status.textContent = `Not accepted: ${error.message}`; status.classList.add("err-text"); }
     }
@@ -915,7 +914,7 @@ footer { margin-top: var(--space-12); padding-top: var(--space-4); border-top: 1
       return `<div role="tabpanel" id="panel-${t.key}" aria-labelledby="tab-${t.key}" ${t.key === state.tab ? "" : "hidden"}><div class="scroll-x"><table><thead><tr>${header}</tr></thead><tbody>${body}</tbody></table></div></div>`;
     }).join("");
     const note = $("records-note");
-    if (state.coworldMissing) note.textContent = "This is a workspace session. Open this desk with ?coworld=<id> to work on a particular game.";
+    if (state.coworldMissing) note.textContent = scope.coworld ? `Coworld ${scope.coworld} has no store to read yet.` : "This is a workspace session. Open this desk with ?coworld=<id> to work on a particular game.";
     else if (state.snapshots.coworld) note.textContent = `Coworld ${state.snapshots.coworld.coworld_id} at seq ${state.snapshots.coworld.seq}; workspace at seq ${state.snapshots.workspace ? state.snapshots.workspace.seq : "?"}. Refreshed when a record event arrives.`;
     else note.textContent = "Loading the snapshots…";
     renderSettingKeys();

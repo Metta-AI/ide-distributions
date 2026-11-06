@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import re
 import sqlite3
 import subprocess
 import sys
@@ -18,11 +19,12 @@ import urllib.error
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from pathlib import Path
 from uuid import uuid4
 
 import pytest
 
-from research_core import intake
+from research_core import intake, serve
 from research_core.client import ScriptedClient, SeamError
 from research_core.serve import SeamServer
 from research_core.store import admissions, coworlds, goals, notices, sessions, tasks, ui_state
@@ -718,6 +720,16 @@ def test_status_reports_the_watcher_fields_from_the_workspace_store(seam, monkey
     assert {k: v for k, v in printed.items() if k != "heartbeat_age_s"} == {
         k: v for k, v in status.items() if k != "heartbeat_age_s"
     }
+
+
+def test_client_page_awaits_only_functions_it_defines():
+    """A missing function surfaces only as a false refusal in the catch around the call."""
+    page = (Path(serve.__file__).parent / "ui" / "index.html").read_text()
+    awaited = set(re.findall(r"\bawait (\w+)\(", page))
+    defined = set(re.findall(r"\bfunction (\w+)\(", page)) | set(
+        re.findall(r"\bconst (\w+) = (?:async )?\(", page)
+    )
+    assert awaited - defined <= {"fetch"}
 
 
 def test_unknown_get_paths_still_404_beside_the_page(seam):

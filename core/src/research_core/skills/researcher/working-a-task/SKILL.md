@@ -12,14 +12,14 @@ Task.
 
 The assignment prompt names the Task and your first call: `task.claim {task: T-n}`. The
 workspace reserved ownership before starting you. This call renews that lease, creates
-`worktrees/task-<n>/` on branch `task/<n>` from `main`, and returns the Task, its Goal, the type's
-instructions and the Orchestrator's messages. A refused claim means you lack valid ownership:
-end your run without writing anything.
+`worktrees/task-<n>/` on branch `task/<n>` from `main`, and returns the Task, its Goal's id, the
+type's instructions and the Orchestrator's messages. A refused claim names its reason (ownership,
+an unset repository, a git failure, an unfinished dependency): end your run without writing anything.
 
 ## 2. Read before working
 
-- The briefing in your system prompt: the Player, the champion, the directives, the broken
-  capabilities, your Task.
+- The briefing: your Player's id, the champion, the directives, the broken capabilities, your
+  Task.
 - `task.read {task}` for the full record, `goal.read {goal}` for the end state the work is judged
   by, `directive.list` for standing instructions on the workspace and the Goal.
 - The type's instructions (returned by the claim) and the skills they name; the mixin's
@@ -29,30 +29,30 @@ end your run without writing anything.
 
 ## 3. Work in your worktree
 
-Edit only inside your worktree and commit on your branch with messages that say what and why;
+Edit code only inside your worktree and commit on your branch with messages that say what and why;
 never touch `main` or another worktree. `version.create {summary, task}` builds from your
 committed tree and refuses a dirty one, listing the files. Record findings as you go:
-`claim.write` with evidence, `experiment.create`, `experiment.add_run`. The record is the
+`claim_write` with evidence, `experiment_create`; `xp.request` records its runs. The record is the
 report; there is no second write-up. Keep the Task small enough to finish; a bigger idea becomes
 a proposal (see `proposing`).
 
 ## 4. Ask or decide
 
-`task.ask {task, question}` when the decision is not yours: the Goal is ambiguous, two readings
+`task_ask {task, question}` when the decision is not yours: the Goal is ambiguous, two readings
 of a directive conflict, the Experiment would cost far more credits than the Task implied, or
 the result changes what the Goal should be. The question sets a wait: end your run, and the
 answer resumes you. Decide yourself everything inside the Task: the method, the seeds, which
 claim to write, how to fix a broken build. A question you can answer with a tool is not a
-`task.ask`.
+`task_ask`.
 
 ## 5. Wait, then END YOUR RUN
 
-Anything outside your control is a wait: `task.wait {task, kind, detail, ref}` with kind `xp`
+Anything outside your control is a wait: `task_wait {task, kind, detail, ref}` with kind `xp`
 (`ref`: the request ids from `xp.request`), `credits` (after a 402), `process` (`ref`: the pid of
-a background build or evaluate), `question`, `permit` (`ref`: the route to read), `submission`
-(`ref`: the policy version id), `platform` (set for you when a route keeps failing), `user` or
-`dependency`. Then stop: end the run with no further tool call. That
-is not quitting: the watcher resumes this Session, with its history, when the wait resolves.
+a background build or evaluate), `permit` (`ref`: the route to read), `submission` (`ref`: the
+policy version id), `platform` (set for you when a route keeps failing), `user` (`ref`: the setting
+or T-n their answer changes) or `dependency`. Then stop: end the run with no further tool call. That
+is not quitting: the watcher continues the Task when the wait resolves, usually in a new Session.
 Never poll in a loop and never sleep. On resume, call the tool you were waiting for
 (`xp.status {experiment}` for XP) and `directive.list`, since your briefing does not update.
 
@@ -65,12 +65,10 @@ again. `commit` is the commit on your branch to merge; `merge: no` needs `merge_
 is two or three sentences the Orchestrator reads first.
 
 `task.complete {task, outcome: "failed", failure: {what_failed, next_step, error, exit_code,
-tried}}` when the Task cannot succeed. Good: `what_failed: "the build failed on nim 2.2:
-undefined symbol X"`, `next_step: "pin nim 2.0 in MIXIN.md toolchains or patch tools/build.sh
-line 12"`. Bad: `what_failed: "it broke"`, `next_step: "try again"`. Fill `tried` so nobody
-repeats it.
+tried}}` when the Task cannot succeed. Fill `tried` so
+nobody repeats it.
 
-`task.release {task, reason}` when you must not continue, as when a directive forbids the only
+`task_release {task, reason}` when you must not continue, as when a directive forbids the only
 path; tried and it did not work is `outcome: "failed"`. End your run afterward. The workspace stops your recorded run, then returns the Task to scheduling.
 
 ## 7. What happens next

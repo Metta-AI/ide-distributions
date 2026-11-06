@@ -137,7 +137,7 @@ def test_a_call_production_refuses_is_answered_with_the_tools_refusal(script):
 
 
 def test_hermes_tools_get_the_plausible_result(script):
-    fake = script(reply(("todo_list", {"todos": []})), reply(("claim", GOOD_CLAIM)))
+    fake = script(reply(("web_search", {"query": "x"})), reply(("claim", GOOD_CLAIM)))
     assert run().outcome == "valid"
     assert fake.requests[1][-1]["content"] == write_actions.RESULT
 
@@ -145,12 +145,12 @@ def test_hermes_tools_get_the_plausible_result(script):
 def test_text_after_other_calls_is_told_apart_from_a_plain_text_answer(script):
     script(reply(text="Done."))
     assert run().outcome == "no_call"
-    script(reply(("todo_list", {"todos": []})), reply(text="I could not find it."))
+    script(reply(("web_search", {"query": "x"})), reply(text="I could not find it."))
     assert run().outcome == "stopped"
 
 
 def test_never_reaching_the_tool_within_the_limit_is_a_wrong_tool(script):
-    script(*(reply(("todo_list", {"todos": []})) for _ in range(write_actions.MAX_REQUESTS)))
+    script(*(reply(("web_search", {"query": "x"})) for _ in range(write_actions.MAX_REQUESTS)))
     result = run()
     assert result.outcome == "wrong_tool"
     assert len(result.detours) == write_actions.MAX_REQUESTS
@@ -162,8 +162,9 @@ def test_a_recovery_history_holds_the_refused_call_and_the_tools_refusal(script)
     assert run(case).outcome == "valid"
     assistant, tool_result = fake.requests[0][-2:]
     sent = json.loads(assistant["tool_calls"][0]["function"]["arguments"])
-    assert sent == write_actions.INCIDENT_CLAIM_ARGS
-    assert "summary is required for write" in json.loads(tool_result["content"])["error"]
+    assert assistant["tool_calls"][0]["function"]["name"] == "claim_write"
+    assert sent == {k: v for k, v in write_actions.INCIDENT_CLAIM_ARGS.items() if k != "action"}
+    assert "summary is required" in json.loads(tool_result["content"])["error"]
 
 
 def test_a_deeper_recovery_history_repeats_the_call_with_the_short_refusal(script):
@@ -379,7 +380,7 @@ def test_a_gateway_that_stops_answering_leaves_a_host_error_result(monkeypatch):
 
 def test_the_detour_limit_applies_before_a_later_judged_call():
     gateway = RealGateway(Path("/"), Path("h"), "k", "m")
-    other = {"id": "c", "function": {"name": "todo_list", "arguments": "{}"}}
+    other = {"id": "c", "function": {"name": "web_search", "arguments": "{}"}}
     good = {"id": "g", "function": {"name": "claim", "arguments": json.dumps(GOOD_CLAIM)}}
     stored = [{"tool_calls": [other] * (MAX_DETOURS + 1) + [good]}]
     result = harness.Result("m", "h", "c", "wrong_tool")

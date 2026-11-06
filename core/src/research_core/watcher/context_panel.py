@@ -1,8 +1,8 @@
 """Step 12b: the computed part of the ``agent-context`` panel (design A.13, amendment A3.5).
 
-The panel lives in the UI state of the fixed conversation ``workspace`` at
-``/panels/agent-context`` as ``{"kind": "agent-context", "content": {"computed", "needs"}}``.
-The watcher computes the workspace part from records with no model turn: the active Coworld,
+The panel lives in the UI state of the Coworld's shared conversation ``coworld:<id>`` (``workspace``
+with no Coworld) at ``/panels/agent-context`` as ``{"kind": "agent-context", "content": {"computed",
+"needs"}}``. The watcher computes the workspace part from records with no model turn: the Coworld,
 the image, the acting Player and whether the User identity is available, Goals (goal-less
 maintenance work shows as "workspace maintenance", A2.2), the champion rows, the last Versions
 with their submission status as the record knows it, the running Tasks with their Sessions and
@@ -38,9 +38,10 @@ from research_core.store.db import Store
 if TYPE_CHECKING:  # pragma: no cover
     from research_core.watcher.context import TickContext
 
-from research_core.tools.ui import coworld_conversation
+from research_core.tools.base import PLAYER_ID_META
+from research_core.tools.ui import AGENT_CONTEXT_PANEL, coworld_conversation
 
-PANEL = "agent-context"
+PANEL = AGENT_CONTEXT_PANEL
 PANEL_PATH = f"/panels/{PANEL}"
 VERSION_LIMIT = 5
 HEARTBEAT_ALIVE = timedelta(minutes=3)
@@ -62,7 +63,7 @@ def compute(ctx: TickContext) -> dict[str, Any]:
     computed: dict[str, Any] = {
         "coworld": None if active is None else {k: active[k] for k in COWORLD_FIELDS},
         "image": environment_guide.image_info(env),
-        "player": env.get("SOFTMAX_PLAYER_ID"),
+        "player": env.get("SOFTMAX_PLAYER_ID") or ctx.meta(PLAYER_ID_META),
         "user_identity_available": bool(env.get("SOFTMAX_USER_CREDENTIAL")),
         "paused": bool(settings.get(ctx.wstore, "paused")),
         "heartbeat": {"alive": alive, "has_work": ctx.meta("has_work") == "1"},

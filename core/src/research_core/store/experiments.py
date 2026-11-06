@@ -815,6 +815,17 @@ def _cited_by(store: Store, xid: str) -> list[dict[str, Any]]:
     ]
 
 
+def candidate_of(store: Store, experiment_id: int, methods: dict[str, Any]) -> str | None:
+    """``methods.candidate``, or when it stayed empty at start (it is built during the Task and the
+    methods then lock) the one Version built for the Experiment; None when that is not one."""
+    if methods.get("candidate"):
+        return methods["candidate"]
+    built = [
+        v["id"] for v in _versions_tested(store, experiment_id, methods) if v["role"] == "built"
+    ]
+    return built[0] if len(built) == 1 else None
+
+
 def _versions_tested(
     store: Store, experiment_id: int, methods: dict[str, Any]
 ) -> list[dict[str, str]]:

@@ -10,7 +10,7 @@ ORCHESTRATOR = frozenset({"orchestrator"})
 BOTH = frozenset({"orchestrator", "researcher"})
 
 GOAL = a.string("The Goal, such as G-3.")
-STATUS = a.string("The Goal's status.", enum=["active", "parked", "completed", "abandoned"])
+STATUS = a.string("The Goal's status.", enum=["parked", "active", "completed", "abandoned"])
 # What create takes and update replaces.
 FIELDS = {
     "title": a.string("Short name of the outcome."),
@@ -67,7 +67,7 @@ SPEC = tool(
         name="goal",
         description=(
             "Goals: what the user wants, with an end state the work is judged by. Goals and "
-            "Tasks are the plan; there is no plan file. Returns the updated record."
+            "Tasks are the plan; there is no plan file."
         ),
         handler=dispatch,
         roles=BOTH,
@@ -92,6 +92,7 @@ SPEC = tool(
                 },
                 ("goal",),
                 ORCHESTRATOR,
+                example_fields=("where_it_stands",),
             ),
             ActionSpec(
                 "set_status",
@@ -103,6 +104,7 @@ SPEC = tool(
                 },
                 ("goal", "status", "status_reason"),
                 ORCHESTRATOR,
+                own_tool=True,
             ),
             ActionSpec(
                 "read", "Read a Goal with its computed progress.", {"goal": GOAL}, ("goal",)

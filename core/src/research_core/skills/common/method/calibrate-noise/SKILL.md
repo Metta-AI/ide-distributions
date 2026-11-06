@@ -11,7 +11,7 @@ A decision rule needs `n_min` pairs that match how much each metric moves on its
 
 Only hosted episodes count; local runs never do.
 
-- League episodes: `platform.episodes {league}` lists the active policies' episodes; `platform.episode {episode}` gives each one's scores and participants. Per-seat metrics beyond the score need the mixin's `evaluate` command on downloaded results (`platform.replay`, or the results artifact through `softmax_api`; see the `softmax-api-routes` skill).
+- League episodes: `platform.episodes {league}` lists episodes of up to ten active policies, from any league or XP request (`round_id` marks a round's; `truncated` says policies were left out); `platform.episode {episode}` gives each one's scores and participants. Per-seat metrics beyond the score need the mixin's `evaluate` command on downloaded results (the results artifact through `softmax_api`; see the `softmax-api-routes` skill).
 - Completed Experiments of the same game version: `experiment.read {experiment, section: results}` has the stored rows that `xp.status` downloaded.
 - Which metrics matter, and how to run `evaluate` on a folder of results, is game-specific: see the mixin's `<coworld>-ab` skill or docs.
 
@@ -20,7 +20,7 @@ Only hosted episodes count; local runs never do.
 1. Find the game version: `platform.coworld {coworld}` (version and commit). Take the metric names and directions from `MIXIN.md`.
 2. Collect at least 10 rows per metric; aim for 100 or more. Drop rows of other game versions and failed episodes, and report the counts you dropped.
 3. For each metric compute the per-episode standard deviation and, where rows pair by seed, the standard deviation of the paired difference. The workspace environment ships helpers: `research_core.stats.noise.compute_noise` (rows to a record), `research_core.stats.power.min_episodes` and `power.delta` (the pairs an effect needs, and the slip a `tolerance` should allow: `k` is how many standard errors, default 0.5). Run them with the workspace environment's Python (`environment` skill).
-4. Store the record under `documents/measurements/noise-<game version>.json` with the rows' source ids, and commit it in your worktree.
+4. Store the record under `documents/measurements/noise-<game version>.json` in the Coworld folder, not in your worktree, with the rows' source ids. `documents/` is not in git, so there is nothing to commit.
 5. Write one claim per record (`writing-claims`): summary "metric noise for <game version>: <metric> sd <x> (n=<rows>)…", body with the counts, sources and what would change it (a new game version, a field shift), tags `noise`, the game version and the League, evidence `measurement` (`<command> @<sha> -> documents/measurements/noise-<game version>.json`). Fewer than 10 rows per metric: say the record is weak in the summary.
 6. Experiments cite the claim in `decision_rule.text` and take `n_min` from it.
 

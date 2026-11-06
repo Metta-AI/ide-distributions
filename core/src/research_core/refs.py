@@ -104,6 +104,14 @@ def parse(text: str) -> Ref:
     return Ref(kind="unknown", value=token, display=token)
 
 
+def names_only_records(text: str) -> bool:
+    """Whether ``text`` only names records (``G-3``, ``Goal G-3``, ``G-3, T-4``): at most one other
+    word per id, so a sentence that mentions a record is not caught."""
+    tokens = text.split()
+    ids = [token for token in tokens if parse(token.strip(",;.")).is_record]
+    return bool(ids) and len(tokens) <= 2 * len(ids)
+
+
 def _parse_url(url: str) -> Ref:
     """A platform URL is reduced to the strongest id it carries; otherwise it stays a URL."""
     ids = _PLATFORM_ID.findall(url)
@@ -118,7 +126,8 @@ def _parse_url(url: str) -> Ref:
 
 
 def parse_many(text: str) -> list[Ref]:
-    """Every reference found in free text, in order of appearance, without duplicates."""
+    """Every reference found in free text, without duplicates: by kind (URLs, record ids, platform
+    ids, UUIDs, labels), and within a kind in order of appearance."""
     found: list[Ref] = []
     seen: set[tuple[str, str]] = set()
 

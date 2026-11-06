@@ -1,4 +1,4 @@
-# IDE agent application contract 2.0.0
+# IDE agent application contract
 
 Source of truth: `image/contract.py`. `openapi.json` is generated with Pydantic, not maintained separately.
 The schema document has no HTTP paths: it describes the existing operations carried by the platform relay.
@@ -13,20 +13,15 @@ Current-wire scope agreed with the separately owned AIDE v1 design. No new trans
 
 ## Message content
 
-`session.message.args.message` uses OpenAI's text user-message shape:
-`{"role": "user", "content": "Hello"}`. Hermes receives that message directly; no content
-adapter, file cache, or transcript rewrite is involved. File, image and audio attachment
-inputs are outside this change. Transcribed speech is ordinary text.
+`session.message.args.message` is an OpenAI user message: `{"role": "user", "content": "Hello"}`,
+or with a list of text, image, input-audio and file parts as `content`. Hermes receives text
+directly and stages attachments through its own attachment call
+(`core/src/research_core/native_attachments.py`). Transcribed speech is ordinary text.
 
 Application context and instructions are separate from user content. Hermes's native turn
 context hook supplies the agent's context without changing the stored user message.
 
-Clients validate against this generated artifact. Deploy this runtime and matching clients as
-a coordinated major-version cutover; an old client sending a string to `session.message`
-will be rejected. Existing browser pending text sends migrate once without changing their
-operation IDs. Existing workspace admissions retain their frozen native payload across the
-SQLite migration, including uncertain sends. Coplay refuses to recreate an unresolved old
-mailbox delivery under a new operation ID; resolve those deliveries before upgrading it.
+Clients validate against this generated artifact; a bare string as `message` is rejected.
 
 ## Session scope
 
@@ -38,6 +33,5 @@ with `kind: "scope_mismatch"` and create no admission. Existing sessions are nev
 `workspace.snapshot` accepts Coworld and league IDs to return only that game's root chat sessions.
 With `session_id`, it returns only that session and its admissions. Expected scope mismatches
 return `scope_mismatch`. `session.messages` validates the same selection before reading Hermes.
-Clients pass IDs; runtime owns filtering and validation. Deploy this runtime before the frontend.
-Coworld snapshots and store streams require an explicit `coworld` selector. Retained images without the
-sentinel must upgrade before a client may send a game request. No platform-owned active-game table is involved.
+Clients pass IDs; runtime owns filtering and validation.
+Coworld snapshots and store streams require an explicit `coworld` selector. No platform-owned active-game table is involved.

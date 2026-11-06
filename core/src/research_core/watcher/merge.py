@@ -29,10 +29,10 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from research_core import gitops, locks
+from research_core import coworld_setup, gitops, locks
 from research_core import mixin as mixin_module
 from research_core.gitops import GitError, MergeConflict
-from research_core.store import settings, tasks
+from research_core.store import capabilities, settings, tasks
 from research_core.watcher.resume import emit_event
 
 if TYPE_CHECKING:  # pragma: no cover
@@ -41,6 +41,7 @@ if TYPE_CHECKING:  # pragma: no cover
 MERGE_LOCK = "merge.lock"
 CHECK_WORKTREE = "merge-check"
 CHECK_COMMANDS = ("build", "check")
+CHECKS_DUE = "checks_due"  # Coworld store meta: the full capability check runs on the next tick
 CHECK_BUDGET_S = 240
 MAIN = "main"
 
@@ -96,6 +97,9 @@ def integrate(ctx: TickContext, task: dict[str, Any]) -> dict[str, Any]:
         reason = failure.pop("reason")
         return _fail(ctx, task, reason, **failure)
     tasks.set_merge(ctx.store, ctx.actor, task["id"], f"merged {new_tip}")
+    # The checks run at main, so this merge may be what fixes a broken capability.
+    if capabilities.broken(ctx.store):
+        ctx.store.set_meta(CHECKS_DUE, ctx.store.now())
     if _submission_candidate(task):
         emit_event(
             ctx.store,
@@ -107,7 +111,7 @@ def integrate(ctx: TickContext, task: dict[str, Any]) -> dict[str, Any]:
                 "commit": commit,
                 "merge_commit": new_tip,
                 "versions": list((task.get("checklist") or {}).get("versions") or []),
-                "reason": task.get("submission_reason") or "",
+                "reason": (task.get("checklist") or {}).get("submission_reason") or "",
             },
         )
     return {
@@ -117,6 +121,13 @@ def integrate(ctx: TickContext, task: dict[str, Any]) -> dict[str, Any]:
         "merge_commit": new_tip,
         "previous_main": old_tip,
     }
+
+
+def install_toolchains(ctx: TickContext, loaded: mixin_module.Mixin) -> None:
+    """Install what the mixin declares, so a toolchain pin takes effect once it is committed. A
+    problem is only noted: the command that needs the toolchain fails with its own output."""
+    for problem in coworld_setup.install_toolchains(ctx.ws, loaded.toolchains)["problems"]:
+        ctx.note(problem)
 
 
 def run_checks(
@@ -134,6 +145,7 @@ def run_checks(
             loaded = mixin_module.load(tree / coworld.mixin.name)
         except mixin_module.MixinError as error:
             return {"reason": f"the mixin at {sha[:10]} is not usable: {'; '.join(error.problems)}"}
+        install_toolchains(ctx, loaded)
         for name in commands:
             if name not in loaded.commands:
                 continue

@@ -1,6 +1,6 @@
 """The one way a tool talks to the platform: retries, then a wait, then a refusal (C.4, A3.9).
 
-:func:`call_platform` runs a platform call through ``with_retries`` (3 tries: 1 s, 4 s, 16 s).
+:func:`call_platform` runs a platform call through ``with_retries`` (3 tries, 1 s and 4 s apart).
 When a :class:`PlatformError` still escapes, the tool refuses with the error's detail plus
 ``route``, ``status``, ``request_id`` and ``retryable``; a 401 also reports the ``login:<identity>``
 capability as broken (A4.1). When the error is retryable (the platform stayed unreachable) and
@@ -84,7 +84,7 @@ def identity_for(ctx: ToolContext, requested: str | None) -> Identity:
     if identity == "user" and ctx.role == "researcher":
         raise ToolError(
             "the Researcher acts as the Player only; the User identity belongs to the "
-            "Orchestrator (ask through task.ask or task.message)",
+            "Orchestrator (ask through task_ask)",
             identity="user",
             role=ctx.role,
         )
@@ -136,7 +136,11 @@ def _wait_on_platform(ctx: ToolContext, route: str, error: PlatformError) -> dic
 
     except (StoreError, ToolError) as problem:
         return {"waiting": False, "wait_skipped": "; ".join(problem.problems) or str(problem)}
-    return {"waiting": True, "task": f"T-{task_id}"}
+    return {
+        "waiting": True,
+        "task": f"T-{task_id}",
+        "next": "end your run; the watcher resumes you when the route answers again",
+    }
 
 
 def _held_task_id(ctx: ToolContext) -> int | None:

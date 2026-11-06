@@ -1,14 +1,14 @@
 ---
 name: client-web-ide
-description: Use when the session context names the Softmax web IDE.
+description: Use when the turn context names the web IDE as its guide.
 ---
 
 # Working with the Softmax web IDE
 
 The web IDE is the browser surface on the Softmax site: tabs for records, replays and
 documents, a policy selected in the sidebar, discovery and goal entry points, and the
-agent-context panel as an advanced view. The session context names it (`client_guide:
-client-web-ide`) and carries `league`, `policy {id, version_id}`, `opening_goal` and
+agent-context panel as an advanced view. The turn context names it (`guide skill:
+client-web-ide`). Either context may carry `league`, `policy {id, version_id}`, `opening_goal` and
 `agent_profile {name, focus, preferences}`. The turn context carries the active tab in `view`,
 the open tabs in `on_screen`, policy versions and task references in `references`,
 `replay_moment {episode, step, seat, note}`, and the IDE's own session workspace (tabs, typed
@@ -26,7 +26,7 @@ points (a Version built, an Experiment started), not on a timer.
 
 - `ui.show {ref}` opens or focuses the record's tab; `ui.show {view}` switches to one of the views
   the client's capabilities list.
-- `ui.panel_set` fills a custom tab: `markdown`, `record`, `table`, `checklist`, `file` (a
+- `ui_panel_set` fills a custom tab: `markdown`, `record`, `table`, `checklist`, `file` (a
   document under the Coworld's `documents/`), `link`, `replay` (an episode, or the moment the
   user is looking at), and `html` only when the capabilities include it; the client sandboxes it.
 - `ui.notify` lands in the IDE's notice area and, unread, in the next turn's context.
@@ -34,10 +34,10 @@ points (a Version built, an Experiment started), not on a timer.
 
 ## The selected policy and league
 
-`policy` and `league` in the session context are what the user is looking at, not necessarily
+`policy` and `league` are what the user is looking at, not necessarily
 yours: the Player you act as can differ from the Player on screen. Name Players and policy
 versions by id. When the user says "this policy", resolve it to the selected `version_id` and say
-which one you mean. A policy the user uploaded elsewhere and wants you to work from becomes an
+which one you mean. A policy this Player uploaded elsewhere and the user wants you to work from becomes an
 adopted Version with `version.adopt {policy_version, summary}`.
 
 ## Replay moments

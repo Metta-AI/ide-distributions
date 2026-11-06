@@ -5,7 +5,7 @@ description: Use when calling softmax_api for a route no tool covers.
 
 # Softmax API routes
 
-`softmax_api {method, path, params?, json?, identity?}` calls any Observatory route with authentication handled. Paths are relative to `/observatory`. The default identity is the Player; the Orchestrator may pass `identity: user` (a notice is sent for every non-GET). Prefer the tool that covers a route; the tables mark them. Every call is logged; a route you use often is a tool request: say so in your result.
+`softmax_api {method, path, params?, json?, identity?}` calls any Observatory route with authentication handled. Paths are relative to `/observatory`. The default identity is the Player; the Orchestrator may pass `identity: user` (a notice is sent for every call but GET and HEAD). Prefer the tool that covers a route; the tables mark them. Every call is logged; a route you use often is a tool request: say so in your result.
 
 Paging: list routes take `limit` and `cursor` and return the next cursor in the `X-Next-Cursor` header or `next_cursor`. Ids: `league_…`, `div_…`, `ply_…`, `cow_…`, `xreq_…`, `ereq_…`; policy versions are UUIDs, labels `name:vN`.
 
@@ -13,9 +13,9 @@ Paging: list routes take `limit` and `cursor` and return the next cursor in the 
 
 | Purpose | Route |
 |---|---|
-| Games; leagues (by game); one league; game of the week | `GET /v2/games`; `GET /v2/leagues?game_id=`; `GET /v2/leagues/{id}`; `GET /v2/leagues/game-of-week` (`platform.leagues`, `platform.league`) |
-| Divisions; one; the ladder | `GET /v2/divisions?league_id=`; `GET /v2/divisions/{id}`; `GET /v2/leagues/{id}/division-ladder` (`platform.divisions`) |
-| Leaderboard; multi-view leaderboards | `GET /v2/divisions/{id}/leaderboard`; `GET /v2/divisions/{id}/leaderboards` (`platform.standings`) |
+| Games; leagues (by game); one league; game of the week | `GET /v2/games`; `GET /v2/leagues?game_id=`; `GET /v2/leagues/{id}`; `GET /v2/leagues/game-of-week` (`platform.leagues` and `platform.league` cover the leagues) |
+| Divisions; one; the ladder | `GET /v2/divisions?league_id=`; `GET /v2/divisions/{id}`; `GET /v2/leagues/{id}/division-ladder` (`platform.divisions` lists them) |
+| Leaderboard; multi-view leaderboards | `GET /v2/divisions/{id}/leaderboard`; `GET /v2/divisions/{id}/leaderboards` (`platform.standings` covers the first) |
 | Rounds; one round with results | `GET /v2/rounds?league_id=&division_id=&status=`; `GET /v2/rounds/{id}` |
 | Power analysis for a division | `POST /v2/divisions/{id}/power-analysis` |
 
@@ -41,12 +41,12 @@ Paging: list routes take `limit` and `cursor` and return the next cursor in the 
 
 | Purpose | Route |
 |---|---|
-| Create; list mine; one; its episodes | `POST /v2/experience-requests` (use `xp.request`); `GET /v2/experience-requests?mine=true`; `GET /v2/experience-requests/{xreq}`; `GET /v2/experience-requests/{xreq}/episodes` (`xp.status`) |
+| Create; list mine; one; its episodes | `POST /v2/experience-requests` (use `xp.request`); `GET /v2/experience-requests?mine=true`; `GET /v2/experience-requests/{xreq}`; `GET /v2/experience-requests/{xreq}/episodes` (`xp.status` covers the one) |
 | Cancel a request | `POST /v2/experience-requests/{xreq}/cancel` (409 when finished) |
 | Episodes in bulk; changes feed; download manifest | `GET /v2/episode-requests?ids=&view=&status=`; `GET /v2/episode-requests/changes`; `GET /v2/episode-requests/download-manifest?ids=&include=` |
 | One episode; an artifact; the bundle; stats | `GET /v2/episode-requests/{ereq}` (`platform.episode`); `GET …/{ereq}/artifacts/{results|replay|logs|error-info|spec|game-config}`; `GET …/{ereq}/bundle?include=`; `GET …/{ereq}/episode-stats` |
 | Policy logs and artifacts per seat | `GET …/{ereq}/policy-artifacts`; `GET …/{ereq}/{pv}/policy-logs/{agent_idx}`; `GET …/{ereq}/{pv}/annotations`; `GET …/{ereq}/{pv}/policy-artifact/{agent_idx}` |
-| Episodes of a round, a policy version, a Coworld | `GET /v2/rounds/{round}/episode-requests`; `GET /v2/policy-versions/{pv}/episode-requests`; `GET /v2/coworlds/{cow}/episode-requests?source=` (`platform.episodes`) |
+| Episodes of a round, a policy version, a Coworld | `GET /v2/rounds/{round}/episode-requests`; `GET /v2/policy-versions/{pv}/episode-requests`; `GET /v2/coworlds/{cow}/episode-requests?source=` (`platform.episodes` covers the second) |
 | Replay viewer session | `POST /v2/coworlds/replays/session {coworld_id, episode_id, replay_uri}` (`platform.replay` fetches the file) |
 
 ## Credits, Coworlds, forum, wiki
@@ -63,6 +63,6 @@ Paging: list routes take `limit` and `cursor` and return the next cursor in the 
 ## Rules
 
 - Unknown fields in a body are refused (4xx): re-derive the body from the error detail; do not retry blind.
-- Platform errors are retried with backoff by the tool; a lasting one puts a Task on a `platform` wait with the route, status and request id.
-- A 403 names a missing permission (the Player may not read it): report it, never look for another credential.
+- Platform errors are retried with backoff by the tool; a lasting retryable one puts the Task a Session holds on a `platform` wait with the route, status and request id; anywhere else it is a refusal.
+- A 403 names a missing permission (the Player may not read it): report it, never look for another credential. Only the Orchestrator may try again with `identity: "user"`, when the `user-identity` skill covers it.
 - A route that works today can change: record the ones you needed in your result so they become tools.

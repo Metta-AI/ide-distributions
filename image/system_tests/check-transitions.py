@@ -181,6 +181,7 @@ report_args = {
     "task": record["id"],
     "kind": "user",
     "detail": "Packaged authority proof",
+    "ref": "max_researchers",
     "operation_id": "packaged-report",
 }
 reported = json.loads(

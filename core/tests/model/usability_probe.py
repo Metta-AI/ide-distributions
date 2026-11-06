@@ -55,7 +55,6 @@ PREPARATION_BUILTINS = frozenset(
         "search_files",
         "session_search",
         "terminal",
-        "todo_list",
         "vision_analyze",
         "web_extract",
         "web_search",
@@ -291,7 +290,9 @@ def _handle_call(
     situation: Situation, run: Run, call: harness.Call, schemas: harness.SchemaSet
 ) -> str | None:
     """Record one call. Returns what to answer it with, or None when it ends the run."""
+    refused = ""
     if call.arguments is not None:
+        refused = "; ".join(harness.own_tool_problems(situation.role, call.name, call.arguments))
         name, canonical = schemas.canonical(situation.role, call.name, call.arguments)
         call = harness.Call(call.id, name, canonical, call.raw)
     args = call.arguments
@@ -308,7 +309,9 @@ def _handle_call(
     if not is_ide and call.name not in usability_context.builtin_names():
         run.unknown_tools.append(call.name)
         return json.dumps({"error": f"Unknown tool: {call.name}"})
-    problems = _problems(situation, call) if is_ide or call.name == "delegate_task" else ""
+    problems = refused or (
+        _problems(situation, call) if is_ide or call.name == "delegate_task" else ""
+    )
     if problems:
         run.problems.append(f"{label}: {problems}"[:400])
     # A call to the wanted tool with no action is a try at the wanted act, refused as such.

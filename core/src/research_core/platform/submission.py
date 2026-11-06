@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING, Any
 
 from research_core import gitops, mixin
 from research_core.platform.errors import PlatformError
-from research_core.store import champion, settings
+from research_core.store import champion, experiments, settings
 from research_core.store._common import display_id, parse_iso
 from research_core.tools.base import ToolContext
 from research_core.transitions import report_capability
@@ -233,19 +233,21 @@ def _experiment_shortfalls(ctx: ToolContext, vid: str, current: dict[str, Any]) 
 
 
 def confirmed_against(store: Store, candidate: str, baseline: str, margin: float) -> bool:
-    """A confirmed Experiment with these methods whose primary effects all reach ``margin``.
+    """A confirmed Experiment of ``candidate`` against ``baseline`` whose primary effects all reach
+    ``margin``. The candidate is ``methods.candidate`` or the one Version built for the Experiment.
 
     ``effect`` in a measurement is the signed candidate-minus-baseline difference in the
     metric's favourable direction (the decision rule's convention: larger is better).
     """
     rows = store.q(
-        "SELECT methods, results FROM experiments WHERE status = 'confirmed'"
-        " AND json_extract(methods, '$.candidate') = ?"
+        "SELECT id, methods, results FROM experiments WHERE status = 'confirmed'"
         " AND json_extract(methods, '$.baseline') = ? ORDER BY id DESC",
-        (candidate, baseline),
+        (baseline,),
     )
     for row in rows:
         methods = json.loads(row["methods"] or "{}")
+        if experiments.candidate_of(store, row["id"], methods) != candidate:
+            continue
         results = json.loads(row["results"] or "{}")
         primaries = {m.get("name") for m in methods.get("metrics") or [] if _is_primary(m)}
         effects = [

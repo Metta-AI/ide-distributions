@@ -16,7 +16,7 @@ from research_core.tools.catalog import ROLES, tools_for
 
 REPO = Path(__file__).resolve().parents[2]
 BUILD_PROMPTS = REPO / "tools" / "build_prompts.py"
-SUMMARY_LINE = "If this conversation is summarised, keep the user's instructions word for word."
+SUMMARY_LINE = "Directives and records are stored and survive it"
 FORBIDDEN = ("promotion", "kanban", "coordinator", ".state", "store.db")
 
 # Every tool name the catalog knows, so a backticked `name` or `name.action` in a SOUL is checked
@@ -90,7 +90,7 @@ def test_authority_is_the_first_paragraph_and_the_guide_is_near_the_top(role):
     text = build.render(role)
     first = paragraphs(text)[0]
     assert first.startswith("The user's explicit request comes first")
-    assert "never refuse an action the platform allows" in first
+    assert "refuse only what the platform refuses" in first
     assert build.sections(text)[0][0] == "Order of authority"
     assert "workspace.environment_guide" in " ".join(text.split()[:400])
 
@@ -105,7 +105,7 @@ def test_section_order_follows_the_design(role):
         "Your role: the Orchestrator" if role == "orchestrator" else "Your role: a Researcher",
         build.RECORDS_TITLE,
         *(["Context and the UI"] if role == "orchestrator" else []),
-        "How to act as your Player and User",
+        "How to act as your Player",
         *(["The User identity"] if role == "orchestrator" else []),
         "When something breaks",
         "If this conversation is summarised",
@@ -121,6 +121,15 @@ def test_forbidden_words_and_the_summary_line(role):
     for word in FORBIDDEN:
         assert word not in lowered, word
     assert SUMMARY_LINE in text
+
+
+def test_the_tool_list_shows_a_role_only_the_fields_it_can_use():
+    rendered = build.render_tools("researcher")
+    for spec in tools_for("researcher"):
+        if spec.actions is None and spec.split_from is None:
+            line = next(ln for ln in rendered.splitlines() if ln.startswith(f"- `{spec.name}`"))
+            for name in spec.orchestrator_fields:
+                assert name not in line, f"{spec.name} shows the Researcher {name}"
 
 
 @pytest.mark.parametrize("role", ROLES)
@@ -140,7 +149,7 @@ def test_records_section_names_ids_statuses_and_writers():
     text = build.render_records("orchestrator")
     assert "**Goal** (G-n)" in text and "**Task** (T-n)" in text
     assert "Statuses: proposed, unclaimed, in-progress, complete, abandoned" in text
-    assert "**Session** (one per Hermes Session)" in text and "Written by the watcher." in text
+    assert "**Session** (one per Hermes Session)" in text and "Written by the workspace." in text
     assert "**Champion** (one per League)" in text
     assert "Written by `ui.notify`" in text
     researcher = build.render_records("researcher")
@@ -153,7 +162,7 @@ def test_role_sections_carry_the_binding_rules():
     for needle in ("ui.notify", "ui.ask", "user_requested: true", "`mode`", "`command`"):
         assert needle in orchestrator
     researcher = build.render("researcher")
-    for needle in ("task.claim", "task.wait", "task.complete", "outcome: succeeded"):
+    for needle in ("task.claim", "task_wait", "task.complete", "outcome: succeeded"):
         assert needle in researcher
     assert "`what_failed`" in researcher and "`next_step`" in researcher
     assert "`ui`" not in researcher and "`submit`" not in researcher

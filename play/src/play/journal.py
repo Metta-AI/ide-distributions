@@ -58,7 +58,7 @@ class Version(BaseModel):
 
 class Card(BaseModel):
     key: str
-    body: dict  # the Task record body as last written
+    body: dict  # the task card as last written
 
 
 class Journal(BaseModel):

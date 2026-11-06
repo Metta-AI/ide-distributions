@@ -20,6 +20,9 @@ from research_core.store.settings import SETTINGS
 from research_core.tools.catalog import ROLES, tools_for
 
 SKILLS = Path(research_core.__file__).parent / "skills"
+PROMPTS = SKILLS.parent / "prompts"
+TASK_TYPES = SKILLS.parent / "task_types"
+WAKES = SKILLS.parent / "watcher" / "wakes"
 ROOT_ROLES: dict[str, tuple[str, ...]] = {
     "common": ROLES,
     "orchestrator": ("orchestrator",),
@@ -142,14 +145,71 @@ def test_every_tool_action_exists_for_the_skill_role(path):
     assert not missing, f"{skill_id(path)} ({'/'.join(roles)}): unknown tool actions {missing}"
 
 
+SHIPPED_TEXTS = [
+    *skill_files(),
+    *sorted(TASK_TYPES.glob("*.md")),
+    *sorted(WAKES.glob("*.md")),
+    *(path for root in ("common", *ROLES) for path in sorted((PROMPTS / root).glob("*.md"))),
+]
+# A call as prose writes it: `tool.action {field, field: value}` or `tool_name {field}`.
+CALL_IN_PROSE = re.compile(r"`([a-z_]+(?:\.[a-z_]+)?) \{([^`]*)\}`")
+
+
+def tool_fields() -> dict[str, set[str]]:
+    """Every name a call can use, as ``tool.action`` and ``split_tool``, with its fields."""
+    fields: dict[str, set[str]] = {}
+    for role in ROLES:
+        for spec in tools_for(role):
+            if spec.actions is None:
+                fields.setdefault(spec.name, set()).update(spec.params)
+            for action in spec.actions_for(role):
+                fields.setdefault(f"{spec.name}.{action.name}", set()).update(action.params)
+    return fields
+
+
+def top_level_fields(text: str) -> list[str]:
+    """The field names of ``a, b: {c, d}, e: [f]``: nested values are skipped."""
+    names, depth, current = [], 0, ""
+    for char in text + ",":
+        if char in "{[(":
+            depth += 1
+        elif char in "}])":
+            depth -= 1
+        if char == "," and depth == 0:
+            names.append(current.split(":")[0].strip())
+            current = ""
+        else:
+            current += char
+    return [name for name in names if re.fullmatch(r"[a-z_]+", name)]
+
+
+@pytest.mark.parametrize(
+    "path", SHIPPED_TEXTS, ids=lambda p: p.relative_to(SKILLS.parent).as_posix()
+)
+def test_every_call_in_prose_uses_a_real_tool_and_its_real_fields(path):
+    known = tool_fields()
+    tools = {name.split(".")[0] for name in known}
+    problems = []
+    for name, body in CALL_IN_PROSE.findall(path.read_text(encoding="utf-8")):
+        if name not in known:
+            # `decision_rule {...}` is a record's field. Only a tool's name or prefix is a call.
+            if re.split(r"[._]", name)[0] in tools:
+                problems.append(f"{name} is not a tool or action")
+            continue
+        problems += [
+            f"{name} has no field {field}"
+            for field in top_level_fields(body)
+            if field not in known[name]
+        ]
+    assert not problems, problems
+
+
 @pytest.mark.parametrize("type", task_types.TYPES)
-def test_task_type_body_teaches_the_loop_and_the_failure_fields(type):
+def test_task_type_body_teaches_the_loop(type):
     body = task_types.load(type).body
     assert words(body) <= TASK_TYPE_WORD_LIMIT, f"{type}: {words(body)} words"
-    for needle in ("task.complete", "task.ask", "failure", "what_failed", "next_step"):
+    for needle in ("task.complete", "task_ask"):
         assert needle in body, f"{type}: body must name {needle}"
-    assert "undefined symbol X" in body, f"{type}: the good failure example"
-    assert '"it broke"' in body and '"try again"' in body, f"{type}: the bad failure example"
     lowered = body.lower()
     assert not [w for w in FORBIDDEN if w in lowered], f"{type}: forbidden vocabulary"
     researcher = catalog_actions("researcher")

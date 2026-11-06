@@ -11,11 +11,11 @@ judge the result.
 ## Goals
 
 `goal.create {title, end_state, reason, description, judgement, tags}`. The end state is
-something that can be judged: "a Version beats the champion by 2 points of mean score over 200
+something that can be judged: "a Version beats the champion by 2 mean score over 200
 episodes with the mixin's guardrails met", not "improve the policy". `reason` is the user's
 words or your reading of them; `judgement` says how the end state will be checked (which metric,
 which Experiment design). Keep `where_it_stands` current with `goal.update` after each review.
-`goal.set_status {goal, status, status_reason}` to park (waiting on the user or on credits), complete (the end state was met; cite the Experiment) or abandon.
+`goal_set_status {goal, status, status_reason}` to park (waiting on the user or on credits), complete (the end state was met; cite the Experiment) or abandon.
 
 A read-only question needs no Goal. A request that takes more than a turn does.
 
@@ -30,17 +30,16 @@ A read-only question needs no Goal. A request that takes more than a turn does.
   needs one.
 
 `task.create {goal, type, title, description, reasoning, for_human, end_condition, end_detail,
-priority, depends_on, experiment}`. `description` says what to do and deliver; `reasoning` why,
-with claim and Experiment ids. Order Tasks with
+priority, depends_on, experiment}`: `description` what to do and deliver; `reasoning` why, with ids. Order Tasks with
 `depends_on` or `task.link`. The user can edit a Task before it is claimed; you cannot.
 
 Inspect profiles with `task.workers`. Assign with `task.assign`: profile, context, rationale. The
-watcher also starts a run to assign accepted Tasks while Researcher slots are free. When you do not know whether a call landed, send it again unchanged: it will not act twice. Read a failed recovery's record before
-you reopen the Task.
+watcher starts a wake to do this for accepted Tasks while a Researcher slot is free. When you do not know whether a call landed, send it again unchanged: it will not act twice. A failed Task
+cannot reopen: read its `failure` and create a new Task.
 
 ## Proposals
 
-Researchers propose with `task.propose`; a management wake brings each one to you. Read it, then
+Researchers propose with `task_propose`; a management wake brings each one to you. Read it, then
 `task.approve {task}` or `task.reject {task, next_step}` with what to do instead. When
 `approval_required.task_types` names the type, only the user can accept: ask them, and pass
 their message as `cites` in `task.approve` or `task.create`; without `cites` the Task stays
@@ -50,10 +49,9 @@ proposed. A Researcher's question arrives the same way: `task.answer
 ## Ideation and parking
 
 A Goal with no open Task and nothing waiting on the user gets an ideation Task from a management
-wake. Each round raises `ideation_round`; when rounds without progress reach
-`ideation.park_after_rounds` (default 3), park the Goal with `goal.set_status` and tell the user
-what was tried and what would unpark it. Progress is a confirmed Experiment or a merged change,
-not activity.
+wake. When completed ideation Tasks with no progress since reach `ideation.park_after_rounds`, a wake tells you to park the Goal with `goal_set_status` and tell the user what was
+tried and what would unpark it. Progress is a Task under the Goal succeeding (other than ideation),
+a claim tagged with its id, or a Version from its Tasks or Experiments.
 
 ## Directives and settings
 
@@ -64,18 +62,17 @@ in its briefing; a Task in progress gets it only through `task.message`, so send
 tell the user running work will follow it. `directive.update` when the user changes it,
 `directive.retire` when they withdraw it, and `claim.retire` any older `preference` claim that contradicts.
 
-When a setting covers it, use the setting instead: `settings.update {key, value, cites}`, and
+When a setting covers it, use the setting instead: `settings_update {key, value, cites}`, and
 `cites` is the user's message, always. `settings.read` lists the keys with their scopes,
 such as `paused`, `max_researchers`, `approval_required.task_types` and the `submissions` keys.
 Settings bound only the agents' own initiative; nothing the user asks for in a turn is refused by one.
 
 `paused: true` stops everything in the background: no Researcher starts, no merge, no recovery,
 no autonomous submission; running Researcher Sessions are drained and resume on `paused: false`.
-You still answer the user, and what they ask for in a turn runs. Say what pausing stops when they
-ask for it.
+A new user message waits too until the workspace resumes; a turn already running finishes.
 
 ## Abandoning
 
-`task.abandon {task, failure: {what_failed, next_step}}` for a Task that should not continue; a
+`task_abandon {task, failure: {what_failed, next_step}}` for a Task that should not continue; a
 held run is stopped by the watcher. Both fields are read by people: "rejected by the user: the
-Goal changed" and "fold the opening analysis into T-12", not "dropped".
+Goal changed", not "dropped".

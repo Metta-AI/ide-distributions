@@ -1,8 +1,7 @@
 """Hermes plugin entry of the Researcher profile. Runs inside the Hermes process: stdlib only.
 
 prepare.py records the release's core source path in ``local/core-path.txt``; this shim puts it
-on ``sys.path`` and delegates to ``research_core``. If ``research_core`` is already importable
-(installed into Hermes's interpreter), that copy is used instead.
+first on ``sys.path`` and delegates to ``research_core``.
 """
 
 import os

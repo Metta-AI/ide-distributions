@@ -2,7 +2,7 @@
 
 Runs in the Hermes process (stdlib only). It empties exactly the two files of Hermes's built-in
 memory in this profile, ``memories/MEMORY.md`` (the cogent's own notes) and ``memories/USER.md``
-(its notes about the user). The workspace, programs, credentials, Kanban board and the other
+(its notes about the user). The workspace, programs, credentials and the other
 profiles are never touched. The running conversation keeps the notes it started with; the next
 conversation loads the empty ones.
 """

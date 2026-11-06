@@ -82,11 +82,14 @@ def test_every_field_and_key_is_described():
 
 
 def test_a_field_shared_by_actions_has_one_shape():
-    """The tool list shows a shared field once, shaped as its first action declares it."""
+    """A grouped tool shows a shared field once, shaped as its first action declares it. An action
+    with a tool of its own is not in the group's schema, so its shape may differ."""
     problems = []
     for spec in specs():
         shapes: dict[str, tuple[str, dict]] = {}
         for action in spec.actions or ():
+            if action.own_tool:
+                continue
             for name, schema in action.params.items():
                 shape = {k: v for k, v in schema.items() if k != "description"}
                 first = shapes.setdefault(name, (action.name, shape))
@@ -95,8 +98,36 @@ def test_a_field_shared_by_actions_has_one_shape():
     assert problems == []
 
 
+def test_a_researcher_is_not_offered_what_only_the_orchestrator_can_use():
+    def offered(tool):
+        return catalog.TOOLS[tool].schema("researcher")["parameters"]["properties"]
+
+    for tool, field in (
+        ("platform", "exclude_user"),
+        ("platform", "identity"),
+        ("forum_post", "identity"),
+        ("forum_post", "cites"),
+        ("wiki_edit", "identity"),
+        ("softmax_api", "identity"),
+        ("version", "worktree"),
+    ):
+        assert field not in offered(tool), (tool, field)
+        schema = catalog.TOOLS[tool].schema("orchestrator")["parameters"]["properties"]
+        assert field in schema, (tool, field)
+
+
+def test_an_update_shaped_action_has_an_example_that_changes_something():
+    """Everything an update takes is optional, so an example of the required fields alone would be
+    refused as "nothing to update" when a model copies it."""
+    for spec in specs():
+        for action in spec.actions or ():
+            if action.name in ("update", "update_run"):
+                assert action.example_fields, (spec.name, action.name)
+
+
 def test_claim_evidence_items_carry_the_handler_rules():
-    write = catalog.TOOLS["claim"].schema("researcher")["parameters"]["properties"]["evidence"]
+    schema = catalog.TOOLS["claim_write"].schema("researcher")
+    write = schema["parameters"]["properties"]["evidence"]
     assert write["minItems"] == 1
     item = write["items"]
     assert set(item["properties"]) == {"type", "ref", "stance", "note"}
@@ -112,14 +143,6 @@ def test_task_failure_matches_the_store():
     assert failure["required"] == list(tasks.FAILURE_REQUIRED)
     assert set(failure["properties"]) == set(tasks.FAILURE_REQUIRED + tasks.FAILURE_OPTIONAL)
     assert failure["additionalProperties"] is False  # unknown keys are refused
-
-
-def test_a_field_description_names_its_actions_write_side_first():
-    tags = catalog.TOOLS["claim"].schema("orchestrator")["parameters"]["properties"]["tags"]
-    text = tags["description"]
-    assert text.startswith("write: Keywords")
-    assert text.index("write:") < text.index("search:")
-    assert text.endswith("Required for write; optional for search.")
 
 
 def test_field_description_forms():
@@ -169,10 +192,10 @@ def test_a_frozen_schema_may_still_send_them_on_the_actions_that_took_them():
 
 
 def role_actions():
-    """(role, spec, action) for every action a role can call."""
+    """(role, spec, action) for every action a role's grouped tools offer."""
     for role in ROLES:
         for spec in catalog.tools_for(role):
-            for action in spec.actions_for(role):
+            for action in spec.grouped_actions(role):
                 yield role, spec, action
 
 
@@ -232,3 +255,10 @@ def test_a_field_is_advertised_for_an_action_only_if_the_validator_accepts_it():
             if refused and action.name in named_actions(schema.get("description", "")):
                 problems.append(f"{role} {spec.name}.{action.name}: {name}: advertised, refused")
     assert problems == []
+
+
+def test_end_condition_says_it_needs_end_detail():
+    """A store check, not the validator, requires the pair, so only this text can warn a model."""
+    properties = catalog.TOOLS["task"].schema("orchestrator")["parameters"]["properties"]
+    assert "requires end_detail" in properties["end_condition"]["description"]
+    assert "Required with end_condition" in properties["end_detail"]["description"]

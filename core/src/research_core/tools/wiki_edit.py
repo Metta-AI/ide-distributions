@@ -17,7 +17,7 @@ def handle(call: ToolCall) -> dict:
     wiki, page = str(call.get("wiki")), str(call.get("page"))
     title, body = str(call.get("title")), str(call.get("body"))
     base = call.get("base_revision_id")
-    key = w.digest("wiki", wiki, page, str(base or ""), body)
+    key = w.digest("wiki", identity, wiki, page, title, str(base or ""), body)
     intent = w.begin_intent(call, kind="wiki", key=key, subject=None)
     platform = ctx.platform()
     if intent.get("existing") and intent.get("state") == "done":
@@ -25,7 +25,9 @@ def handle(call: ToolCall) -> dict:
     if intent.get("existing") and intent.get("state") == "pending":
         # A crash after the platform accepted the edit: look for our body in the history.
         try:
-            current = call_platform(ctx, "GET wiki page", lambda: platform.wiki_read(wiki, page))
+            current = call_platform(
+                ctx, f"GET /v2/wikis/{wiki}/pages/{page}", lambda: platform.wiki_read(wiki, page)
+            )
             revision = (current.get("current_revision") or {}) if isinstance(current, dict) else {}
             if revision.get("body") == body:
                 result = {"conflict": False, "page": current, "reconciled": True}
@@ -33,7 +35,7 @@ def handle(call: ToolCall) -> dict:
                 return {"edit": result, "reconciled": True, "identity": identity}
         except Exception:
             pass  # fall through and try the edit
-    route = f"PUT wikis/{wiki}/pages/{page}"
+    route = f"PUT /v2/wikis/{wiki}/pages/{page}"
     try:
         edit = call_platform(
             ctx,
@@ -64,11 +66,12 @@ def handle(call: ToolCall) -> dict:
             "current_revision_id": edit.get("current_revision_id"),
             "current_body": edit.get("current_body"),
         }
-    w.finish_intent(call, intent, state="done", result=edit)
     what = f"wiki edit {wiki}/{page}"
     with ctx.store.tx(ctx.actor) as tx:
         tx.event("platform.wiki_edit", what, {"identity": identity, "cites": call.get("cites")})
+    # Last: a crash before it leaves the intent pending, so the retry still tells the user.
     w.notice_user_write(call, identity, what)
+    w.finish_intent(call, intent, state="done", result=edit)
     return {"edit": edit, "identity": identity}
 
 
@@ -78,8 +81,7 @@ SPEC = tool(
         description=(
             "Edit a Coworld wiki page with compare-and-swap: pass the revision you read as "
             "base_revision_id; a conflict returns the current body to merge. The "
-            "platform_writes.wiki setting bounds edits you make on your own; a user request "
-            "(cites) always runs."
+            "platform_writes.wiki setting bounds edits you make on your own."
         ),
         handler=handle,
         roles=BOTH,
@@ -90,12 +92,13 @@ SPEC = tool(
             "title": a.string("The page title."),
             "body": a.string("The whole new page body, Markdown."),
             "base_revision_id": a.string(
-                "The revision you read (platform.wiki_read); omit to create a page."
+                "The revision you read (platform.wiki_read); omit only to create a new page."
             ),
             "note": a.string("A short edit note."),
             "identity": a.string("Default player.", enum=["player", "user"]),
             "cites": a.string("The user's message that asked for this, if any."),
         },
         required=("wiki", "page", "title", "body"),
+        orchestrator_fields=("identity", "cites"),
     )
 )

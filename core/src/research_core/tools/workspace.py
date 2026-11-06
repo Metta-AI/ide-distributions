@@ -4,7 +4,7 @@
 Executor ``workspace`` (A3.1): it clones repositories, reads the platform manifest and parses
 YAML, so it runs in the workspace environment. ``capabilities {check: true}`` never runs the
 checks here (A3.2, A3.4): it marks them due in the Coworld store's ``meta`` and the watcher runs
-them on its next tick. ``change_complete`` (A3.6) is added by the review-and-merge entry.
+them on its next tick.
 """
 
 from __future__ import annotations
@@ -338,8 +338,8 @@ def list_capabilities(ctx: ToolContext, *, check: bool) -> dict[str, Any]:
         store.set_meta(CHECKS_DUE_KEY, due)
         result["checks_due"] = due
         result["note"] = (
-            "checks marked due; the watcher runs them on its next tick (within a minute) and "
-            "the briefing shows the result"
+            "checks marked due; the watcher runs them on its next tick (within a minute), and "
+            "this action or doctor shows the result"
         )
     return result
 
@@ -360,12 +360,8 @@ SPEC = durable_tool(
                 "coworld_switch",
                 "Set up this session's Coworld; another Coworld requires a new session.",
                 {
-                    "coworld": a.string("The platform Coworld id, such as cow_fake."),
+                    "coworld": a.string("The platform Coworld id (cow_...)."),
                     "cites": a.string("The user's message reference when the user asked."),
-                    "source": a.string(
-                        "Override the source repository URL from the platform manifest."
-                    ),
-                    "commit": a.string("Override the pinned source commit."),
                     "pending_request": a.obj(
                         "The user's request that setup carries out when done.",
                         {
@@ -373,6 +369,10 @@ SPEC = durable_tool(
                             "cites": a.string("The user's message reference."),
                         },
                     ),
+                    "source": a.string(
+                        "A git URL, when the platform lists no source or the user names a fork."
+                    ),
+                    "commit": a.string("The commit of source to set up."),
                 },
                 ("coworld",),
                 ORCHESTRATOR,

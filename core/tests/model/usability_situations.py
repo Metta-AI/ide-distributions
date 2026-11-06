@@ -343,6 +343,7 @@ ORCHESTRATOR_CHATS = [
         "Primary metric win_rate, going up, by at least 3 points, with 40 paired seeds.",
         ("experiment.create",),
         ("experiment",),
+        x5="absent",
     ),
     chat(
         "experiment-search",
@@ -382,13 +383,6 @@ ORCHESTRATOR_CHATS = [
         ("experiment.update_run",),
         ("experiment",),
         x5="stored",
-    ),
-    chat(
-        "experiment-add-run",
-        "I started an XP request by hand for X-5 and the platform accepted it as xreq_77: "
-        "baseline arm, seed 12, 1 episode. Put it on the record.",
-        ("experiment.add_run",),
-        ("experiment",),
     ),
     chat(
         "xp-request",
@@ -803,7 +797,7 @@ XP_ACCEPTED = ok(
     credits="credits: 838 available of 1000; 162 spent this period",
     estimate={"episodes": 2, "credits": 2.0},
     warnings=[],
-    next="task.wait {task, kind: xp, detail: 'XP requests for X-5', ref: "
+    next="task_wait {task, kind: xp, detail: 'XP requests for X-5', ref: "
     '["xreq_1", "xreq_2"]} and end your run; the watcher resumes you when they finish, then '
     "xp.status stores the rows",
 )
@@ -821,6 +815,7 @@ BUILD_BACKGROUND = json.dumps(
             pid=4242,
             resume_token="res_8c1",
         ),
+        "4f1c9a2",
     )
 )
 # ``_credits_refused`` in tools/xp.py, as a Researcher gets it; an Orchestrator's ``next`` differs.
@@ -833,7 +828,7 @@ CREDITS_REFUSAL = json.dumps(
         "created": [],
         "reconciled": [],
         "runs": [],
-        "next": "task.wait {task, kind: credits, detail: 'XP requests for X-5: need 2.00 credits'} "
+        "next": "task_wait {task, kind: credits, detail: 'XP requests for X-5: need 2.00 credits'} "
         "and end your run; the watcher resumes you when the balance covers it",
     }
 )
@@ -1343,6 +1338,7 @@ HARD = [
         ("experiment.create",),
         ("experiment",),
         args={"methods": r'"baseline": "V-7"'},
+        x5="absent",
     ),
     chat(
         "hard-opening-goal",
@@ -1674,8 +1670,7 @@ HARD = [
         "hard-repair-complete",
         "Repair: evaluate is broken",
         "The evaluate capability was broken. You fixed the mixin's command, committed it as "
-        "3f2a9c1, reran it until it passed, asked for a check, and workspace.capabilities now "
-        "shows evaluate ok. All that remains is to finish.",
+        "3f2a9c1 and reran it until it passed. All that remains is to finish.",
         ("task.complete",),
         (
             "repair",

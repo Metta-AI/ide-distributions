@@ -15,7 +15,7 @@ Before anyone changes the policy because of a bad score, see the cause in a repl
 
 ## Fetch and decode
 
-1. `platform.replay {episode}` downloads the replay into `documents/replays/` once and pins it; the pin keeps the download data so the citation can be re-fetched. A second call returns the pin.
+1. `platform.replay {episode}` downloads the replay into `documents/replays/` once and pins its path, digest and size. A second call returns the pin, or fetches the file again from the episode id if it is gone.
 2. Decode it with the game's tool. How to open, expand and read this game's replays and the policy's own logs is game-specific: see the mixin's `<coworld>-replay-inspection` skill or docs. Policy logs per episode: `softmax_api {method: GET, path: /v2/episode-requests/<ereq>/<pv>/policy-logs/<agent_idx>}`.
 3. Pass the gate before any strategy change. All of these must hold:
    - the episode is completed and its game version is known (`platform.coworld` for the current one);
@@ -32,7 +32,7 @@ Each inspected replay becomes evidence on a claim (`writing-claims`):
 - the body gives the before metric, the tick, the cause and what would change your mind;
 - one replay is an anecdote, say so; a pattern across several replays supports a mechanism; tag the policy version, the lever and the Goal.
 
-An existing claim on the same behaviour gets `claim.add_evidence` instead of a twin; a contradicted one is retired with the killing replay (`claim.retire {claim, status: refuted, type: replay, ref, note}`).
+An existing claim on the same behaviour gets `claim_add_evidence` instead of a twin; a contradicted one is retired with the killing replay (`claim.retire {claim, status: refuted, type: replay, ref, note}`).
 
 ## When the replay cannot show the cause
 

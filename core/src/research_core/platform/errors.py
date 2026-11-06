@@ -76,7 +76,7 @@ class IdentityUnavailable(PlatformError):
 
 
 class NotAvailable(PlatformError):
-    """The platform has no route for this operation (for example a policy file download)."""
+    """The client has no route for this operation."""
 
     def __init__(self, detail: str, **kwargs):
         kwargs.setdefault("retryable", False)

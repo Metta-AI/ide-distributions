@@ -1,5 +1,7 @@
 """The tool surface (design C.2, amendment A3.1): counts, roles and executors."""
 
+from pathlib import Path
+
 import pytest
 
 from research_core.tools import catalog
@@ -23,8 +25,37 @@ ORCHESTRATOR = {
     "softmax_api",
     "github",
 }
-RESEARCHER = ORCHESTRATOR - {"ui", "submit", "github"}
-INPROC = {"goal", "task", "directive", "claim", "settings", "ui"}
+# Actions with a tool of their own (ActionSpec.own_tool). The two roles have different ones.
+OWN_TOOLS_BOTH = {"claim_write", "claim_add_evidence", "experiment_create"}
+OWN_TOOLS_ORCHESTRATOR = {
+    "goal_set_status",
+    "settings_update",
+    "task_abandon",
+    "ui_panel_set",
+}
+OWN_TOOLS_RESEARCHER = {
+    "task_ask",
+    "task_propose",
+    "task_propose_submission",
+    "task_release",
+    "task_wait",
+}
+RESEARCHER = (ORCHESTRATOR - {"ui", "submit", "github"}) | OWN_TOOLS_BOTH | OWN_TOOLS_RESEARCHER
+ORCHESTRATOR = ORCHESTRATOR | OWN_TOOLS_BOTH | OWN_TOOLS_ORCHESTRATOR
+INPROC = {
+    "goal",
+    "goal_set_status",
+    "task",
+    "task_abandon",
+    "directive",
+    "claim",
+    "claim_write",
+    "claim_add_evidence",
+    "settings",
+    "settings_update",
+    "ui",
+    "ui_panel_set",
+}
 
 
 def names(role):
@@ -42,9 +73,18 @@ def test_a_broken_tool_module_fails_loudly(tmp_path, monkeypatch):
 
 
 def test_tool_counts_match_the_design():
-    assert names("orchestrator") == ORCHESTRATOR and len(ORCHESTRATOR) == 17
-    assert names("researcher") == RESEARCHER and len(RESEARCHER) == 14
+    assert names("orchestrator") == ORCHESTRATOR and len(ORCHESTRATOR) == 24
+    assert names("researcher") == RESEARCHER and len(RESEARCHER) == 22
     assert len(ORCHESTRATOR) <= catalog.TOOL_BUDGET
+
+
+def test_readmes_state_the_tool_counts():
+    """Hermes registers each tool of an action of its own, so the counts are of the whole list."""
+    repo = Path(__file__).resolve().parents[2]
+    for role, tools in (("orchestrator", ORCHESTRATOR), ("researcher", RESEARCHER)):
+        assert f"{len(tools)} tools, listed in" in (repo / role / "README.md").read_text()
+    core = (repo / "core" / "README.md").read_text()
+    assert f"{len(ORCHESTRATOR)} Orchestrator, {len(RESEARCHER)} Researcher" in core
 
 
 def test_executor_table():

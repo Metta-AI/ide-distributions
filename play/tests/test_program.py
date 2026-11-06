@@ -147,6 +147,7 @@ def test_practice_defaults_to_five_games_with_a_human_title(program, cli):
         "request_id": "xreq_1",
         "games": 5,
         "seats": [0],
+        "already": False,
     }
     body = json.loads(
         cli.inputs[cli.calls.index(["coworld", "xp-request", "create", "-", "--json"])]
@@ -162,6 +163,20 @@ def test_practice_defaults_to_five_games_with_a_human_title(program, cli):
         "title": "Practice: towerless v1",
         "idempotency_key": f"practice:{GOTA.reference_league_id}:towerless:v1:a1",
     }
+
+
+def test_a_repeated_practice_reports_the_first_requests_games_not_the_new_ask(program, cli):
+    first_version(program)
+    program.practice_request(league=GOTA.reference_league_id, episodes=5)
+    cli.requests = 0  # the platform replays on the idempotency key: the same id comes back
+    data = program.practice_request(league=GOTA.reference_league_id, episodes=10, seats=[1])
+    assert (data["request_id"], data["games"], data["seats"], data["already"]) == (
+        "xreq_1",
+        5,
+        [0],
+        True,
+    )
+    assert len(Journal.load(program.workspace).versions[0].practices) == 1
 
 
 @pytest.mark.parametrize("named", ["towerless v1", "towerless:v1", "Towerless V1", "towerless"])
@@ -444,7 +459,7 @@ def test_task_card_stays_in_the_existing_workspace_journal(program):
     card = Journal.load(program.workspace).card
     assert card.key.startswith("play-")
     body = card.body
-    assert body["origin"] == "player"  # the bridge forwards only coach tasks
+    assert body["origin"] == "player"
     assert body["state"] == "active" and body["version"] == 2
     assert [s["rung"] for s in body["steps"]] == [
         "reflect",
@@ -671,33 +686,3 @@ def test_league_status_names_what_the_platform_could_not_answer(program, cli):
     cli.latest_replay = {"round": {}, "episode": {}}
     assert program.league_status(league=CHOSEN)["unavailable"] == ["latest_result"]
     assert run("league_status", {"league": CHOSEN, "top": 3}, program)["ok"] is True
-
-def test_name_keep_puts_the_name_in_the_cogents_own_play_record(program, monkeypatch):
-    sent = []
-
-    class Reply:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, *exc):
-            return False
-
-    def urlopen(request, timeout=None):
-        sent.append((request.method, request.full_url, json.loads(request.data), request.headers))
-        return Reply()
-
-    monkeypatch.setattr("play.program.urllib.request.urlopen", urlopen)
-    assert program.name_keep("  Orbi ") == {"name": "Orbi"}
-    ((method, url, body, headers),) = sent
-    assert method == "PUT"
-    assert url.endswith(f"/observatory/v2/cogents/{PLAYER}/c/play/name")
-    assert body == {"body": {"name": "Orbi"}}
-    assert headers["Authorization"] == "Bearer cga_fake"
-
-
-@pytest.mark.parametrize("name", ["", "   ", "x" * 61])
-def test_name_keep_refuses_a_bad_name_without_calling(program, monkeypatch, name):
-    monkeypatch.setattr("play.program.urllib.request.urlopen", lambda *a, **k: pytest.fail("called"))
-    with pytest.raises(PlayError) as error:
-        program.name_keep(name)
-    assert error.value.reason == "bad_arguments"

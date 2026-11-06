@@ -8,13 +8,14 @@ from __future__ import annotations
 
 from typing import Any
 
+from research_core import refs
 from research_core.store import settings
 from research_core.tools import _args as a
 from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolError, ToolSpec, tool
 
 ORCHESTRATOR = frozenset({"orchestrator"})
 BOTH = frozenset({"orchestrator", "researcher"})
-KEY = a.string("The setting, such as paused or max_researchers; read without it lists all.")
+KEY = "The setting, such as paused or max_researchers"
 
 
 def describe(found: settings.SettingSpec, value: Any) -> dict:
@@ -67,6 +68,10 @@ def handle(call: ToolCall) -> dict:
             ]
         }
     if call.action == "update":
+        if refs.names_only_records(call.get("cites")):
+            raise ToolError(f"cites must be the user's message, not the record {call.get('cites')}")
+        if "value" not in call.args:
+            raise ToolError("value is required: the new value, or null to clear the setting")
         found = settings.spec(call.get("key"))
         record = settings.update(
             store_for(ctx, found),
@@ -95,13 +100,13 @@ SPEC = tool(
             ActionSpec(
                 "read",
                 "Read one setting, or all of them with their types, defaults and scopes.",
-                {"key": KEY},
+                {"key": a.string(f"{KEY}; without it, all of them.")},
             ),
             ActionSpec(
                 "update",
                 "Change a setting at the user's request; cites names the message that asked.",
                 {
-                    "key": KEY,
+                    "key": a.string(f"{KEY}."),
                     "value": a.any_of(
                         "The new value in the setting's type; null clears a nullable setting.",
                         a.BOOLEAN,
@@ -114,6 +119,8 @@ SPEC = tool(
                 },
                 ("key", "cites"),
                 ORCHESTRATOR,
+                example_fields=("value",),
+                own_tool=True,
             ),
         ),
     )

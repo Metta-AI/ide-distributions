@@ -1,6 +1,6 @@
 """Step 4: resolve what in-progress Tasks wait on, without a model (design B.13).
 
-A Researcher that must wait records ``waiting_on`` with ``task.wait`` and ends its run (A4.4).
+A Researcher that must wait records ``waiting_on`` with ``task_wait`` and ends its run (A4.4).
 Every tick this step checks each wait against its source and, when it is over, calls
 ``tasks.resolve_wait``, whose ``task.wait_resolved`` event the wake step hands to
 ``resume.handle_wait_resolved`` after step 5 refreshed run statuses (A5.3). Nothing here

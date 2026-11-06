@@ -3,7 +3,8 @@
 Upload takes any built Version (an adopted one is already uploaded: a no-op). Before the first
 send the tool computes the exact inputs the platform deduplicates an upload on (coworld's
 ``policy_upload_inputs``: name, player, file hash, file size, attributes) and commits an
-``upload`` intent keyed by the artifact's sha256 with those inputs saved on it. The bytes are
+``upload`` intent keyed by the policy name and the artifact's sha256, the part of those inputs
+that can differ between Versions, with the inputs saved on it. The bytes are
 sent once per call and the write is never retried: a lost answer leaves the intent ``pending``,
 a platform error finishes it ``failed``, and either way the next call reads the platform first.
 
@@ -18,8 +19,9 @@ saved inputs, as the Player; it needs no local artifact, so it works after the c
   ``ok: false`` naming the intent and the saved inputs, writes a notice for the user and sends
   nothing.
 
-``user_requested: true`` (the user asked for this upload) always sends again. The platform's
-returned hash, when it has one, is checked against the digest; a mismatch finishes the intent
+``user_requested: true`` (the user asked for this upload) sends a Version not yet uploaded again.
+The platform's returned hash, when it has one, is checked against the digest; a mismatch finishes
+the intent
 ``failed``. ``versions.mark_uploaded`` emits ``version.uploaded``; a wake Session also leaves a
 notice (A2.4: the only wake channel).
 
@@ -41,7 +43,7 @@ from research_core.tools import _args as a
 from research_core.tools import version as version_tool
 from research_core.tools.base import ToolCall, ToolContext, ToolError, ToolSpec, tool
 
-UPLOAD_ROUTE = "POST /v2/policy-versions/upload"
+UPLOAD_ROUTE = "POST /stats/policies/files/upload"
 # Recorded on the earlier attempt when the tool sends again after the lookup found nothing;
 # one such attempt per intent happens without a user request.
 NOT_FOUND = {"lookup": "not_found"}
@@ -59,12 +61,13 @@ def handle(call: ToolCall) -> dict:
         raise ToolError(f"{vid} has no artifact to upload; version.create builds one")
     if not record.get("policy_name"):
         raise ToolError(f"{vid} records no policy name to upload under")
-    intent = intents.find(ctx.store, kind="upload", key=digest)
+    key = f"{record['policy_name']}:{digest}"
+    intent = intents.find(ctx.store, kind="upload", key=key)
     if intent is None:
         content = read_artifact(ctx, vid, artifact)
         request = upload_inputs(ctx, record)
         intent = intents.begin(
-            ctx.store, ctx.actor, kind="upload", key=digest, subject=vid, request=request
+            ctx.store, ctx.actor, kind="upload", key=key, subject=vid, request=request
         )
         return send(ctx, record, intent, content)
     if call.get("user_requested"):
@@ -165,7 +168,7 @@ def send(ctx: ToolContext, record: dict[str, Any], intent: dict[str, Any], conte
             )
     except PlatformError as error:
         finish(ctx, intent, "failed", error.to_dict())
-        raise version_tool.platform_refusal(UPLOAD_ROUTE, error) from error
+        raise version_tool.platform_refusal(ctx, UPLOAD_ROUTE, error) from error
     checked = uploaded.content_hash is not None
     if checked and uploaded.content_hash != digest:
         finish(ctx, intent, "failed", {"platform_hash": uploaded.content_hash, "digest": digest})
@@ -229,7 +232,7 @@ def upload_inputs(ctx: ToolContext, record: dict[str, Any]) -> dict[str, Any]:
             image_archive=record["artifact"]["kind"] == "image",
         )
     except PlatformError as error:
-        raise version_tool.platform_refusal("upload inputs", error) from error
+        raise version_tool.platform_refusal(ctx, "upload inputs", error) from error
     if record["artifact"]["kind"] == "file" and inputs.get("file_hash") != digest:
         # The intent key is the digest; the lookup must ask for the same bytes.
         raise ToolError(
@@ -312,11 +315,9 @@ SPEC = tool(
     ToolSpec(
         name="upload",
         description=(
-            "Upload a Version's exact built artifact to the platform as a policy version,"
-            " once; the platform's hash is checked against the artifact digest. An earlier"
-            " attempt whose answer was lost is looked up, never sent again blindly; an"
-            " unresolved one needs user_requested=true. An adopted or already uploaded Version"
-            " is a no-op. Returns the Version with its status."
+            "Upload a Version's exact built artifact to the platform as a policy version, once."
+            " An earlier attempt whose answer was lost is looked up, never sent again blindly."
+            " Returns the Version with its status."
         ),
         handler=handle,
         roles=version_tool.BOTH,
@@ -325,7 +326,7 @@ SPEC = tool(
             "version": version_tool.VERSION,
             "user_requested": a.boolean(
                 "true when the user asked for this upload: the bytes are sent again even when"
-                " an earlier attempt is unresolved. false (default) for your own initiative."
+                " an earlier attempt is unresolved."
             ),
         },
         required=("version",),

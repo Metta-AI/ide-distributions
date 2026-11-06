@@ -2,7 +2,8 @@
 
 Each case offers the role's whole tool list as a Hermes session does (``harness.full_toolset``,
 ``tool_choice: "auto"``) with a one-line instruction, and judges the model's first call to the
-expected tool: a call to that tool with no ``action``, or with any action that is not a read.
+expected tool: a call to that tool with no ``action``, or with any action that is not a read. A
+call to an action's own tool counts as the grouped tool and action (``ShippedSchemas.canonical``).
 That call must pass the checks production runs before anything changes: ``validate_args`` (the
 tools' argument check) and, for the actions whose store checks need no records, those checks
 too (``RECORD_CHECKS``). Calls before it get the answer production would give: the tool's own
@@ -180,12 +181,6 @@ ORCHESTRATOR = [
     Case(
         "orchestrator",
         "experiment",
-        "add_run",
-        "Record xp request req-9f2 as the candidate run of experiment X-4.",
-    ),
-    Case(
-        "orchestrator",
-        "experiment",
         "abandon",
         "Abandon experiment X-6: its baseline Version was deleted.",
     ),
@@ -224,12 +219,6 @@ RESEARCHER = [
         "Add replay evidence (ref 'episode:ep-77 xp:none') to claim C-5, supporting it.",
     ),
     Case("researcher", "experiment", "create", EXPERIMENT_CREATE),
-    Case(
-        "researcher",
-        "experiment",
-        "add_run",
-        "Record xp request req-1c0 as the baseline run of experiment X-4.",
-    ),
     Case(
         "researcher",
         "task",
@@ -437,6 +426,9 @@ def judge(case: Case, call: harness.Call, args: dict) -> tuple[str, str]:
     """The outcome of the judged call, and what production would refuse."""
     if call.arguments is None:
         return "invalid", f"arguments are not a JSON object: {call.raw[:200]}"
+    refused = harness.own_tool_problems(case.role, call.name, call.arguments)
+    if refused:
+        return "invalid", f"{'; '.join(refused)}; sent {sorted(call.arguments)}"
     if args.get("action") not in (None, case.action):
         return "invalid", f"action {args['action']!r} instead of {case.action}; sent {sorted(args)}"
     spec = next(s for s in catalog.tools_for(case.role) if s.name == case.tool)
@@ -509,6 +501,10 @@ def run_case(model: str, host: str, case: Case, schemas: harness.SchemaSet) -> h
                 result.reasoning_gaps = gaps_in_reasoning(case, args, reply.reasoning)
                 return result
             result.detours.append(f"{call.name} {call.raw[:120]}")
+            if call.arguments is not None and harness.own_tool_problems(
+                case.role, call.name, call.arguments
+            ):
+                tool, args = call.name, call.arguments  # refused as the flat call it was
             content = answer(case, schemas, tool, None if call.arguments is None else args)
             answers.append({"role": "tool", "tool_call_id": call.id, "content": content})
         history = [*history, reply.message, *answers]

@@ -103,6 +103,7 @@ def test_prepare_orchestrator_end_to_end(hermes_bin, host):
         "browser",
         "connections",
         "cronjob",
+        "todo",
     ]
     assert config_get(hermes_bin, host, "orchestrator", "skills.external_dirs") == [
         str(CORE_SRC / "research_core" / "skills" / "common"),
@@ -116,6 +117,18 @@ def test_prepare_orchestrator_end_to_end(hermes_bin, host):
     assert probe.stdout.strip() == "ok"
 
     assert not watcher_job(host)
+
+
+def test_installed_script_finds_its_profile_and_reads_its_env(hermes_bin, host):
+    """The README's install: no HERMES_HOME in the environment, IDE_WORKSPACE only in ``.env``."""
+    profile = host.profile("researcher")
+    workspace = host.workspace.parent / "workspace-from-dotenv"
+    (profile / ".env").write_text(f"IDE_WORKSPACE={workspace}\n")
+    env = {k: v for k, v in os.environ.items() if k not in ("HERMES_HOME", "IDE_WORKSPACE")}
+    argv = [hermes_python(hermes_bin), profile / "scripts" / "prepare.py"]
+    result = run([*argv, "--source", REPO / "researcher", "--hermes", hermes_bin, "--check"], env)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert json.loads(result.stdout.strip().splitlines()[-1])["workspace"] == str(workspace)
 
 
 def test_prepare_again_keeps_environment_without_observation_cron(hermes_bin, host):
@@ -143,6 +156,7 @@ def test_prepare_researcher_shares_the_environment(hermes_bin, host):
         "browser",
         "connections",
         "cronjob",
+        "todo",
     ]
     assert not (host.profile("researcher") / "cron" / "jobs.json").exists()
     assert (host.profile("researcher") / "local" / "core-path.txt").is_file()
@@ -426,10 +440,10 @@ import model_tools
 from toolsets import resolve_toolset
 disabled = json.loads(sys.argv[1])
 removed = {tool for name in disabled for tool in resolve_toolset(name)}
-assert {"browser_exec", "manage_connections", "cronjob_manage"} <= removed, removed
+assert {"browser_exec", "manage_connections", "cronjob_manage", "todo_list"} <= removed, removed
 kept = {"terminal", "read_file", "write_file", "patch", "search_files", "skill_view",
     "skill_manage", "skills_list", "execute_code", "delegate_task", "process_manage",
-    "session_search", "web_extract", "web_search", "todo_list", "vision_analyze"}
+    "session_search", "web_extract", "web_search", "vision_analyze"}
 assert not kept & removed, kept & removed
 names = {tool["function"]["name"] for tool in model_tools.get_tool_definitions(
     enabled_toolsets=["hermes-api-server"], disabled_toolsets=disabled, quiet_mode=True)}

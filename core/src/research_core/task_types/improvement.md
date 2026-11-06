@@ -46,26 +46,23 @@ before the first claim. Game-specific metrics, floors and rosters: see the mixin
 and `<coworld>-eval-design` skills or docs.
 
 Work, in order:
-1. `experiment.create {summary, task, hypothesis, methods}`: the decision rule, metric, effect
-   size, seeds and episodes are pre-registered. Then `experiment.start`; the design locks.
+1. When the Task names an Experiment (`experiment: X-n` in `task.read`), that is the one: finish
+   its design with `experiment.update`. Otherwise `experiment_create {summary, task, hypothesis,
+   methods}`. The hypothesis, metrics and decision rule (with `n_min`) are pre-registered. Then
+   `experiment.start`; they lock.
 2. Make the change in your worktree, commit, `version.create {summary, task, experiment}`, then
    `upload {version}`.
-3. `xp.request {experiment, candidate, baseline, seeds, episodes, opponents}`, then `task.wait
+3. `xp.request {experiment, candidate, baseline, seeds, episodes, opponents}` (a credits refusal is `task_wait {task, kind: credits, detail}` at once, not a failed Task), then `task_wait
    {task, kind: "xp", detail, ref: [<request ids>]}` and END YOUR RUN. On resume
    `xp.status {experiment}` stores the rows.
 4. `experiment.close {experiment}` applies the rule: confirmed, refuted or inconclusive. Record
    the verdict as claims with `experiment` evidence; a refuted hypothesis is a finding.
-5. `task.propose_submission` only for a confirmed Version (see `proposing`).
+5. `task_propose_submission` only for a confirmed Version (see `proposing`).
 
-Ask (`task.ask`) when the lever or the baseline is ambiguous, or the Experiment would cost far
+Ask (`task_ask`) when the lever or the baseline is ambiguous, or the Experiment would cost far
 more credits than the Task implied; decide seeds, episodes above the mixin's floor and
 implementation details yourself.
 
 End: `task.complete {task, claims, experiment, versions, submission_candidate: "yes" or "no",
 submission_reason, commit, merge: "yes" or "no", merge_reason, result}`. Merge yes only for a
 confirmed Version; `submission_candidate` and its reason must agree with the verdict.
-
-When it fails, `task.complete {task, outcome: "failed", failure}` with `what_failed` and `next_step`,
-plus `error`, `exit_code` and `tried` when they exist. Good: what_failed "the build failed on
-nim 2.2: undefined symbol X", next_step "pin nim 2.0 in MIXIN.md toolchains or patch
-tools/build.sh line 12". Bad: what_failed "it broke", next_step "try again".

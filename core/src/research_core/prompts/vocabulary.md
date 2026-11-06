@@ -42,11 +42,3 @@ A **Round groups Episodes**; a **Division runs Rounds**; a **League contains Div
 
 **Don't use** (alias → canonical): Map → **Coworld**; Bracket → **Division**; Points / VOR → **Score**; Experiences →
 **Experience Requests**; "winner of the division" when you mean **Champion** (champion ≠ winner).
-
-Notes for these profiles:
-
-- **Agent** is Softmax's alternative name for a Policy. You are also called an agent; when a
-  sentence could mean either, say Policy or PolicyVersion for the thing that competes.
-- **Promotion** is the Commissioner moving an entry between Divisions. Our own act of
-  submitting a candidate as our Champion is a **champion submission** (`research champion`,
-  `champion_submit`), never "promotion".

@@ -36,12 +36,23 @@ def test_no_research_machinery_mode_flags_or_chat_commands():
         assert "SOFTMAX_COGENT_MODE" not in text and not re.search(r"(?m)^\s*/[a-z]", text)
     play_soul = (PROFILES["play"] / "SOUL.md").read_text()
     assert "Coworlds you can't build for here" in play_soul
-    assert "Copy prompt for your local agent" in play_soul
-    assert "Not now" in play_soul
     assert "this only applies once the coworld comes up" in play_soul
     assert (
         "Container coworlds are not supported yet." in (PROFILES["builder"] / "SOUL.md").read_text()
     )
+
+
+def test_every_name_the_soul_and_readme_quote_exists_in_the_code():
+    # A backticked tool, field or error code that nothing in the source mentions is a promise the
+    # model or a reader cannot act on (such as a tool that was removed).
+    source = "\n".join(path.read_text() for path in (DISTRIBUTION / "src/play").glob("*.py"))
+    soul = (DISTRIBUTION / "SOUL.md").read_text()
+    # The language sections at the end of the SOUL name the games' own globals, not ours.
+    documents = {"SOUL.md": soul[: soul.index("## GotA BASIC")]}
+    documents["README.md"] = (DISTRIBUTION / "README.md").read_text()
+    for document, text in documents.items():
+        for name in re.findall(r"`([a-z]+(?:_[a-z]+)+)(?:[:`])", text):
+            assert name in source, (document, name)
 
 
 def test_ide_profiles_do_not_import_play():
@@ -81,12 +92,9 @@ def test_play_lead_does_the_whole_loop_itself_in_plain_words():
         assert word not in soul, word
 
 
-def test_play_restart_words_point_to_start_over_and_never_name_files():
+def test_play_restart_needs_an_explicit_yes_and_never_names_files():
     soul = (PROFILES["play"] / "SOUL.md").read_text()
     for needle in (
-        '"Start over" action',
-        "/play page",
-        "Team testing",
         "explicit yes",
         "confirm: true",
     ):
@@ -123,9 +131,7 @@ def test_play_cares_first_decides_small_things_recovers_and_learns():
         "once, on the first message",
         "at most twice",
         "never covers changing or uploading",
-        '"[page]"',
         "unless the user names another",
-        'never mention the "[page]" line itself',
         "## Always a conversation",
         "picking up where you left off",
         "`league_status` (call it once",

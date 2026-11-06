@@ -7,7 +7,7 @@ import json
 
 import pytest
 
-from research_core import gitops
+from research_core import coworld_setup, gitops
 from research_core.platform.fake import FakePlatform
 from research_core.store import capabilities, coworlds, notices, sessions, tasks
 from research_core.store.actors import Actor
@@ -234,7 +234,35 @@ def test_task_failed_for_an_ordinary_task_is_not_counted(tmp_path):
         failure=FAILURE,
     )
     result = checks.handle_task_failed(ctx, last_event(ctx.store, "task.failed"), ctx.store)
-    assert result["skipped"].endswith("is not a repair Task")
+    assert result == {"review": task["id"]}
+    review = last_event(ctx.store, "task.failure_review")
+    assert review.payload["what_failed"] == FAILURE["what_failed"]
+    assert review.payload["next_step"] == FAILURE["next_step"]
+
+
+def test_a_task_the_watcher_gave_up_on_wakes_the_orchestrator_once(tmp_path):
+    ctx = fake_ctx(tmp_path)
+    task = make_task(ctx)
+    register_session(ctx, "api_1761690000_eeee0002", task)
+    claim(ctx, "api_1761690000_eeee0002", task)
+    tasks.complete(
+        ctx.store,
+        Actor.session("api_1761690000_eeee0002"),
+        task_number(task),
+        outcome="failed",
+        failure=FAILURE,
+    )
+    with ctx.wstore.tx(ctx.actor) as tx:
+        tx.event("recovery.failed", task["id"], {"coworld_id": ctx.coworld.coworld_id})
+    result = checks.handle_task_failed(ctx, last_event(ctx.store, "task.failed"), ctx.store)
+    assert "skipped" in result
+    assert events_of(ctx.store, "task.failure_review") == []
+
+
+def test_the_login_check_keeps_the_player_id_for_the_briefing(tmp_path):
+    ctx = fake_ctx(tmp_path)
+    checks.login_checks(ctx)
+    assert ctx.wstore.get_meta("player_id") == "ply_fake"
 
 
 def test_platform_down_breaks_the_login_and_leaves_the_coworld_unset(tmp_path):
@@ -251,6 +279,7 @@ def test_platform_down_breaks_the_login_and_leaves_the_coworld_unset(tmp_path):
     assert repairs == {"login:player", "upload"}
     assert coworlds.read(ctx.wstore, "cow_fake")["set_up_at"] is None
     assert ctx.store.get_meta("credits") is None
+    assert ctx.wstore.get_meta("player_id") is None
     login = capabilities.read(ctx.store, "login:player")
     assert "status 503" in login["output"] and "GET /whoami" in login["command"]
 
@@ -283,3 +312,19 @@ def test_real_platform_skips_the_upload_once_verified(tmp_path):
     assert capabilities.read(ctx.store, "upload")["status"] == "ok"
     assert len(ctx.platform.snapshot()["policies"]) == 1
     sessions.read(ctx.wstore, "nobody")  # the workspace store is untouched by the checks
+
+
+def test_a_full_check_installs_the_mixin_toolchains(tmp_path, monkeypatch):
+    ctx = make_ctx(tmp_path)
+    setup_code_repo(ctx)
+    declared = []
+
+    def install(workspace, toolchains):
+        declared.append(toolchains)
+        return {"toolchains": [], "problems": []}
+
+    monkeypatch.setattr(coworld_setup, "install_toolchains", install)
+
+    checks.mixin_checks(ctx)
+
+    assert len(declared) == 1

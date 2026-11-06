@@ -17,7 +17,8 @@ A chat run that fails is classified (``run_failures.py``, in the Coordinator's o
 transition): a budget, rate-limit or provider failure holds the message, which the snapshot
 reports as ``waiting``, and the dispatcher resumes it with a continuation prompt in the same
 Session once its hold has passed and the inference gate is open; other failures end ``failed``
-with an ``error_class`` beside Hermes's error (``contract/CONTRACT.md``, "Message admissions").
+with an ``error_class`` beside Hermes's error (``research_core/contract/CONTRACT.md``, "Message
+admissions").
 Each resume holds longer than the last. ``GET /status``'s ``has_work`` counts neither a held
 message nor the messages queued behind it, on purpose: a budget wait lasts until the daily
 refill and must not keep the workspace awake; the message resumes once the workspace is awake.
@@ -339,7 +340,8 @@ class SeamServer:
     def status(self) -> dict:
         """What ``research watcher status`` prints (``watcher/cli.py``): the last heartbeat and
         its age, the has-work signal with its reasons, and the pause state, from the workspace
-        store's meta and the ``paused`` setting. Nothing else is read."""
+        store's meta, settings and admissions and every registered Coworld store's unfinished
+        transitions."""
         with self.stores() as stores:
             wstore = stores.wstore
             heartbeat = wstore.get_meta(HEARTBEAT_KEY)
@@ -790,6 +792,14 @@ class SeamServer:
                 ]
             }
 
+    def message_finished(self, body: dict) -> dict:
+        """Record where AIDE placed a finished message's outcome in its progress; the first
+        placement stands, so every later read and notification carries the same position."""
+        op_id = str(UUID(_text(body, "op_id")))
+        with self.stores() as stores, stores.wstore.tx(_actor(body.get("actor"))) as tx:
+            placed = admissions.place_finished(tx, op_id, int(body["attempt"]), int(body["seq"]))
+        return {"op_id": op_id, **placed}
+
     def message_cancel(self, body: dict) -> dict:
         op_id = str(UUID(_text(body, "op_id")))
         with self._deliver_lock, self.stores() as stores:
@@ -881,12 +891,26 @@ class SeamServer:
         *,
         session_id: str | None = None,
         league: str | None = None,
+        requests: bool = False,
+        request_id: str | None = None,
     ) -> dict:
+        """One store's snapshot. ``requests`` reads AIDE's view of the workspace: top-level chat
+        Sessions (all of them unless a scope or Session selects) with every message admission as
+        ``admissions.requests`` reads it; ``request_id`` selects the Session of that admission."""
         if kind == "coworld" and coworld_id is None:
             raise Refused(HTTPStatus.BAD_REQUEST, "coworld is required for a Coworld snapshot")
         with self.stores(coworld_id) as stores:
-            if kind == "workspace" and (session_id or coworld_id or league):
+            if kind == "workspace" and (session_id or coworld_id or league or requests):
                 with stores.wstore.read_tx():
+                    if request_id:
+                        owner = stores.wstore.one(
+                            "SELECT session_id FROM client_admissions WHERE op_id=?"
+                            " AND kind='message'",
+                            (request_id,),
+                        )
+                        if owner is None:
+                            raise Refused(HTTPStatus.NOT_FOUND, "Unknown message admission")
+                        session_id = owner["session_id"]
                     if session_id:
                         session = self._require_session(stores, session_id)
                         if (
@@ -904,21 +928,24 @@ class SeamServer:
                             sessions.read(stores.wstore, row["id"])
                             for row in stores.wstore.q(
                                 "SELECT id FROM sessions WHERE kind='chat' AND parent IS NULL"
-                                " AND coworld_id IS ?"
-                                " AND json_extract(session_context, '$.league') IS ?"
+                                " AND (? OR (coworld_id IS ?"
+                                " AND json_extract(session_context, '$.league') IS ?))"
                                 " ORDER BY rowid",
-                                (coworld_id, league),
+                                (requests and not (coworld_id or league), coworld_id, league),
                             )
                         ]
+                    records = {"sessions": selected}
+                    if requests:
+                        ids = [session["id"] for session in selected]
+                        records["requests"] = admissions.requests(stores.wstore, ids)
+                    else:
+                        records["admissions"] = (
+                            admissions.snapshot(stores.wstore, session_id) if session_id else []
+                        )
                     return {
                         "store": "workspace",
                         "seq": stores.wstore.last_seq(),
-                        "records": {
-                            "sessions": selected,
-                            "admissions": admissions.snapshot(stores.wstore, session_id)
-                            if session_id
-                            else [],
-                        },
+                        "records": records,
                         "ui_state": [],
                     }
             if coworld_id is not None:
@@ -1171,6 +1198,8 @@ class _Handler(BaseHTTPRequestHandler):
                         query.get("coworld"),
                         session_id=query.get("session_id"),
                         league=query.get("league"),
+                        requests=query.get("requests") == "1",
+                        request_id=query.get("request_id"),
                     ),
                 )
             elif url.path == "/session-pending":
@@ -1195,6 +1224,7 @@ class _Handler(BaseHTTPRequestHandler):
             "/session-open": seam.session_open,
             "/message": seam.message,
             "/message-cancel": seam.message_cancel,
+            "/message-finished": seam.message_finished,
             "/messages/context": seam.message_context,
             "/ui-action": seam.ui_action,
             "/store/apply": seam.store_apply,

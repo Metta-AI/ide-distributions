@@ -34,7 +34,7 @@ def no_client_text(role: str, kind: str) -> str:
     if role == "researcher":
         return (
             "No client is attached and the user does not read this Session: you reach the "
-            "Orchestrator through your Task, with task.ask for a question."
+            "Orchestrator through your Task, with task_ask for a question."
         )
     if kind == "wake":
         return (

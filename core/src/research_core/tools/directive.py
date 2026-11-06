@@ -116,10 +116,12 @@ SPEC = tool(
             ),
             ActionSpec(
                 "update",
-                "Change a directive's text or scope.",
+                "Change a directive's text, or move a D-n to another Goal; a W-n stays on the "
+                "workspace.",
                 {"directive": DIRECTIVE, "text": TEXT, "scope": SCOPE},
                 ("directive",),
                 ORCHESTRATOR,
+                example_fields=("text",),
             ),
             ActionSpec(
                 "retire",
@@ -130,7 +132,7 @@ SPEC = tool(
             ),
             ActionSpec(
                 "list",
-                "List active directives for the workspace and the active Coworld's Goals.",
+                "List active directives for the workspace and this session's Coworld's Goals.",
                 {
                     "scope": SCOPE,
                     "status": a.string("Default active.", enum=["active", "retired"]),

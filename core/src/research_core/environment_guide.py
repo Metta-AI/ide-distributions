@@ -51,7 +51,7 @@ def render(ctx: ToolContext) -> str:
     lines += _commits(env, checkout)
     lines += _environments(ws.venv_python, ws.tools)
     lines += _paths(checkout, coworld)
-    lines += _credentials(env)
+    lines += _credentials(env, ctx.player_id())
     lines += _clis(ws.venv)
     lines += _reaching_the_user(ctx.role)
     lines += _sleep_and_wake()
@@ -74,7 +74,9 @@ def _where_you_are(root: Path, coworld) -> list[str]:
             "  - `code/`: the policy repository (git; `main` holds the policy and `mixin/`).",
             "  - `source/`: the Coworld's public repository at the release-pinned commit.",
             "  - `worktrees/task-<n>/` and `worktrees/orch-<n>/`: one worktree per piece of work.",
-            "  - `documents/`: your own notes and files (command logs under `documents/logs/`).",
+            "  - `documents/`: your own notes and files (command logs under `documents/logs/`). "
+            "It is in no git repository, so nothing there is committed; it stays through sleep "
+            "and restarts.",
         ]
     lines.append("")
     return lines
@@ -103,8 +105,8 @@ def _environments(venv_python: Path, tools: Path) -> list[str]:
         f"- The workspace environment `{venv_python}` runs this tool, the `research` CLI, the "
         "platform tools, mixin commands and the watcher. It holds `coworld`, `softmax`, "
         "`numpy` and `PyYAML`.",
-        f"- Mixin-declared toolchains (another Python, Nim) install under "
-        f"`{tools}/<kind>-<version>`.",
+        f"- Mixin-declared toolchains live under `{tools}/<kind>-<version>`: `python` ones are "
+        "installed for you, any other kind (Nim) by hand.",
         "",
     ]
 
@@ -114,15 +116,23 @@ def _paths(checkout: Path | None, coworld) -> list[str]:
     if coworld is not None:
         lines.append(
             f"- Writable: everything under `{coworld.root}` except its bookkeeping folder: "
-            "`code/` (commit on a branch in a worktree, never on `main` directly), `documents/`, "
-            "`worktrees/`, and `source/` (a clone; re-fetched by setup)."
+            "`code/` (after setup, commit on a branch in a worktree, never on `main` directly), "
+            "`documents/` and `worktrees/`. `source/` is a clone to read, not to edit."
         )
     else:
         lines.append("- Writable: the session Coworld's `code/`, `documents/` and `worktrees/`.")
     lines += [
         f"- Read-only: the profile source checkout `{checkout or '(unknown)'}` (plugin, store "
-        "library and schema, tools, prompts, cron definitions). Report a bug there instead of "
+        "library and schema, tools, prompts). Report a bug there instead of "
         "patching it; `config.yaml` is writable but `prepare.py` re-applies the protected keys.",
+        "- Shipped skills live in that checkout, whatever Hermes's skill index says about "
+        "fixing them. Where it is read-only, as in hosting, `skill_manage` `patch`, `write_file` "
+        "and `delete` on one fail with a file system error and change nothing. On a writable "
+        "checkout (a local install) they change the shipped files for every profile using it: "
+        "do not. `create` under a shipped name is refused. Record a fix as a claim tagged "
+        "`lesson` and report the fault; game steps go in a mixin skill, committed on a branch. "
+        "`create` with a new name makes a skill in this profile's folder only, which `patch` "
+        "can change; it stays through sleep, restarts and releases.",
         "- Records (Goals, Tasks, Claims, Experiments, Versions, settings) live in the store and "
         "change only through the record tools. Direct edits are detected and reported.",
         "",
@@ -130,15 +140,15 @@ def _paths(checkout: Path | None, coworld) -> list[str]:
     return lines
 
 
-def _credentials(env: Mapping[str, str]) -> list[str]:
-    player_id = env.get("SOFTMAX_PLAYER_ID") or "unknown"
+def _credentials(env: Mapping[str, str], player_id: str | None) -> list[str]:
     player = "present" if env.get("SOFTMAX_PLAYER_CREDENTIAL") else "absent"
     user = "provisioned" if env.get("SOFTMAX_USER_CREDENTIAL") else "not provisioned"
     api = env.get("COGAMES_API_URL") or "https://softmax.com/api"
     return [
         "## Credentials and identities (names only; values are never shown)",
         "",
-        f"- Player identity: `{player_id}` (the workspace's Player); credential {player}.",
+        f"- Player identity: `{player_id or 'unknown'}` (the workspace's Player); "
+        f"credential {player}.",
         f"- User identity (the user's own account, Orchestrator only): {user}."
         + (
             ""
@@ -176,7 +186,7 @@ def _reaching_the_user(role: str) -> list[str]:
         ]
     else:
         lines += [
-            "- Researchers never talk to the user directly: `task.ask` puts a question on the "
+            "- Researchers never talk to the user directly: `task_ask` puts a question on the "
             "Task for the Orchestrator, and the Task's result reports the outcome.",
         ]
     lines.append("")
@@ -187,10 +197,11 @@ def _sleep_and_wake() -> list[str]:
     return [
         "## Sleep and wake",
         "",
-        f"- The watcher runs every {WATCHER_TICK_S} seconds (a Hermes cron job without a model). "
+        f"- The watcher runs every {WATCHER_TICK_S} seconds (`research serve`, with no model). "
         "It starts Task runs, resolves waits, recovers dead runs and runs capability checks.",
-        "- `task.wait` ends your run; the same Session resumes with its history when the wait "
-        "resolves. Nothing you started in the foreground survives the end of a run.",
+        "- After `task_wait`, end your run; the watcher continues the Task when the wait resolves, "
+        "usually in a new Session with the Task's record, worktree and recent messages. Nothing "
+        "you started in the foreground survives the end of a run.",
         "- Long mixin commands run detached with their output in a log file; a result with "
         "`background` means the command outlived the tool budget and is still running.",
         "- The sandbox may sleep while nothing runs; the watcher's heartbeat says when it last "

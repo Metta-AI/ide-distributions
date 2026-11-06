@@ -201,3 +201,37 @@ def test_user_identity_notice_uses_bound_game(ctx_factory, register_session):
     assert result["ok"] is True
     assert [n["text"] for n in notices.unread(ctx.wstore, coworld_id="cow_fake")] == ["Game news"]
     assert notices.unread(ctx.wstore) == []
+
+
+def test_a_chats_needs_join_the_shared_panel_and_keep_the_computed_part(
+    call, ctx_factory, register_session
+):
+    register_session("s1", "chat")
+    ctx = ctx_factory(session_id="s1")
+    ui_state.patch(
+        ctx.wstore,
+        Actor.harness(),
+        "coworld:cow_fake",
+        [
+            {
+                "op": "add",
+                "path": "/panels",
+                "value": {
+                    "agent-context": {
+                        "kind": "agent-context",
+                        "content": {"computed": {"paused": False}, "needs": []},
+                    }
+                },
+            }
+        ],
+    )
+    args = {"action": "panel_set", "panel": "agent-context", "kind": "agent-context"}
+    needs = {"needs": ["A User credential, to read your other Players"]}
+    result = call("ui", args | {"content": needs}, session_id="s1")
+    assert result["ok"] is True and result["conversation"] == "coworld:cow_fake"
+    content = doc(ctx_factory, "coworld:cow_fake")["panels"]["agent-context"]["content"]
+    assert content == {"computed": {"paused": False}, **needs}
+    assert "panels" not in doc(ctx_factory, "s1")
+
+    refused = call("ui", args | {"content": {"goals": []}}, session_id="s1")
+    assert refused["ok"] is False and "needs" in refused["error"]

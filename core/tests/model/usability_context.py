@@ -15,12 +15,10 @@ the tools, prompts or skills:
 ``usability_hermes.json`` holds what is Hermes's, as the pinned image (v0.22.6) gives it: the
 prompt sections around the skill index (from a request captured on 2026-11-03) and the built-in
 tools. The tools are ``model_tools.get_tool_definitions(enabled_toolsets=["hermes-api-server"],
-disabled_toolsets=["browser", "connections", "cronjob"])`` run inside the image, without
+disabled_toolsets=["browser", "connections", "cronjob", "todo"])`` run inside the image, without
 ``memory`` (the profiles turn it off) and with ``vision_analyze`` (it appears only with a vision
 provider; its schema is from the same capture). ``delegate_task`` has the text a real session
-froze, which leaves out the sentence on what children may call. ``hermes_builtin_tools.json`` on
-``main`` is still v0.21.6, with other ``terminal`` and ``skill_view`` descriptions; the
-``tools/model-test-gaps`` branch refreshes it. The ``Execution discipline`` section is the one Hermes adds only for Kimi models, so it
+froze, which leaves out the sentence on what children may call. The ``Execution discipline`` section is the one Hermes adds only for Kimi models, so it
 is here for both roles because the test model is Kimi.
 
 What is not real: the workspace itself. :data:`BRIEFING` and the session context describe a made
@@ -146,6 +144,7 @@ BRIEFING = (
     BRIEFING_HEADING
     + """
 Workspace: Coworld cow_cogs; paused: no; watcher heartbeat just now; credits: 840.0
+Your Player: id ply_cogs
 Capability check: 4 minutes ago; 7 of 7 ok
 User identity: available
 Directives (2 active, the user's standing instructions):
@@ -167,6 +166,7 @@ NO_COWORLD_BRIEFING = (
     BRIEFING_HEADING
     + """
 Workspace: Coworld none; the frontend must open a session for a Coworld; paused: no; watcher heartbeat just now; credits: unknown
+Your Player: id ply_cogs
 User identity: available
 Directives: none active
 No session Coworld: open a Coworld session to access game work."""
@@ -255,7 +255,7 @@ def builtin_names() -> set[str]:
 
 
 def session_tools(role: Role, schemas: harness.SchemaSet, model: str) -> list[dict]:
-    """``harness.full_toolset`` with the pinned image's built-in tools instead of v0.21.6's."""
+    """``harness.full_toolset`` with the pinned image's built-in tools."""
     sanitizer, moonshot = harness.hermes_sanitizers()
     ide = [{"type": "function", "function": schema} for schema in schemas.tools(role)]
     tools = sanitizer.sanitize_tool_schemas(

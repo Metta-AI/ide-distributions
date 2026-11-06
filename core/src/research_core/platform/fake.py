@@ -367,7 +367,7 @@ class FakePlatform:
     def upload_file_policy(
         self, *, name: str, content: bytes, tags: dict[str, str] | None = None
     ) -> PolicyVersion:
-        route = "POST /v2/policy-versions/upload"
+        route = "POST /stats/policies/files/upload"
         self._require_identity("player", route)
         self._upload_fault(route)
         content_hash = hashlib.sha256(content).hexdigest()
@@ -520,9 +520,12 @@ class FakePlatform:
             self.whoami("user")
 
         def action(state: dict) -> bytes:
+            route = f"GET /v2/policy-files/{policy_version_id}/download"
             row = state["policies"].get(policy_version_id)
             if row is None:
-                raise self._not_found(f"GET /v2/policy-versions/{policy_version_id}/file")
+                raise self._not_found(route)
+            if "image_inputs" in row:
+                raise PlatformError("Policy version has no player file", route=route, status=409)
             return base64.b64decode(row["content_b64"])
 
         return self._operate("policy_file", action, persist=False)
@@ -1068,7 +1071,7 @@ class FakePlatform:
             "coworld_manifest", lambda state: self._manifest(state, coworld_id), persist=False
         )
 
-    # --- forum (one forum; the slug is accepted and ignored) --------------------------------
+    # --- forum --------------------------------------------------------------------------------
 
     def _author(self, identity: Identity) -> dict:
         if identity == "user":
@@ -1086,7 +1089,7 @@ class FakePlatform:
 
     def forum_list(self, slug: str, *, sort: str = "hot", limit: int = 20) -> list[dict]:
         def action(state: dict) -> list[dict]:
-            posts = list(state["forum"]["posts"].values())
+            posts = [p for p in state["forum"]["posts"].values() if p.get("forum") == slug]
             if sort == "new":
                 posts.sort(key=lambda p: p["created_at"], reverse=True)
             else:
@@ -1124,7 +1127,13 @@ class FakePlatform:
         return self._operate("forum_search", action, persist=False)
 
     def forum_post(
-        self, *, title: str, body: str, idempotency_key: str, identity: Identity = "player"
+        self,
+        *,
+        title: str,
+        body: str,
+        idempotency_key: str,
+        slug: str | None = None,
+        identity: Identity = "player",
     ) -> dict:
         self._require_identity(identity, "POST /v2/posts")
 
@@ -1134,6 +1143,7 @@ class FakePlatform:
                 return existing
             post = {
                 "id": f"post_{_short_hash(idempotency_key)}",
+                "forum": slug,
                 "title": title,
                 "body": body,
                 "content_format": "markdown",
@@ -1263,9 +1273,9 @@ class FakePlatform:
         note: str | None = None,
         identity: Identity = "player",
     ) -> dict:
-        """Compare-and-swap: a stale ``base_revision_id`` returns ``{"conflict": True,
-        "current_revision_id", "current_body"}`` instead of writing. A missing page is created
-        whatever the base."""
+        """Compare-and-swap: a stale or missing ``base_revision_id`` on a page that exists returns
+        ``{"conflict": True, "current_revision_id", "current_body"}`` instead of writing. A missing
+        page is created by an edit with no base; one with a base is a 404."""
         self._require_identity(identity, f"PUT /v2/wikis/{wiki}/pages/{page}")
 
         def action(state: dict) -> dict:
@@ -1282,6 +1292,8 @@ class FakePlatform:
                     "current_body": row["body"],
                 }
             if row is None:
+                if base_revision_id is not None:
+                    raise self._not_found(f"PUT /v2/wikis/{wiki}/pages/{page}")
                 row = pages[page] = {
                     "page_id": f"wpage_{_short_hash(wiki, page)}",
                     "title": title,
