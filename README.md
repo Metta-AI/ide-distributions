@@ -195,8 +195,12 @@ latest run and what it did and did not show: 905 runs, $33.98. Ctrl-C drops the 
 and those already running finish and are billed. A change in the test's fixtures can move
 these rates by itself, so judge a drop by running the same test code on both sides. Fixtures have
 changed since that baseline, so until it is rewritten a comparison opens by saying the two are not
-comparable, and it leaves out `r-wait-credits` and `r-hard-wait-credits-args`. The offline tests of
-its judging and read results run in the default `pytest`:
+comparable, and it leaves out `r-wait-credits` and `r-hard-wait-credits-args`. `right` and
+`wrong_act` are the strict measure: `wrong_act` is what the model tried, and it counts a
+`task.complete` that `tasks.complete` would refuse. Beside them, `wrong_attempted`, `wrong_applied`,
+`wrong_unchecked` and `right_refused` say what would have happened; the docstring of
+[`usability_probe.py`](core/tests/model/usability_probe.py) defines them. The offline tests of its
+judging and read results run in the default `pytest`:
 
 ```bash
 OPENROUTER_API_KEY=... IDE_HERMES_SRC=/path/to/hermes-agent \

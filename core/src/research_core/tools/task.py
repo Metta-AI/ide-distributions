@@ -12,6 +12,9 @@ steers or resumes the holder's run with them (entry 5).
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+from typing import Any
+
 from research_core import gitops, refs, task_types
 from research_core.coordinator import Coordinator
 from research_core.store import admissions, sessions, settings, tasks
@@ -192,15 +195,29 @@ def handle_claim(call: ToolCall) -> dict:
     }
 
 
+def _complete_fields(args: Mapping[str, Any]) -> dict[str, Any]:
+    """The flat arguments as ``tasks.complete`` takes them: the checklist's are folded into it."""
+    checklist = dict(args.get("checklist") or {})
+    for key in CHECKLIST_FIELDS:
+        if args.get(key) is not None:
+            checklist.setdefault(key, args.get(key))
+    return {
+        "checklist": checklist,
+        "commit": args.get("commit"),
+        "merge_request": args.get("merge"),
+        "merge_reason": args.get("merge_reason") or "",
+        "submission_candidate": args.get("submission_candidate"),
+        "result": args.get("result"),
+        "outcome": args.get("outcome") or "succeeded",
+        "failure": args.get("failure"),
+    }
+
+
 def handle_complete(call: ToolCall) -> dict:
     """Finish the Task. The checklist is the flat arguments of that name; a ``commit`` must be
     reachable from the Task branch."""
     ctx, store = call.ctx, call.ctx.store
     n = a.record_number(call.get("task"), "task", "task")
-    checklist = dict(call.get("checklist") or {})
-    for key in CHECKLIST_FIELDS:
-        if call.get(key) is not None:
-            checklist.setdefault(key, call.get(key))
     commit = call.get("commit")
     if commit is not None:
         branch = tasks.read(store, n)["branch"]
@@ -209,20 +226,7 @@ def handle_complete(call: ToolCall) -> dict:
                 f"commit {commit} is not on the Task branch {branch or '(none: not claimed)'};"
                 " commit in the Task's worktree and pass that sha"
             )
-    record = tasks.complete(
-        store,
-        ctx.actor,
-        n,
-        checklist=checklist,
-        commit=commit,
-        merge_request=call.get("merge"),
-        merge_reason=call.get("merge_reason") or "",
-        submission_candidate=call.get("submission_candidate"),
-        result=call.get("result"),
-        outcome=call.get("outcome") or "succeeded",
-        failure=call.get("failure"),
-    )
-    return {"record": record}
+    return {"record": tasks.complete(store, ctx.actor, n, **_complete_fields(call.args))}
 
 
 def handle(call: ToolCall) -> dict:

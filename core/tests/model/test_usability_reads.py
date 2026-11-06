@@ -13,8 +13,10 @@ from research_core.platform.errors import CreditsRefused
 from research_core.stats import decision_rule, ingest
 from research_core.store import experiments, goals, sessions, tasks, versions
 from research_core.store.actors import Actor
+from research_core.store.errors import StoreError
 from research_core.tools import catalog
 from research_core.tools import experiment as experiment_tool
+from research_core.tools import task as task_tool
 from research_core.tools import xp as xp_tool
 from research_core.tools.xp import _credits_refused
 from tests.model import (
@@ -648,6 +650,171 @@ def test_offline_a_valid_call_that_was_not_wanted_ends_the_run():
     )
     assert run.outcome == "wrong_act"
     assert answer is None
+
+
+COMPLETE = {"action": "complete", "task": "T-21"}
+# What an improvement Task's checklist needs (``task_types/improvement.md``).
+COMPLETE_SUCCEEDED = {
+    **COMPLETE,
+    "claims": ["C-30"],
+    "experiment": "X-5",
+    "versions": ["V-12"],
+    "submission_candidate": "no",
+    "submission_reason": "no verdict yet",
+    "merge": "no",
+    "merge_reason": "nothing to merge",
+    "result": "stopped",
+}
+FAILURE = {"what_failed": "xp.request", "next_step": "retry after the refill"}
+
+
+@pytest.mark.parametrize(
+    ("args", "applied"),
+    [
+        # What the reviewer found: past the argument check, refused by the store.
+        (COMPLETE, False),
+        # A transcript's call: failed needs a failure record, and result is not one.
+        ({**COMPLETE, "outcome": "failed", "result": "Task set to wait."}, False),
+        ({**COMPLETE, "outcome": "failed", "failure": {"what_failed": "x"}}, False),
+        ({**COMPLETE, "merge": "no", "merge_reason": "r", "result": "r"}, False),  # no checklist
+        ({**COMPLETE_SUCCEEDED, "merge": "yes"}, False),  # merge yes needs the commit
+        ({**COMPLETE_SUCCEEDED, "experiment": "X-6"}, False),  # this Task runs X-5
+        # Production would end the Task on these.
+        ({**COMPLETE, "outcome": "failed", "failure": FAILURE}, True),
+        (COMPLETE_SUCCEEDED, True),
+    ],
+)
+def test_offline_a_wrong_completion_stays_wrong_and_says_if_it_would_apply(args, applied):
+    run, answer = _handle("r-wait-credits", "task", args)
+    assert (run.outcome, run.act, answer) == ("wrong_act", "task.complete", None)
+    assert run.wrong_attempts == ["task.complete"]
+    assert run.act_applied is applied
+
+
+def test_offline_would_apply_agrees_with_the_real_store(ctx_factory):  # noqa: F811
+    """The judge's verdict on each kind of completion, against a real Task in a real store."""
+    ctx = ctx_factory()
+    goals.create(ctx.store, ctx.actor, title="g", end_state="e", reason="r")
+    holder = Actor.session("r1")
+
+    def real_store_applies(args: dict) -> bool:
+        task = tasks.create(
+            ctx.store, ctx.actor, type="research", title="t", description="d", goal_id=1
+        )
+        tasks.claim(ctx.store, holder, task["id"], run_id="r", worktree="/w", branch="t")
+        fields = task_tool._complete_fields(args)
+        try:
+            tasks.complete(ctx.store, holder, task["id"], **fields)
+        except StoreError:
+            return False
+        return True
+
+    situation = next(
+        s for s in SITUATIONS if s.role == "researcher" and s.task_type == "research" and s.claimed
+    )
+    for args in (
+        COMPLETE,
+        {**COMPLETE, "outcome": "failed", "result": "Task set to wait."},
+        {**COMPLETE, "outcome": "failed", "failure": {"what_failed": "x"}},
+        {**COMPLETE, "outcome": "failed", "failure": FAILURE},
+        {**COMPLETE, "claims": "none: nothing found", "merge": "no", "result": "r"},
+        {
+            **COMPLETE,
+            "claims": "none: nothing found",
+            "merge": "no",
+            "merge_reason": "r",
+            "result": "r",
+        },
+    ):
+        applied = usability_probe._would_apply(situation, _call("task", args), "")
+        assert applied is real_store_applies(args), args
+
+
+def test_offline_a_refused_wrong_write_is_an_attempt_and_the_run_goes_on():
+    run, _ = _handle("r-wait-credits", "task", {"action": "ask", "task": "T-21"})
+    assert run.outcome == "limit"
+    assert run.wrong_attempts == ["task.ask"]
+    assert run.act_applied is None
+
+
+def test_offline_a_read_is_no_wrong_attempt():
+    run, _ = _handle("r-wait-credits", "task", {"action": "read", "task": "T-21"})
+    assert run.wrong_attempts == []
+
+
+def test_offline_a_write_no_store_check_covers_is_not_called_applied():
+    run, _ = _handle("r-wait-credits", "upload", {"version": "V-12"})
+    assert (run.outcome, run.act) == ("wrong_act", "upload")
+    assert run.act_applied is None
+
+
+def test_offline_a_refused_completion_that_is_wanted_stays_right_and_says_so():
+    situation = next(s for s in SITUATIONS if "task.complete" in s.acts and s.claimed)
+    run, _ = _handle(situation.id, "task", COMPLETE)
+    assert run.outcome == "right"
+    assert run.act_applied is False
+
+
+def test_offline_a_read_where_stopping_was_wanted_changes_nothing():
+    situation = next(s for s in SITUATIONS if s.stop)
+    run, _ = _handle(situation.id, "task", {"action": "list"})
+    assert run.outcome == "wrong_act"
+    assert run.act_applied is False
+
+
+def test_offline_a_malformed_action_is_refused_and_the_run_goes_on():
+    run, answer = _handle("o-goal-read", "task", {"action": []})
+    assert run.act == ""
+    assert json.loads(answer)["ok"] is False
+
+
+def test_offline_a_wanted_read_is_not_counted_as_refused():
+    run, _ = _handle("o-goal-read", "goal", {"action": "read", "goal": "G-1"})
+    assert run.outcome == "right"
+    assert run.act_applied is None
+    situation = next(s for s in SITUATIONS if s.id == "o-goal-read")
+    row = usability_results.situation_row(situation, [run.to_dict()])
+    assert row["right_refused"] == 0
+
+
+@pytest.mark.parametrize("task", ["not-a-task", "T-99"])
+def test_offline_a_completion_naming_another_task_would_not_apply(task):
+    args = {**COMPLETE, "task": task, "outcome": "failed", "failure": FAILURE}
+    run, _ = _handle("r-wait-credits", "task", args)
+    assert run.outcome == "wrong_act"
+    assert run.act_applied is False
+
+
+def test_offline_a_read_where_stopping_was_wanted_is_no_wrong_attempt():
+    run, _ = _handle("r-hard-end-after-wait", "task", {"action": "read", "task": "T-21"})
+    assert run.outcome == "wrong_act"
+    assert run.wrong_attempts == []
+
+
+def test_offline_a_situation_row_counts_attempts_beside_the_strict_outcome():
+    situation = next(s for s in SITUATIONS if s.id == "r-wait-credits")
+    run = usability_probe.Run(situation.id, 0)
+    runs = [
+        dataclasses.replace(run, outcome="right", act_applied=True),
+        dataclasses.replace(run, outcome="wrong_act", wrong_attempts=["a"], act_applied=True),
+        dataclasses.replace(run, outcome="wrong_act", wrong_attempts=["a"], act_applied=False),
+        dataclasses.replace(run, outcome="wrong_act", wrong_attempts=["a"]),
+        dataclasses.replace(run, outcome="text", wrong_attempts=["a"]),
+    ]
+    row = usability_results.situation_row(situation, [r.to_dict() for r in runs])
+    assert row["right"] == 1
+    assert row["outcomes"]["wrong_act"] == 3
+    assert (row["wrong_attempted"], row["wrong_applied"], row["wrong_unchecked"]) == (4, 1, 1)
+    assert row["right_refused"] == 0
+
+
+def test_offline_a_row_from_before_the_attempt_fields_still_counts():
+    situation = next(s for s in SITUATIONS if s.id == "r-wait-credits")
+    old = usability_probe.Run(situation.id, 0, "wrong_act").to_dict()
+    del old["wrong_attempts"], old["act_applied"]
+    row = usability_results.situation_row(situation, [old])
+    assert row["outcomes"] == {"wrong_act": 1}
+    assert row["wrong_attempted"] == 0
 
 
 def test_offline_a_store_check_refusal_is_answered_as_a_refusal():
