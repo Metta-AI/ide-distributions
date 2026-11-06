@@ -25,6 +25,7 @@ COMMAND_MODULES: dict[str, str] = {
     "watcher": "research_core.watcher.cli",
     "workspace": "research_core.watcher.cli",
     "serve": "research_core.serve",
+    "telemetry": "research_core.agent_telemetry.cli",
 }
 
 
