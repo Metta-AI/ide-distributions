@@ -50,7 +50,7 @@ from research_core.store import (
 )
 from research_core.store._common import now_iso, parse_display_id, require
 from research_core.store.actors import Actor
-from research_core.store.db import QUIESCE_MARKER, Store, schema_status
+from research_core.store.db import DEFAULT_MAX_HOLD_S, QUIESCE_MARKER, Store, schema_status
 from research_core.store.errors import StoreError
 from research_core.store.migrate import _copyable_tables
 from research_core.store.registry import RECORDS, RecordSpec, record_from_row
@@ -595,7 +595,6 @@ def _fsync(path: Path) -> None:
 
 # --- quiesce --------------------------------------------------------------------------------
 
-DEFAULT_MAX_HOLD_S = 30.0
 # How many times the checkpoint is redone when a writer commits between it and the lock.
 CHECKPOINT_ATTEMPTS = 3
 
