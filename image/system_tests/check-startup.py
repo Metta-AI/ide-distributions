@@ -19,6 +19,10 @@ expected = {
 }
 boots: dict[str, list[dict]] = {}
 for line in sys.stdin:
+    # Real prints share this stream with telemetry, and one joined to its line would not parse.
+    if '"service":"ide-agent-telemetry"' in line:
+        json.loads(line)
+        continue
     if not line.startswith('{"name": "workspace.'):
         continue
     span = json.loads(line)

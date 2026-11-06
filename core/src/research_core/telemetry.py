@@ -44,9 +44,14 @@ def configure_logging() -> None:
     atexit.unregister(logging.shutdown)
     logging.raiseExceptions = False
     root = logging.getLogger()
-    destinations = root.handlers or [logging.StreamHandler(sys.stderr)]
+    # Agent telemetry's handler only enqueues, so it cannot block a caller, and behind this queue a
+    # stuck handler holds its records and an exit can lose them.
+    direct = [h for h in root.handlers if getattr(h, "only_enqueues", False)]
+    destinations = [h for h in root.handlers if h not in direct] or [
+        logging.StreamHandler(sys.stderr)
+    ]
     handler = QueueHandler(queue.Queue(maxsize=2048))
-    root.handlers = [handler]
+    root.handlers = [handler, *direct]
     QueueListener(handler.queue, *destinations, respect_handler_level=True).start()
     _logging_started = True
 

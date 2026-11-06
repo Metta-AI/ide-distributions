@@ -136,7 +136,7 @@ def test_plugin_side_modules_import_with_the_standard_library_alone():
         "import sys\n"
         f"sys.path.insert(0, {str(CORE_SRC)!r})\n"
         "import research_core.agent_telemetry\n"
-        "import research_core.agent_telemetry.rebuild\n"
+        "import research_core.agent_telemetry.rebuild, research_core.plugin.capture\n"
         "stdlib = sys.stdlib_module_names\n"
         "other = sorted({m.split('.')[0] for m in sys.modules} - stdlib - {'research_core'})\n"
         "assert not [m for m in other if not m.startswith('_')], other\n"
