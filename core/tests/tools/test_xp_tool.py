@@ -11,6 +11,8 @@ import pytest
 
 import research_core.tools.xp as xp_tool
 from research_core.platform import fake
+from research_core.platform import xp as xp_platform
+from research_core.platform.errors import PlatformError
 from research_core.store import (
     capabilities,
     experiments,
@@ -27,6 +29,8 @@ from research_core.watcher import waits
 from tests.fixtures.fakegame_repo import fixture_files
 
 N_MIN = 2
+# The fake game seats two; tests about something else than the roster pin the other seat.
+ROSTER = {"opponents": ["pv_other"]}
 HYPOTHESIS = {
     "statement": "More patience wins more",
     "if_true": "score rises",
@@ -164,7 +168,7 @@ def wait_for_rows(run, token, *, timeout=20):
 
 
 def test_request_creates_one_request_per_seed_and_arm(run, ctx, running):
-    result = run("xp", {"action": "request", "experiment": "X-1"})
+    result = run("xp", {"action": "request", "experiment": "X-1", **ROSTER})
     assert result["ok"] is True, result
     assert len(result["created"]) == 4 and result["reconciled"] == []
     runs = result["runs"]
@@ -186,7 +190,7 @@ def test_request_creates_one_request_per_seed_and_arm(run, ctx, running):
     assert "xp.status" in result["next"]
     assert [i["state"] for i in (intents.read(ctx.store, n) for n in range(1, 5))] == ["done"] * 4
 
-    again = run("xp", {"action": "request", "experiment": "X-1"})
+    again = run("xp", {"action": "request", "experiment": "X-1", **ROSTER})
     assert again["ok"] is True and again["created"] == [] and len(again["runs"]) == 4
     assert ctx.platform().snapshot()["counts"]["xp_create"] == 4
 
@@ -200,7 +204,6 @@ def test_request_body_and_options(run, ctx, running):
             "seeds": [7],
             "episodes": 3,
             "arms": ["candidate"],
-            "league": fake.LEAGUE_ID,
             "opponents": ["pv_other"],
         },
     )
@@ -215,21 +218,120 @@ def test_request_body_and_options(run, ctx, running):
         ],
         "num_episodes": 3,
         "title": "ide:X-1:7:candidate",
-        "target": {"league_id": fake.LEAGUE_ID},
         "game_config_overrides": {"seed": 7},
     }
     assert result["runs"][0]["episodes_total"] == 3
     assert any("below the decision rule's n_min" in w for w in result["warnings"])
 
 
+def test_a_league_fills_the_open_seats_and_picks_the_coworld(run, ctx, running):
+    args = {"action": "request", "experiment": "X-1", "seeds": [7], "arms": ["candidate"]}
+    result = run("xp", {**args, "league": fake.LEAGUE_ID})
+    assert result["ok"] is True, result
+    (row,) = ctx.platform().snapshot()["xp"].values()
+    assert "coworld_id" not in row["body"]
+    assert row["body"]["target"] == {"league_id": fake.LEAGUE_ID}
+    assert row["body"]["roster"] == [
+        {"player": {"policy_ref": row["policy"]}, "slot": 0},
+        {"player": {"random": True}, "slot": -1},
+    ]
+
+
+@pytest.mark.parametrize(
+    "roster",
+    [
+        {},
+        {"opponents": []},
+        {"opponents": ["a", "b"]},
+        {"league": fake.LEAGUE_ID, "opponents": ["a", "b"]},
+    ],
+)
+def test_a_roster_the_game_cannot_seat_is_refused_before_any_request(run, ctx, running, roster):
+    result = run("xp", {"action": "request", "experiment": "X-1", "seeds": [1], **roster})
+    assert result["ok"] is False
+    assert "this game seats 2" in result["error"]
+    assert ctx.platform().snapshot()["counts"]["xp_create"] == 0
+
+
+@pytest.mark.parametrize(
+    ("low", "high", "exact", "args", "refused"),
+    [
+        (2, 8, None, {"league": fake.LEAGUE_ID}, True),  # how many seats to fill is unknowable
+        (2, 8, None, {"opponents": ["a"]}, False),
+        (1, 8, None, {}, True),  # a lone seat in a game of up to 8 is a mistake, not a choice
+        (1, 8, None, {"opponents": []}, False),
+        (1, 1, 1, {}, False),  # a solo game
+    ],
+)
+def test_a_game_of_several_sizes_is_never_guessed(
+    run, ctx, running, monkeypatch, low, high, exact, args, refused
+):
+    seats = xp_platform.Seats(exact, low, high)
+    monkeypatch.setattr(xp_platform, "seats_for", lambda *_: seats)
+    monkeypatch.setattr(fake, "_refuse_create", lambda _body: None)
+    request = {"action": "request", "experiment": "X-1", "seeds": [1], "arms": ["candidate"]}
+    result = run("xp", {**request, **args})
+    assert result["ok"] is not refused, result
+
+
+def test_seats_come_from_the_leagues_variant():
+    manifest = {
+        "game": {
+            "config_schema": {
+                "required": ["tokens"],
+                "properties": {
+                    "tokens": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 1,
+                        "maxItems": 5,
+                    }
+                },
+            }
+        },
+        "variants": [
+            {"id": "solo", "game_config": {"num_agents": 1}},
+            {"id": "five", "game_config": {"num_agents": 5}},
+            {"id": "open", "game_config": {}},
+        ],
+    }
+    assert xp_platform.seats_for(manifest).exact == 1
+    assert xp_platform.seats_for(manifest, "five") == xp_platform.Seats(5, 1, 5)
+    assert xp_platform.seats_for(manifest, "open").exact is None
+
+
+def test_a_refused_body_is_not_replayed_on_the_next_call(run, ctx, running, monkeypatch):
+    """A 4xx created nothing; the corrected call must send its own body, not the saved one."""
+    args = {"action": "request", "experiment": "X-1", "seeds": [1], "arms": ["candidate"]}
+    create = fake.FakePlatform.xp_create
+    sent: list[dict] = []
+
+    def refuse_first(self, body):
+        sent.append(body)
+        if len(sent) == 1:
+            raise PlatformError("game_config is invalid", route="POST", status=400)
+        return create(self, body)
+
+    monkeypatch.setattr(fake.FakePlatform, "xp_create", refuse_first)
+    first = run("xp", {**args, "opponents": ["pv_wrong"]})
+    assert first["ok"] is False and intents.read(ctx.store, 1)["state"] == "failed"
+    second = run("xp", {**args, "opponents": ["pv_right"]})
+    assert second["ok"] is True, second
+    assert sent[1]["roster"][1]["player"]["policy_ref"] == "pv_right"
+    assert sent[1]["idempotency_key"] != sent[0]["idempotency_key"]
+    assert intents.read(ctx.store, 1)["request"] == sent[1]
+
+
 def test_request_refusals_name_every_problem(run, ctx, uploaded):
     proposed = make_experiment(ctx, start=False)
-    result = run("xp", {"action": "request", "experiment": proposed["id"], "seeds": [1, 1]})
+    result = run(
+        "xp", {"action": "request", "experiment": proposed["id"], **ROSTER, "seeds": [1, 1]}
+    )
     assert result["ok"] is False
     assert "X-1 is proposed; start the experiment first (experiment.start)" in result["problems"]
     assert "seeds must not repeat" in result["problems"]
 
-    other = run("xp", {"action": "request", "experiment": "X-1", "candidate": "V-1"})
+    other = run("xp", {"action": "request", "experiment": "X-1", **ROSTER, "candidate": "V-1"})
     assert (
         "candidate V-1 differs from X-1's locked methods.candidate V-2; abandon X-1 and create a"
         " new Experiment to test another Version"
@@ -252,14 +354,16 @@ def test_request_refusals_name_every_problem(run, ctx, uploaded):
         methods={**proposed["methods"], "candidate": "V-3"},
     )
     experiments.start(ctx.store, ctx.actor, record["id"])
-    result = run("xp", {"action": "request", "experiment": record["id"]})
+    result = run("xp", {"action": "request", "experiment": record["id"], **ROSTER})
     assert result["ok"] is False
     assert "V-3 (candidate) is not uploaded; run upload {version: V-3} first" in result["problems"]
     assert ctx.platform().snapshot()["counts"]["xp_create"] == 0
 
 
 def test_request_is_idempotent_after_a_crash_between_create_and_record(run, ctx, running):
-    crashed = run("xp", {"action": "request", "experiment": "X-1"}, faults="fail_after=xp_create")
+    crashed = run(
+        "xp", {"action": "request", "experiment": "X-1", **ROSTER}, faults="fail_after=xp_create"
+    )
     assert crashed["ok"] is False and "injected fault after xp_create" in crashed["error"]
     platform = ctx.platform()
     assert platform.snapshot()["counts"]["xp_create"] == 1
@@ -267,7 +371,7 @@ def test_request_is_idempotent_after_a_crash_between_create_and_record(run, ctx,
     (pending,) = intents.pending(ctx.store, "xp")
     assert pending["key"] == "X-1:1:candidate"
 
-    result = run("xp", {"action": "request", "experiment": "X-1"})
+    result = run("xp", {"action": "request", "experiment": "X-1", **ROSTER})
     assert result["ok"] is True, result
     assert platform.snapshot()["counts"]["xp_create"] == 4
     assert len(result["reconciled"]) == 1 and len(result["created"]) == 3
@@ -305,7 +409,7 @@ def test_credits_refusal_names_a_need_the_wait_can_read(
     make_experiment(ctx, task_id=1)
     result = run(
         "xp",
-        {"action": "request", "experiment": "X-1"},
+        {"action": "request", "experiment": "X-1", **ROSTER},
         role="researcher",
         session_id="r1",
         faults="credits_refuse=1",
@@ -319,7 +423,7 @@ def test_credits_refusal_reports_the_balance_and_sets_no_wait(run, ctx, uploaded
     make_experiment(ctx, task_id=1)
     result = run(
         "xp",
-        {"action": "request", "experiment": "X-1"},
+        {"action": "request", "experiment": "X-1", **ROSTER},
         role="researcher",
         session_id="r1",
         faults="credits_refuse=1",
@@ -337,7 +441,10 @@ def test_credits_refusal_reports_the_balance_and_sets_no_wait(run, ctx, uploaded
     assert ctx.platform().snapshot()["counts"]["xp_create"] == 0
 
     retried = run(
-        "xp", {"action": "request", "experiment": "X-1"}, role="researcher", session_id="r1"
+        "xp",
+        {"action": "request", "experiment": "X-1", **ROSTER},
+        role="researcher",
+        session_id="r1",
     )
     assert retried["ok"] is True, retried
     assert (
@@ -351,23 +458,28 @@ def test_a_tasks_experiment_is_refused_for_anyone_but_its_holder_before_any_requ
     run, ctx, uploaded, researcher_task
 ):
     make_experiment(ctx, task_id=researcher_task["id"])
-    refused = run("xp", {"action": "request", "experiment": "X-1"})
+    refused = run("xp", {"action": "request", "experiment": "X-1", **ROSTER})
     assert refused["ok"] is False and "belongs to T-1" in str(refused["problems"])
     assert ctx.platform().snapshot()["counts"]["xp_create"] == 0
-    held = run("xp", {"action": "request", "experiment": "X-1"}, role="researcher", session_id="r1")
+    held = run(
+        "xp",
+        {"action": "request", "experiment": "X-1", **ROSTER},
+        role="researcher",
+        session_id="r1",
+    )
     assert held["ok"] is True, held
 
 
 def test_ask_above_warns_the_orchestrator_and_asks_the_researcher(run, ctx, uploaded):
     make_experiment(ctx)
     settings.update(ctx.store, ctx.actor, xp_tool.ASK_ABOVE_KEY, 2, cites="the user said so")
-    researcher = run("xp", {"action": "request", "experiment": "X-1"}, role="researcher")
+    researcher = run("xp", {"action": "request", "experiment": "X-1", **ROSTER}, role="researcher")
     assert researcher["ok"] is False and researcher["ask_orchestrator"] is True
     assert researcher["counts"] == {"existing": 0, "new": 4, "total": 4, "limit": 2}
     assert researcher["suggest"].startswith("task_ask {task: <your Task>, question: ")
     assert ctx.platform().snapshot()["counts"]["xp_create"] == 0
 
-    orchestrator = run("xp", {"action": "request", "experiment": "X-1"})
+    orchestrator = run("xp", {"action": "request", "experiment": "X-1", **ROSTER})
     assert orchestrator["ok"] is True, orchestrator
     assert len(orchestrator["created"]) == 4
     (warning,) = orchestrator["warnings"]
@@ -381,10 +493,10 @@ def test_over_the_limit_a_task_experiment_takes_requests_after_the_user_raises_t
     make_experiment(ctx, task_id=researcher_task["id"])
     settings.update(ctx.store, ctx.actor, xp_tool.ASK_ABOVE_KEY, 2, cites="the user said so")
     held = {"role": "researcher", "session_id": "r1"}
-    asked = run("xp", {"action": "request", "experiment": "X-1"}, **held)
+    asked = run("xp", {"action": "request", "experiment": "X-1", **ROSTER}, **held)
     assert asked["ask_orchestrator"] is True and "raise the setting" in asked["suggest"]
 
-    orchestrator = run("xp", {"action": "request", "experiment": "X-1"})
+    orchestrator = run("xp", {"action": "request", "experiment": "X-1", **ROSTER})
     assert orchestrator["ok"] is False and "belongs to T-1" in str(orchestrator["problems"])
     assert ctx.platform().snapshot()["counts"]["xp_create"] == 0
 
@@ -392,7 +504,7 @@ def test_over_the_limit_a_task_experiment_takes_requests_after_the_user_raises_t
         "settings_update", {"key": xp_tool.ASK_ABOVE_KEY, "value": 4, "cites": "message m-1"}
     )
     assert raised["ok"] is True, raised
-    sent = run("xp", {"action": "request", "experiment": "X-1"}, **held)
+    sent = run("xp", {"action": "request", "experiment": "X-1", **ROSTER}, **held)
     assert sent["ok"] is True and len(sent["created"]) == 4
     assert len(sent["runs"]) == 4
 
@@ -411,7 +523,7 @@ def test_tool_spec(run):
 
 def test_status_completes_downloads_evaluates_and_stores_rows(run, ctx, running, mixin_dir):
     ctx.platform().configure(polls_to_complete=2)
-    requested = run("xp", {"action": "request", "experiment": "X-1", "seeds": [1]})
+    requested = run("xp", {"action": "request", "experiment": "X-1", **ROSTER, "seeds": [1]})
     assert requested["ok"] is True, requested
     first = run("xp", {"action": "status", "experiment": "X-1"})
     assert first["ok"] is True and first["complete"] is False
@@ -464,19 +576,25 @@ def test_status_marks_a_broken_evaluate_invalid_and_reports_the_capability(
     run, ctx, running, mixin_dir
 ):
     set_evaluate_command(mixin_dir, "false")
-    run("xp", {"action": "request", "experiment": "X-1", "seeds": [1], "arms": ["candidate"]})
+    run(
+        "xp",
+        {"action": "request", "experiment": "X-1", **ROSTER, "seeds": [1], "arms": ["candidate"]},
+    )
     result = run("xp", {"action": "status", "experiment": "X-1"})
     assert result["ok"] is True, result
     (run_record,) = result["runs"]
     assert run_record["validity"] == "invalid: evaluate failed (exit 1)"
     assert "rows" not in run_record["results"]
-    assert result["complete"] is True
+    assert result["complete"] is False
     broken = capabilities.read(ctx.store, "evaluate")
     assert broken["status"] == "broken" and broken["command"] == "false"
     assert tasks.read(ctx.store, broken["maintenance_task_id"])["capability"] == "evaluate"
 
     set_evaluate_command(mixin_dir, "echo not-json")
-    run("xp", {"action": "request", "experiment": "X-1", "seeds": [2], "arms": ["candidate"]})
+    run(
+        "xp",
+        {"action": "request", "experiment": "X-1", **ROSTER, "seeds": [2], "arms": ["candidate"]},
+    )
     result = run("xp", {"action": "status", "experiment": "X-1"})
     second = [r for r in result["runs"] if r["seed"] == 2][0]
     assert second["validity"].startswith("invalid: evaluate output: evaluate output line 1")
@@ -485,7 +603,10 @@ def test_status_marks_a_broken_evaluate_invalid_and_reports_the_capability(
 def test_status_backgrounds_a_slow_evaluate_and_resumes(run, ctx, running, mixin_dir, monkeypatch):
     monkeypatch.setattr(xp_tool, "EVALUATE_BUDGET_S", 0.2)
     set_evaluate_command(mixin_dir, f"sleep 1; {EVALUATE_COMMAND}")
-    run("xp", {"action": "request", "experiment": "X-1", "seeds": [1], "arms": ["baseline"]})
+    run(
+        "xp",
+        {"action": "request", "experiment": "X-1", **ROSTER, "seeds": [1], "arms": ["baseline"]},
+    )
     started = run("xp", {"action": "status", "experiment": "X-1"})
     assert started["ok"] is True and started["background"]["pid"] > 0
     assert "task_wait {task, kind: process" in started["next"]
@@ -502,7 +623,10 @@ def test_status_backgrounds_a_slow_evaluate_and_resumes(run, ctx, running, mixin
 
 
 def test_status_on_a_closed_experiment_reports_without_touching_runs(run, ctx, running):
-    run("xp", {"action": "request", "experiment": "X-1", "seeds": [1], "arms": ["baseline"]})
+    run(
+        "xp",
+        {"action": "request", "experiment": "X-1", **ROSTER, "seeds": [1], "arms": ["baseline"]},
+    )
     experiments.abandon(ctx.store, ctx.actor, "X-1", reason="moot")
     result = run("xp", {"action": "status", "experiment": "X-1"})
     assert result["ok"] is True and result["note"] == "X-1 is abandoned; its runs are final"
@@ -510,7 +634,7 @@ def test_status_on_a_closed_experiment_reports_without_touching_runs(run, ctx, r
 
 
 def test_recovery_ignores_other_requests_with_same_title(run, ctx, running):
-    args = {"action": "request", "experiment": "X-1", "seeds": [1], "arms": ["candidate"]}
+    args = {"action": "request", "experiment": "X-1", **ROSTER, "seeds": [1], "arms": ["candidate"]}
     assert run("xp", args, faults="fail_after=xp_create")["ok"] is False
     platform = ctx.platform()
     (original,) = platform.snapshot()["xp"].values()
@@ -525,7 +649,7 @@ def test_recovery_ignores_other_requests_with_same_title(run, ctx, running):
 
 
 def test_recovery_replays_saved_body_without_listing(run, ctx, running, monkeypatch):
-    args = {"action": "request", "experiment": "X-1", "seeds": [1], "arms": ["candidate"]}
+    args = {"action": "request", "experiment": "X-1", **ROSTER, "seeds": [1], "arms": ["candidate"]}
     assert run("xp", args, faults="fail_after=xp_create")["ok"] is False
     (pending,) = intents.pending(ctx.store, "xp")
     saved = pending["request"]
@@ -545,16 +669,16 @@ def test_recovery_replays_saved_body_without_listing(run, ctx, running, monkeypa
 
 def test_old_pending_request_is_not_resubmitted(run, ctx, running):
     intents.begin(ctx.store, ctx.actor, kind="xp", key="X-1:1:candidate", subject="X-1")
-    result = run("xp", {"action": "request", "experiment": "X-1"})
+    result = run("xp", {"action": "request", "experiment": "X-1", **ROSTER})
     assert result["ok"] is False
     assert "predates idempotent XP requests" in result["error"]
     assert ctx.platform().snapshot()["counts"]["xp_create"] == 0
 
 
 def test_distinct_experiments_get_distinct_request_keys(run, ctx, running):
-    first = run("xp", {"action": "request", "experiment": "X-1"})
+    first = run("xp", {"action": "request", "experiment": "X-1", **ROSTER})
     second_experiment = make_experiment(ctx)
-    second = run("xp", {"action": "request", "experiment": second_experiment["id"]})
+    second = run("xp", {"action": "request", "experiment": second_experiment["id"], **ROSTER})
     assert first["ok"] and second["ok"]
     keys = [row["body"]["idempotency_key"] for row in ctx.platform().snapshot()["xp"].values()]
     assert len(set(keys)) == 8
@@ -576,8 +700,44 @@ def test_retry_after_lost_response_creates_one_request(run, ctx, running, monkey
     monkeypatch.setattr(fake.FakePlatform, "xp_create", lose_first_response)
     monkeypatch.setattr(xp_tool.wait, "sleep", lambda _: None)
     result = run(
-        "xp", {"action": "request", "experiment": "X-1", "seeds": [1], "arms": ["candidate"]}
+        "xp",
+        {"action": "request", "experiment": "X-1", **ROSTER, "seeds": [1], "arms": ["candidate"]},
     )
     assert result["ok"] is True, result
     assert len(calls) == 2 and calls[0] == calls[1]
     assert ctx.platform().snapshot()["counts"]["xp_create"] == 1
+
+
+def test_a_repaired_evaluate_makes_a_failed_run_good_again(run, ctx, running, mixin_dir):
+    """A failed evaluate says nothing about the episodes: it must not settle the Experiment."""
+    args = {"action": "request", "experiment": "X-1", **ROSTER, "seeds": [1], "arms": ["candidate"]}
+    set_evaluate_command(mixin_dir, "false")
+    assert run("xp", args)["ok"] is True
+    failed = run("xp", {"action": "status", "experiment": "X-1"})
+    assert failed["complete"] is False and "evaluates them again" in failed["next"]
+    set_evaluate_command(mixin_dir, EVALUATE_COMMAND)
+    repaired = run("xp", {"action": "status", "experiment": "X-1"})
+    assert repaired["runs"][0]["validity"] == "valid"
+    assert repaired["runs"][0]["results"]["rows"]
+    assert repaired["complete"] is True
+
+
+def test_a_user_marked_invalid_run_stays_settled(run, ctx, running):
+    args = {"action": "request", "experiment": "X-1", **ROSTER, "seeds": [1], "arms": ["candidate"]}
+    (created,) = run("xp", args)["runs"]
+    experiments.update_run(ctx.store, Actor.harness(), created["id"], validity="invalid: bad seed")
+    result = run("xp", {"action": "status", "experiment": "X-1"})
+    assert "rows" not in result["runs"][0]["results"]
+
+
+def test_a_status_call_stops_evaluating_when_its_time_runs_out(
+    run, ctx, running, mixin_dir, monkeypatch
+):
+    args = {"action": "request", "experiment": "X-1", **ROSTER, "seeds": [1], "arms": ["candidate"]}
+    assert run("xp", args)["ok"] is True
+    with monkeypatch.context() as patch:
+        patch.setattr(xp_tool, "STATUS_BUDGET_S", -1)
+        result = run("xp", {"action": "status", "experiment": "X-1"})
+    assert "time ran out" in result["note"] and result["complete"] is False
+    assert "rows" not in (result["runs"][0]["results"] or {})
+    assert run("xp", {"action": "status", "experiment": "X-1"})["complete"] is True
