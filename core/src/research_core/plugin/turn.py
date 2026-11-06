@@ -1,7 +1,8 @@
 """The Orchestrator's chat-turn hook (design A.4, H "Notices and continuity").
 
-Before each turn in a chat Session, Hermes's ``pre_llm_call`` hook adds to the user's
-message: the validated client context block when the message carries one, the unread notices
+Before each turn in a chat Session, Hermes's ``pre_llm_call`` hook adds to that request,
+leaving the stored message as it was: the validated client context block when the message
+carries one, the unread notices
 (the only channel background work has to the user), a short note of what changed in the store
 since this conversation's last turn, the session's Coworld, and, on the first turn of a new chat
 after an hour away, a summary of what happened meanwhile. Wake and task Sessions get nothing.

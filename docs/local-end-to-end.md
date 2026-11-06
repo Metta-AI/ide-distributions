@@ -202,7 +202,7 @@ The seam's routes are those of `research serve` (`core/src/research_core/serve.p
 the same input. `/message` confirms a durable receipt with
 `{op_id, session_id, run_id, delivered, problems, seq}` and `delivered: queued`.
 Read `records.admissions` in the workspace snapshot for the assigned run and its status.
-Messages wait behind an existing run in the same session. `/stream` is Server-Sent Events with `id: <seq>` and the event JSON
+Text joins a live run in the same session; anything else waits for it to end. `/stream` is Server-Sent Events with `id: <seq>` and the event JSON
 in `data:`; `?store=coworld&coworld=<id>` streams that Coworld's store. `core/src/research_core/client.py`
 (`ScriptedClient`) is the same conversation in Python.
 
@@ -259,7 +259,7 @@ What each part of the page exercises:
 | Part | Routes | What to look for |
 |---|---|---|
 | Masthead and health strip | `POST /session-open` on load (client `ui`, kind `web-ide`), `GET /health`, `GET /status` every 5 seconds | The session id; profile, the page's scope (its `?coworld=`) and contract version; the watcher's heartbeat age, `has_work` with its `waiting_on` reasons, `paused`; whether each stream is open |
-| Conversation | `POST /message` with a context block (`mode`, `on_screen`, `view` from the fields under the box), `GET /runs/<id>` every half second until the run is terminal, `POST /ui-action` `reaction` | `delivered` (`queued`) and the run id on your message; the run's status chip, then its output as the Orchestrator's message; "Helpful" / "Not helpful" write a reaction and show the UI-state version it landed in (no run starts) |
+| Conversation | `POST /message` with a context block (`mode`, `on_screen`, `view` from the fields under the box), `GET /runs/<id>` every half second until the run is terminal, `POST /ui-action` `reaction` | `delivered` (`queued`) on your message; each run it starts as an Orchestrator message, with its id and status chip, then its output; "Helpful" / "Not helpful" write a reaction and show the UI-state version it landed in (no run starts) |
 | Now showing, Asks, Panels | The `ui_state` documents of `GET /snapshot?store=workspace`, then `ui.patch` events; `POST /ui-action` `answer` | The last `ui.show`; open asks with their options as buttons (a free-text answer too), answered asks with the answer and who gave it; markdown panels as text, other kinds as JSON |
 | Notices and Events | `GET /stream?store=workspace&after=0` and `GET /stream?store=coworld&coworld=<id>&after=0` (Server-Sent Events; the browser reconnects with `Last-Event-ID`) | `notice` events as a list, newest first; every event as one line (seq, time, store, kind, subject) with a payload summary, the last 300 kept |
 | Records | `GET /snapshot?store=coworld&coworld=<id>` (Goals, Tasks, Versions, Claims, Experiments) and `?store=workspace` (both stores for Directives and settings), refreshed when a record event arrives | Tabs with counts, each record's id, title, status and last update, a Details button with the record as JSON; any `G-1`, `T-3`, `V-1`, `C-2`, `X-1`, `D-1` or `N-1` on the page jumps to its record |
