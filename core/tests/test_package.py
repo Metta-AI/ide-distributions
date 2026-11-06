@@ -1,4 +1,6 @@
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import pytest
@@ -38,3 +40,16 @@ def test_paths_a_doc_names_exist(doc):
         if not any((root / path).exists() for root in roots)
     }
     assert not missing, f"{doc} names paths that do not exist: {sorted(missing)}"
+
+
+def test_the_plugin_imports_without_the_workspace_environment():
+    """Hermes's interpreter runs the plugin and has no Softmax client, so a top-level import of it
+    from anything the plugin reaches breaks every Session, and only the real-Hermes tests see it."""
+    code = (
+        "import sys\n"
+        "sys.modules['softmax_client'] = None\n"
+        "import research_core.plugin, research_core.tools.catalog\n"
+        "import research_core.watcher.context_panel\n"
+    )
+    done = subprocess.run([sys.executable, "-c", code], capture_output=True, text=True, check=False)
+    assert done.returncode == 0, done.stderr
