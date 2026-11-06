@@ -132,7 +132,7 @@ SPEC = tool(
             ),
             ActionSpec(
                 "list",
-                "List active directives for the workspace and the active Coworld's Goals.",
+                "List active directives for the workspace and this session's Coworld's Goals.",
                 {
                     "scope": SCOPE,
                     "status": a.string("Default active.", enum=["active", "retired"]),

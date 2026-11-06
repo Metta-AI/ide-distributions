@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 
 from research_core.store import evidence_types
-from research_core.store.evidence_types import EVIDENCE_TYPES, EvidenceType, InspectEnv
+from research_core.store.evidence_types import EVIDENCE_TYPES, InspectEnv
 
 SHA = "0123abcd"
 SHA256 = "a" * 64
@@ -189,17 +189,3 @@ def test_inspect_evidence_never_raises(coworld_store):
         assert {"type", "ref", "summary"} <= set(result), (name, ref)
 
 
-def test_register_type_adds_a_type_and_refuses_duplicates(coworld_store, monkeypatch):
-    monkeypatch.setattr(evidence_types, "EVIDENCE_TYPES", dict(EVIDENCE_TYPES))
-    screenshot = EvidenceType(
-        name="screenshot",
-        ref_format="shot:<id>",
-        validate=lambda ref: [] if ref.startswith("shot:") else ["shot:<id>"],
-    )
-    evidence_types.register_type(screenshot)
-    assert evidence_types.EVIDENCE_TYPES["screenshot"] is screenshot
-    assert evidence_types.check_ref(coworld_store, "screenshot", "shot:1") == []
-    assert evidence_types.check_ref(coworld_store, "screenshot", "1") == ["shot:<id>"]
-    with pytest.raises(ValueError):
-        evidence_types.register_type(screenshot)
-    assert "screenshot" not in EVIDENCE_TYPES

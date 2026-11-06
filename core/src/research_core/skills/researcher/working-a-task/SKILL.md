@@ -32,7 +32,7 @@ an unset repository, a git failure, an unfinished dependency): end your run with
 Edit only inside your worktree and commit on your branch with messages that say what and why;
 never touch `main` or another worktree. `version.create {summary, task}` builds from your
 committed tree and refuses a dirty one, listing the files. Record findings as you go:
-`claim_write` with evidence, `experiment_create`, `experiment_add_run`. The record is the
+`claim_write` with evidence, `experiment_create`; `xp.request` records its runs. The record is the
 report; there is no second write-up. Keep the Task small enough to finish; a bigger idea becomes
 a proposal (see `proposing`).
 

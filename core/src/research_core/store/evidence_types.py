@@ -11,9 +11,8 @@ inspectors read (the Coworld code repository for ``code``, the Hermes ``state.db
 :func:`inspect_evidence`, which never raises: every answer is a dict with at least ``type``,
 ``ref`` and ``summary``, and anything that could not be read is a ``problem``.
 
-The profile and client types are registered below; a mixin adds game types with
-``register_type``. ``replay`` is registered here as well so its format is checked everywhere,
-even before a mixin wires a richer inspector. Stdlib only.
+The types are all registered below. Nothing registers a mixin's ``evidence_types``: a mixin may
+list them, and a claim cannot yet use them. Stdlib only.
 """
 
 from __future__ import annotations
@@ -395,14 +394,6 @@ EVIDENCE_TYPES: dict[str, EvidenceType] = {
         ),
     )
 }
-
-
-def register_type(evidence_type: EvidenceType) -> None:
-    """Add a type (a mixin's game type, a client's type). A name already registered is an error:
-    a mixin that shadows a profile type would change what existing evidence means."""
-    if evidence_type.name in EVIDENCE_TYPES:
-        raise ValueError(f"evidence type {evidence_type.name!r} is already registered")
-    EVIDENCE_TYPES[evidence_type.name] = evidence_type
 
 
 def check_ref(store: Store, type_name: object, ref: object) -> list[str]:

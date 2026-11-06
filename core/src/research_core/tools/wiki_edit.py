@@ -25,7 +25,9 @@ def handle(call: ToolCall) -> dict:
     if intent.get("existing") and intent.get("state") == "pending":
         # A crash after the platform accepted the edit: look for our body in the history.
         try:
-            current = call_platform(ctx, "GET wiki page", lambda: platform.wiki_read(wiki, page))
+            current = call_platform(
+                ctx, f"GET /v2/wikis/{wiki}/pages/{page}", lambda: platform.wiki_read(wiki, page)
+            )
             revision = (current.get("current_revision") or {}) if isinstance(current, dict) else {}
             if revision.get("body") == body:
                 result = {"conflict": False, "page": current, "reconciled": True}
@@ -33,7 +35,7 @@ def handle(call: ToolCall) -> dict:
                 return {"edit": result, "reconciled": True, "identity": identity}
         except Exception:
             pass  # fall through and try the edit
-    route = f"PUT wikis/{wiki}/pages/{page}"
+    route = f"PUT /v2/wikis/{wiki}/pages/{page}"
     try:
         edit = call_platform(
             ctx,

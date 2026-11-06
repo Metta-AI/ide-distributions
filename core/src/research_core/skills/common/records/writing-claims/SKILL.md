@@ -30,7 +30,7 @@ A claim is one finding with typed evidence. Everything you learn that someone wi
 |---|---|
 | `code` | `<path>:<a>-<b>@<sha>`: lines in the code repository at a commit; the inspector says whether they changed since |
 | `doc` | `<repo-or-url>#<section>`, or `<url> (retrieved <date>): <quote>` |
-| `transcript` | `session:<id>/<message id>#<sha256 of the quote>` |
+| `transcript` | `session:<id>/<message id>#<sha256 of the whole message>` |
 | `measurement` | `<command> @<sha> -> <stored output path or pin id>`, the output kept under the Coworld folder's `documents/`, where `claim.inspect_evidence` looks for a relative path; `<sha>` is the commit the command ran at |
 | `experiment`, `version`, `claim` | the record id: `X-5`, `V-7`, `C-12` |
 | `replay` | `episode:<ereq id>[/seat <n>][/phase <p>] xp:<request id>` (`xp:none` outside an XP request); `platform.replay` pins the file |

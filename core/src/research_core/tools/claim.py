@@ -17,7 +17,7 @@ from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolErro
 
 BOTH = frozenset({"orchestrator", "researcher"})
 CLAIM = a.string("The claim, such as C-3.")
-# No enum: a mixin may register more evidence types (evidence_types.register_type).
+# No enum: the description below names each type with its reference format.
 EVIDENCE_TYPE = a.string("The evidence type, such as code or claim.")
 EVIDENCE_REF = a.string("The reference, in the type's format (see claim_write's evidence.ref).")
 STANCE = a.string("How the evidence bears on the claim.", enum=list(claims.STANCES))
