@@ -11,10 +11,12 @@ record:
 * ``goal.park`` when ``ideation_rounds_without_progress`` reaches the Coworld setting
   ``ideation.park_after_rounds``, once per stretch (meta ``park_pending:<G-n>``); the wake parks
   the Goal with a reason and tells the user.
-* ``anti_stall`` once a day at the workspace setting ``anti_stall.hour`` (``HH:MM`` in
-  America/Los_Angeles), in the workspace store; meta ``anti_stall_last`` holds the local date it
-  last fired (or the day the workspace first ticked), so a tick after the hour fires it even
-  when the workspace slept through 04:00, and a brand-new workspace waits until the next day.
+* ``anti_stall`` once a day per Coworld with an active Goal, at the workspace setting
+  ``anti_stall.hour`` (``HH:MM`` in America/Los_Angeles), in that Coworld's store, so its wake runs
+  in that Coworld: Goals and Tasks can only be read from a Session that has one. The Coworld store's
+  meta ``anti_stall_last`` holds the local date it was last due (or the day the Coworld first
+  ticked), so a tick after the hour fires it even when the workspace slept through 04:00, and a
+  brand-new Coworld waits until the next day.
 """
 
 from __future__ import annotations
@@ -41,7 +43,7 @@ def run(ctx: TickContext) -> dict[str, Any]:
     report: dict[str, Any] = {"needs_ideation": [], "park": [], "anti_stall": False}
     if ctx.store is not None:
         _goal_conditions(ctx, report)
-    report["anti_stall"] = anti_stall(ctx)
+        report["anti_stall"] = anti_stall(ctx)
     return report
 
 
@@ -92,29 +94,32 @@ def _first_tick(store: Store, key: str, due: bool) -> bool:
 
 
 def anti_stall(ctx: TickContext) -> bool:
-    """Emit ``anti_stall`` when the local day's hour has passed and it has not fired today.
+    """Emit ``anti_stall`` for this tick's Coworld when the local day's hour has passed and it has
+    not been due today. A wake starts a model run, so a Coworld with no active Goal gets none.
 
-    The first tick of a workspace's life only records the day: a workspace set up a minute ago
-    has nothing to be stalled on, and the wake would fire only because the hour of the day had
-    already passed. From the next day on it fires once a day.
+    The first tick of a Coworld's life only records the day: one set up a minute ago has nothing to
+    be stalled on, and the wake would fire only because the hour of the day had already passed.
     """
+    store = ctx.coworld_store()
     hour_text = str(settings.get(ctx.wstore, "anti_stall.hour"))
     hours, _, minutes = hour_text.partition(":")
     local = ctx.now.astimezone(LOCAL_ZONE)
     due_at = local.replace(hour=int(hours), minute=int(minutes), second=0, microsecond=0)
     today = local.date().isoformat()
-    last = ctx.meta(ANTI_STALL_LAST)
+    last = store.get_meta(ANTI_STALL_LAST)
     if last is None:
-        ctx.set_meta(ANTI_STALL_LAST, today)
+        store.set_meta(ANTI_STALL_LAST, today)
         return False
     if local < due_at or last == today:
         return False
+    store.set_meta(ANTI_STALL_LAST, today)
+    if not any(goal["status"] == "active" for goal in goals_store.list(store)):
+        return False
     emit_event(
-        ctx.wstore,
+        store,
         ctx.actor,
         "anti_stall",
         today,
         {"date": today, "hour": hour_text, "local_time": local.isoformat(timespec="minutes")},
     )
-    ctx.set_meta(ANTI_STALL_LAST, today)
     return True
