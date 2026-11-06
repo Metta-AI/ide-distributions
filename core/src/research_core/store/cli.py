@@ -610,7 +610,7 @@ def _fsync(path: Path) -> None:
 
 # --- quiesce --------------------------------------------------------------------------------
 
-# How many times the checkpoint is redone when a writer commits between it and the lock.
+# How many times the checkpoint is tried when a writer commits between it and the lock.
 CHECKPOINT_ATTEMPTS = 3
 
 
@@ -688,20 +688,22 @@ def checkpoint_and_lock(path: Path) -> tuple[sqlite3.Connection, dict[str, Any]]
 
     SQLite refuses a checkpoint inside a transaction, so the checkpoint comes first; when a
     writer commits in the gap before the lock (the WAL is no longer empty) the lock is dropped
-    and both are redone. A checkpoint that could not finish (``busy``, a long reader) is
-    reported, not retried. A database in rollback-journal mode reports ``-1`` frames.
+    and both are redone. The connection always returns holding the lock: what the last attempt
+    or a checkpoint that could not finish (``busy``, a long reader) left in the WAL is reported,
+    not retried. Those frames are committed and the lock freezes them, so a snapshot that takes
+    the fsynced WAL with the file is still one consistent point.
     """
     conn = sqlite3.connect(path, isolation_level=None)
     wal_bytes_before = _wal_bytes(path)
     try:
         conn.execute(f"PRAGMA busy_timeout = {migrate.BUSY_TIMEOUT_MS}")
-        for _ in range(CHECKPOINT_ATTEMPTS):
+        for attempt in range(1, CHECKPOINT_ATTEMPTS + 1):
             # TRUNCATE resets the WAL header before the frame counts are read, so the row's
             # counts are always 0; the WAL's size before and after says what happened.
             busy = conn.execute("PRAGMA wal_checkpoint(TRUNCATE)").fetchone()[0]
             conn.execute("BEGIN IMMEDIATE")
             wal_bytes = _wal_bytes(path)
-            if busy or wal_bytes == 0:
+            if busy or wal_bytes == 0 or attempt == CHECKPOINT_ATTEMPTS:
                 break
             conn.execute("ROLLBACK")
     except sqlite3.Error:
