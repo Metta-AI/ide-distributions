@@ -140,8 +140,10 @@ returns it. Nothing retries the failed call, so a failure that lasts across boot
 the workspace.
 
 The backend's seam calls time out after 40 s (`SEAM_TIMEOUT_S`), which a write waiting out a default
-`research store quiesce` stays inside: the run's events are late, not lost. A `--max-hold` above the
-default 30 s has no such margin, and an append that times out recycles the runtime as above.
+`research store quiesce` stays inside. A write that had already begun waiting when the hold began
+keeps its usual five seconds, and its `database is locked` answer recycles the runtime as above: 1 of
+25 holds in a test at about 60 writes a second. A `--max-hold` above the default 30 s has no margin
+either.
 
 The normal image smoke checks execute the real packaged adapter against its running
 seam, including the previously accepted-by-the-stub invalid actor field. Real model
