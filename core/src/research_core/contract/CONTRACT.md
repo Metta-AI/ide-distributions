@@ -110,7 +110,8 @@ agent sees at its next turn.
 Each queued message is an admission in the workspace snapshot (`records.admissions`): `{op_id,
 session_id, message, status, run_id, error, error_class, resume_after, created_at, client_id}`.
 `status` is `queued` until its run starts, then `running`, and ends `completed`, `cancelled`,
-`failed` or `interrupted`. A run that fails for a reason that passes on its own leaves the
+`failed` or `interrupted`. It ends `cancelled` only after `POST /message-cancel`; a run stopped
+without one (a drain, a shutdown) leaves it `interrupted`. A run that fails for a reason that passes on its own leaves the
 admission `waiting`: not finished, and not to be retried by the client. The bridge resumes it by
 itself once `resume_after` has passed and model work may start again, with a fixed continuation
 prompt in the same Session (beginning `Your previous run stopped because`), not the user's text

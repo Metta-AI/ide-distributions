@@ -73,7 +73,7 @@ from research_core.store import cli as store_cli
 from research_core.store._common import parse_iso
 from research_core.store.actors import Actor
 from research_core.store.db import Store, change_version, wait_for_change
-from research_core.store.errors import StoreError
+from research_core.store.errors import NotFound, StoreError
 from research_core.telemetry import propagator, span
 from research_core.tools.ui import coworld_conversation, pointer_token
 from research_core.watcher import context, hermes_api
@@ -93,6 +93,8 @@ RUN_POLL_INTERVAL_S = 1.0
 DEFAULT_ACTOR = "user:local"
 RETRY_AFTER_S = 1
 UI_ACTIONS = ("answer", "reaction")
+# An applied input response is its ``client.input_responded`` event, keyed by the client's op_id.
+INPUT_RESPONSE = "SELECT payload FROM events WHERE kind='client.input_responded' AND subject=?"
 PAGE_PATHS = ("/", "/ui")
 PAGE_FILE = resources.files("research_core").joinpath("ui", "index.html")
 
@@ -823,6 +825,26 @@ class SeamServer:
                 self.hermes.stop(row["run_id"], profile=self.profile)
             return {"op_id": op_id, "stop_requested": True}
 
+    def input_response(self, op_id: str) -> dict:
+        """The input response a client applied under ``op_id``, or ``request: null``."""
+        op_id = str(UUID(op_id))
+        with self.stores() as stores:
+            row = stores.wstore.one(INPUT_RESPONSE, (op_id,))
+        return {"op_id": op_id, "request": None if row is None else json.loads(row["payload"])}
+
+    def input_responded(self, body: dict) -> dict:
+        """Record an input response the gateway applied, so an identical retry replays it: the
+        gateway keeps no record of how a prompt was resolved."""
+        op_id = str(UUID(_text(body, "op_id")))
+        request = _object(body, "request")
+        with self.stores() as stores, stores.wstore.tx(_actor(body.get("actor"))) as tx:
+            row = tx.one(INPUT_RESPONSE, (op_id,))
+            if row is None:
+                tx.event("client.input_responded", op_id, request)
+            elif json.loads(row["payload"]) != request:
+                raise Refused(HTTPStatus.BAD_REQUEST, "op_id was already used for different input")
+        return {"op_id": op_id, "replayed": row is not None}
+
     def ui_action(self, body: dict) -> dict:
         """An answer goes into the Session at once; a reaction is feedback and starts no run."""
         session_id = _text(body, "session_id")
@@ -1204,6 +1226,8 @@ class _Handler(BaseHTTPRequestHandler):
                 )
             elif url.path == "/session-pending":
                 self._json(HTTPStatus.OK, seam.session_pending(query["session_id"]))
+            elif url.path == "/input-response":
+                self._json(HTTPStatus.OK, seam.input_response(query["op_id"]))
             elif url.path == "/stream":
                 self._stream(query)
             elif url.path == "/models":
@@ -1224,6 +1248,7 @@ class _Handler(BaseHTTPRequestHandler):
             "/session-open": seam.session_open,
             "/message": seam.message,
             "/message-cancel": seam.message_cancel,
+            "/input-response": seam.input_responded,
             "/message-finished": seam.message_finished,
             "/messages/context": seam.message_context,
             "/ui-action": seam.ui_action,
@@ -1285,7 +1310,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(error), "problems": []})
         elif isinstance(error, StoreError):
             body = {"ok": False, "error": str(error), "problems": list(error.problems)}
-            self._json(HTTPStatus.BAD_REQUEST, body)
+            status = HTTPStatus.NOT_FOUND if isinstance(error, NotFound) else HTTPStatus.BAD_REQUEST
+            self._json(status, body)
         else:
             log.exception("request failed: %s %s", self.command, self.path)
             self._json(

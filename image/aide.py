@@ -340,6 +340,12 @@ class Resolution(BaseModel):
     status: str
 
 
+class Applied(BaseModel):
+    """The ``input.respond`` params the seam recorded as applied under one request id."""
+
+    request: dict[str, JsonValue] | None
+
+
 # --- AIDE objects -----------------------------------------------------------------------------
 
 
@@ -1389,6 +1395,15 @@ class Backend:
 
     async def respond(self, frontend_id: UUID, request_id: str, params: Respond) -> dict:
         self.touch(params.session_id, params.scope, frontend_id)
+        # The gateway forgets a prompt once it is resolved, so the seam keeps the replay record.
+        request = params.model_dump(mode="json")
+        applied = Applied.model_validate_json(
+            await self.call(self.seam, "GET", "/input-response", params={"op_id": request_id})
+        )
+        if applied.request is not None:
+            if applied.request != request:
+                raise Refusal("id_reused", "This request id was used for different input")
+            return {"applied": True}
         snapshot = await self.scoped(params.scope, session_id=params.session_id)
         found = [
             (run_id, control)
@@ -1423,6 +1438,8 @@ class Backend:
             raise Refusal("conflict", "That input is no longer pending")
         if not response.is_success:
             raise Refusal("unavailable", response.text, unknown=True)
+        record = {"op_id": request_id, "request": request, "actor": "user:aide"}
+        await self.call(self.seam, "POST", "/input-response", command=True, json=record)
         return {"applied": True}
 
     # --- the connection -----------------------------------------------------------------------
