@@ -1024,12 +1024,16 @@ class Backend:
                     "model": "",
                     "choices": [{"index": 0, "delta": {"content": event.delta}}],
                 }
-                cursor = {"attempt": event.attempt, "seq": event.seq}
-                await self.notify(
-                    request.session_id,
-                    "chat.chunk",
-                    note | {"completion_id": event.completion_id, "cursor": cursor, "chunk": chunk},
-                )
+                # A completion's deltas are consecutive events and its id names the first one's
+                # seq, so this is the chunk's place in its completion, counted from one.
+                first = int(event.completion_id.rsplit(":", 1)[1])
+                params = note | {
+                    "completion_id": event.completion_id,
+                    "seq": event.seq - first + 1,
+                    "cursor": {"attempt": event.attempt, "seq": event.seq},
+                    "chunk": chunk,
+                }
+                await self.notify(request.session_id, "chat.chunk", params)
 
     async def follow(
         self, request: Admission, run: Run, progress: Progress, after: int

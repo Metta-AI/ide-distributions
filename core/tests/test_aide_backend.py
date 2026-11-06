@@ -341,8 +341,10 @@ def test_chat_round_trip_pushes_what_the_reads_return_to_every_subscriber(system
         }
         for frontend in (FRONTEND, OTHER):
             chunks = socket.notes("chat.chunk", frontend)
-            assert [c["completion_id"] for c in chunks] == [f"{run_id}:2", f"{run_id}:5"]
-            assert all("seq" not in c for c in chunks)
+            assert [(c["completion_id"], c["seq"]) for c in chunks] == [
+                (f"{run_id}:2", 1),
+                (f"{run_id}:5", 1),
+            ]
             # A chunk mirrors the text.delta at its cursor.
             assert [
                 (c["cursor"]["seq"], c["chunk"]["choices"][0]["delta"]["content"]) for c in chunks
@@ -467,6 +469,9 @@ def test_a_rebuilt_backend_resumes_pushes_for_an_open_request_without_a_new_send
         assert [(c["cursor"], c["chunk"]["choices"][0]["delta"]["content"]) for c in chunks] == [
             ({"attempt": 0, "seq": 2}, "lo")
         ]
+        # The resumed completion keeps its id and counts on from the chunk logged before.
+        (run_id,) = hermes.runs
+        assert [(c["completion_id"], c["seq"]) for c in chunks] == [(f"{run_id}:1", 2)]
         assert [n["event"]["seq"] for n in restarted.socket.notes("chat.event")] == [2, 3]
         assert restarted.socket.notes("chat.finished")[0]["cursor"] == {"attempt": 0, "seq": 3}
 
