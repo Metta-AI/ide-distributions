@@ -72,8 +72,9 @@ def test_anti_stall_fires_once_a_day_after_the_local_hour(tmp_path):
     # 20:00 UTC on 2026-10-28 is 13:00 PDT: the first tick only records the day.
     clock = FakeClock(datetime(2026, 10, 28, 20, 0, tzinfo=UTC))
     ctx = make_ctx(tmp_path, clock=clock)
+    make_goal(ctx)
     assert goals.run(ctx)["anti_stall"] is False
-    assert ctx.meta("anti_stall_last") == "2026-10-28"
+    assert ctx.store.get_meta("anti_stall_last") == "2026-10-28"
     advance(ctx, 13 * 3600)  # the 29th, 02:00 PDT: before the default 04:00
     assert goals.run(ctx)["anti_stall"] is False
     advance(ctx, 3 * 3600)  # 05:00 PDT
@@ -83,15 +84,17 @@ def test_anti_stall_fires_once_a_day_after_the_local_hour(tmp_path):
     assert goals.run(ctx)["anti_stall"] is False
     advance(ctx, 14 * 3600)  # the 30th, 05:00 PDT
     assert goals.run(ctx)["anti_stall"] is True
-    events = events_of(ctx.wstore, "anti_stall")
+    events = events_of(ctx.store, "anti_stall")
     assert [e["payload"]["date"] for e in events] == ["2026-10-29", "2026-10-30"]
     assert events[0]["payload"]["hour"] == "04:00"
-    assert ctx.meta("anti_stall_last") == "2026-10-30"
+    assert ctx.store.get_meta("anti_stall_last") == "2026-10-30"
+    assert events_of(ctx.wstore, "anti_stall") == []
 
 
 def test_anti_stall_honours_the_hour_setting(tmp_path):
     clock = FakeClock(datetime(2026, 10, 28, 19, 30, tzinfo=UTC))  # 12:30 PDT
     ctx = make_ctx(tmp_path, clock=clock)
+    make_goal(ctx)
     set_setting(ctx, "anti_stall.hour", "13:00")
     goals.run(ctx)  # the first tick records the day
     advance(ctx, 24 * 3600)  # the 29th, 12:30 PDT
@@ -100,12 +103,25 @@ def test_anti_stall_honours_the_hour_setting(tmp_path):
     assert goals.run(ctx)["anti_stall"] is True
 
 
-def test_no_active_coworld_still_runs_anti_stall(tmp_path):
+def test_no_coworld_tick_never_fires_anti_stall(tmp_path):
     clock = FakeClock(datetime(2026, 10, 29, 20, 0, tzinfo=UTC))
     ctx = make_ctx(tmp_path, clock=clock, store=None, coworld=None)
-    ctx.set_meta("anti_stall_last", "2026-10-28")
     report = goals.run(ctx)
-    assert report == {"needs_ideation": [], "park": [], "anti_stall": True}
+    assert report == {"needs_ideation": [], "park": [], "anti_stall": False}
+    assert events_of(ctx.wstore, "anti_stall") == []
+
+
+def test_a_coworld_with_no_active_goal_starts_no_anti_stall_run(tmp_path):
+    clock = FakeClock(datetime(2026, 10, 28, 20, 0, tzinfo=UTC))
+    ctx = make_ctx(tmp_path, clock=clock)
+    goals.run(ctx)
+    advance(ctx, 24 * 3600)
+    assert goals.run(ctx)["anti_stall"] is False
+    assert events_of(ctx.store, "anti_stall") == []
+    make_goal(ctx)  # the day is spent: a Goal made today waits for tomorrow's check
+    assert goals.run(ctx)["anti_stall"] is False
+    advance(ctx, 24 * 3600)
+    assert goals.run(ctx)["anti_stall"] is True
 
 
 def complete_ideation_rounds(ctx, goal: int, count: int, *, start: int = 1) -> None:
