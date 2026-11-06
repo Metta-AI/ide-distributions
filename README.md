@@ -169,10 +169,10 @@ uv run python tools/schema_drift.py /path/to/state.db --role orchestrator [--ses
 `test_usability.py` measures how easy the research tools and skills are to find, read and use for
 Kimi K3.1 Pro, with a session's real system prompt and tool list. It compares a run with
 `core/tests/model/usability_baseline.json` to show what a tools or skills change did;
-[`docs/reports/tool-usability-baseline-2026-11-04.md`](docs/reports/tool-usability-baseline-2026-11-04.md)
-is the first run, how to read it, what it cost and what it took. That baseline predates the test's
-realistic read results, so rerun it before comparing. The offline tests of its judging and read
-results run in the default `pytest`:
+[`docs/reports/tool-usability-2026-11-05.md`](docs/reports/tool-usability-2026-11-05.md) is the
+latest run and what it did and did not show. A change in the test's fixtures can move these rates
+by itself, so judge a drop by running the same test code on both sides. The offline tests of its
+judging and read results run in the default `pytest`:
 
 ```bash
 OPENROUTER_API_KEY=... IDE_HERMES_SRC=/path/to/hermes-agent \

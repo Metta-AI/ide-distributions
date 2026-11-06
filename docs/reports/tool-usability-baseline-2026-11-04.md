@@ -3,6 +3,8 @@
 How easy the research tools and skills are to find, read and use for Kimi K3.1 Pro, measured
 before other branches change them. Measured at commit `f6a1e11c`. No tool or skill was changed.
 
+**Replaced by [`tool-usability-2026-11-05.md`](tool-usability-2026-11-05.md).** Kept for its method and how to read a run.
+
 **These numbers predate the test's realistic reads.** In this run every read got one placeholder
 line. The test now answers each read in the shape the real tool gives (`usability_reads.py`), but
 that was added afterwards and could not be measured, because the OpenRouter key has run out. **Rerun
