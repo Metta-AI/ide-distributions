@@ -213,6 +213,12 @@ def run(system, scenario, inference=None):
                     await scenario(restart(), gateway, ctx, hermes)
             finally:
                 stop()
+                # A cancel can be lost while a watcher reads the seam stream (cause not yet
+                # known), and the task group would then wait forever. Repeat it until it lands.
+                while not all(watcher.done() for watcher in watchers):
+                    for watcher in watchers:
+                        watcher.cancel()
+                    await asyncio.sleep(0.05)
 
     asyncio.run(main())
 
