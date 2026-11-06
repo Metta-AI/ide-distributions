@@ -23,7 +23,6 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
-from opentelemetry import trace
 
 from research_core import intake, serve, telemetry
 from research_core.client import ScriptedClient, SeamError
