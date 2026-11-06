@@ -664,3 +664,12 @@ def test_offline_a_read_is_answered_from_the_world():
     assert run.outcome == "limit"
     assert json.loads(answer)["record"]["id"] == "X-5"
     assert run.calls == ["experiment.read"]
+
+
+def test_offline_a_credit_refusal_reads_as_an_uploaded_version_and_no_balance():
+    """``xp.request`` checks uploads before the platform refuses credits; the reads must agree."""
+    situation = next(s for s in SITUATIONS if s.id == "r-wait-credits")
+    version = json.loads(usability_reads.result(situation, "version.read", {"version": "V-12"}))
+    assert version["record"]["uploaded"]["policy_version_id"] == "pv-12"
+    assert json.loads(CREDITS_REFUSAL)["credits_refused"]["balance"] == 0.0
+    assert usability_reads.platform_credits(situation)["balance"] == 0.0
