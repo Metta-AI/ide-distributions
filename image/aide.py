@@ -551,6 +551,18 @@ async def events(response: httpx.Response) -> AsyncIterator[str]:
             data = []
 
 
+def cursor_number(part: str) -> int:
+    """A number from a client's cursor. Anything this backend never issued is a typed refusal.
+
+    An uncaught ``ValueError`` would end the backend, and ``str.isdigit`` alone lets through
+    characters ``int`` rejects, such as a superscript. Twenty digits holds any issued number and
+    stays under Python's limit on converting long strings.
+    """
+    if not (part.isascii() and part.isdigit() and len(part) <= 20):
+        raise Refusal("snapshot_expired", "Cursor is not one this backend issued")
+    return int(part)
+
+
 def fitting(items: list[BaseModel]) -> int:
     """How many leading items fit in one 1 MiB reply beside its envelope and cursor."""
     total = 1024
@@ -1310,9 +1322,9 @@ class Backend:
         offset, boundary = 0, None
         if params.cursor is not None:
             parts = params.cursor.split(":")
-            if len(parts) != 2 or not all(part.isdigit() for part in parts):
+            if len(parts) != 2:
                 raise Refusal("snapshot_expired", "History cursor is not one this backend issued")
-            offset, boundary = int(parts[0]), int(parts[1])
+            offset, boundary = cursor_number(parts[0]), cursor_number(parts[1])
         floor = params.after_sequence
         # (record, native offset after it), newest first.
         items: list[tuple[Record, int]] = []
@@ -1379,7 +1391,7 @@ class Backend:
             parts = params.cursor.split(":")
             if len(parts) != 3 or parts[0] != str(revision) or parts[2] != key:
                 raise Refusal("snapshot_expired", "The listing changed; read it again")
-            offset = int(parts[1])
+            offset = cursor_number(parts[1])
         page = rows[offset : offset + params.limit]
         if params.resource == "sessions":
             page = [await self.project(row, snapshot.records.requests) for row in page]
@@ -1529,6 +1541,11 @@ class Backend:
             except Refusal as refusal:  # the contract's typed application errors
                 reply["error"] = refusal.error()
             except httpx.TransportError as error:  # the seam or gateway dropped mid-request
+                unknown = method in COMMANDS
+                refusal = Refusal("unavailable", type(error).__name__, unknown=unknown)
+                reply["error"] = refusal.error()
+            except Exception as error:  # one request's bug must not end every other client's chat
+                log.exception("%s failed unexpectedly", method)
                 unknown = method in COMMANDS
                 refusal = Refusal("unavailable", type(error).__name__, unknown=unknown)
                 reply["error"] = refusal.error()

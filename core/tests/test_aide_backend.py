@@ -1,6 +1,7 @@
 """The image's AIDE 1.0.0 backend over a real seam and a scripted gateway."""
 
 import asyncio
+import hashlib
 import json
 import os
 import sqlite3
@@ -1332,6 +1333,52 @@ def test_a_request_whose_session_the_gateway_does_not_have_closes_its_log(system
 
     run(system, scenario)
     assert not [name for name, _ in system[1].calls if name == "start"]
+
+
+@pytest.mark.parametrize("number", ["\u00b2", "9" * 5000, "-1", "x"])
+def test_a_forged_cursor_is_refused_and_the_backend_keeps_answering(system, number):
+    async def scenario(backend, gateway, ctx, hermes):
+        session_id = await opened(backend)
+        selection = aide.StateList(resource="sessions").model_dump_json(
+            include={"resource", "scope_id", "scope", "session_id"}
+        )
+        key = hashlib.sha256(selection.encode()).hexdigest()[:16]
+        listed = await call(backend, "state.list", {"resource": "sessions"})
+        revision = listed["result"]["revision"]
+        forged_listing = {"resource": "sessions", "cursor": f"{revision}:{number}:{key}"}
+        assert code(await call(backend, "state.list", forged_listing)) == "snapshot_expired"
+        forged_history = {"session_id": session_id, "scope": WORKSPACE, "cursor": f"{number}:1"}
+        assert code(await call(backend, "chat.history", forged_history)) == "snapshot_expired"
+        assert "result" in await call(backend, "state.list", {"resource": "sessions"})
+
+    run(system, scenario)
+
+
+@pytest.mark.parametrize(
+    ("method", "handler", "params", "unknown"),
+    [
+        ("state.list", "list_state", {"resource": "sessions"}, False),
+        ("task.cancel", "cancel_task", {"task_id": "t", "scope": LEAGUE}, True),
+    ],
+)
+def test_an_unexpected_failure_answers_only_its_request(
+    system, caplog, method, handler, params, unknown
+):
+    async def scenario(backend, gateway, ctx, hermes):
+        async def broken(*_args):
+            raise KeyError("a bug")
+
+        working = getattr(backend, handler)
+        setattr(backend, handler, broken)
+        reply = await call(backend, method, params)
+        setattr(backend, handler, working)
+        assert code(reply) == "unavailable"
+        assert (reply["error"]["data"].get("outcome") == "unknown") is unknown
+        assert f"{method} failed unexpectedly" in caplog.text
+        assert "KeyError" in caplog.text
+        assert "result" in await call(backend, "state.list", {"resource": "sessions"})
+
+    run(system, scenario)
 
 
 def test_history_pages_by_a_stable_boundary_reads_forward_and_bounds_each_reply(system):
