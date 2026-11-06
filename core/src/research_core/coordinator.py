@@ -537,7 +537,7 @@ class Coordinator:
                     )
                 tx.execute(
                     "UPDATE client_admissions SET run_id=?,status=CASE WHEN status='queued'"
-                    " THEN 'running' ELSE status END,owner_instance=? WHERE op_id=?",
+                    " THEN 'running' ELSE status END,owner_instance=?,retry_at=NULL WHERE op_id=?",
                     (run_id, self.instance_id, op_id),
                 )
                 if current["status"] == "queued":
@@ -566,6 +566,12 @@ class Coordinator:
         with store.tx(ACTOR) as tx:
             current = tx.one("SELECT status FROM client_admissions WHERE op_id=?", (row["op_id"],))
             if current["status"] not in {"queued", "running"}:
+                # Already closed: nothing is left to resolve, so it must not hold capacity or
+                # keep the workspace awake (0011 settles the legacy rows 0006 flagged).
+                tx.execute(
+                    "UPDATE client_admissions SET resolution_required=0 WHERE op_id=?",
+                    (row["op_id"],),
+                )
                 return
             tx.execute(
                 "UPDATE client_admissions SET status='interrupted',resolution_required=0,error=?,"
