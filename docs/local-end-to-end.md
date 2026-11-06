@@ -477,6 +477,8 @@ with `session_context.coworld` registers that Coworld (`POST /session-open`).
 
 - **gVisor.** Docker's default runtime (OrbStack's), not gVisor; the S3 check (a second process
   reading a WAL store under gVisor) is not exercised.
+- **Agent telemetry.** Lines reach the container's output, and no Datadog Agent collects them, so
+  `research telemetry rebuild` has nothing to read for these Sessions.
 - **Sleep and drain.** Nothing puts the container to sleep: the image's lifecycle adapter
   (`image/control.py`) does not run here. From `shell`, `research workspace sleep` and `research
   workspace wake` run the sleep cycle by hand (the container keeps running; `docs/hosting.md`,
