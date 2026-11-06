@@ -391,10 +391,12 @@ def test_chat_round_trip_pushes_what_the_reads_return_to_every_subscriber(system
         )["result"]["item"]
         assert [r["request_id"] for r in session["requests"]] == [request_id]
         assert session["active_request_ids"] == []
-        # After the gateway retires the run, its final attempt's outcome still reads.
+        # After the gateway retires the run, its outcome still reads after the last applied
+        # cursor, and a read of the lost events says they are gone.
         gateway.retired.add(run_id)
-        retired = (await events_read(restarted, session_id, request_id))["result"]
-        assert retired["events"] == pushed[-1:] and retired["done"] is True
+        retired = await events_read(restarted, session_id, request_id, {"attempt": 0, "seq": 6})
+        assert retired["result"]["events"] == pushed[-1:] and retired["result"]["done"] is True
+        assert code(await events_read(restarted, session_id, request_id)) == "history_unavailable"
 
     run(system, scenario)
     ctx, hermes, _ = system
@@ -602,11 +604,15 @@ def test_an_interrupted_request_places_its_outcome_once_after_what_was_retained(
         assert finished["status"] == "interrupted" and finished["error"]["code"] == "interrupted"
         assert finished["cursor"] == {"attempt": 0, "seq": 2}
         restarted = backend.restart()
-        read = (await events_read(restarted, session_id, request_id))["result"]
-        assert [(cursor(e), e["kind"], e["status"]) for e in read["events"]] == [
+        # The frontend that applied the pushed delta reads the outcome right after it.
+        read = await events_read(restarted, session_id, request_id, {"attempt": 0, "seq": 1})
+        assert [(cursor(e), e["kind"], e["status"]) for e in read["result"]["events"]] == [
             ((0, 2), "finished", "interrupted")
         ]
-        assert read["next"] == finished["cursor"] and read["done"] is True
+        assert read["result"]["next"] == finished["cursor"] and read["result"]["done"] is True
+        # From the start, the lost delta is a gap the read reports instead of skipping.
+        gap = await events_read(restarted, session_id, request_id)
+        assert code(gap) == "history_unavailable"
 
     run(system, scenario)
 

@@ -1207,6 +1207,17 @@ class Backend:
             found = [e for e in found if (e.attempt, e.seq) < (outcome.attempt, outcome.seq)]
             if (outcome.attempt, outcome.seq) > after:
                 found.append(outcome)
+        # Events lost with their run (a gateway restart, a cut backlog) leave a gap before the
+        # retained ones or the outcome: they are not readable, so the read says so.
+        cursors = [after, *((e.attempt, e.seq) for e in found)]
+        if any(
+            later != (earlier[0], earlier[1] + 1) and (later[0] <= earlier[0] or later[1] != 1)
+            for earlier, later in zip(cursors, cursors[1:], strict=False)
+        ):
+            raise Refusal(
+                "history_unavailable",
+                "Some of these events are no longer retained; read the request and history",
+            )
         page = found[: params.limit]
         page = page[: fitting(page)]
         last = page[-1] if page else None
