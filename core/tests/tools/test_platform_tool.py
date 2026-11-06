@@ -10,10 +10,11 @@ import pytest
 
 import research_core.tools.platform as platform_tool  # noqa: F401  (registers the tool)
 from research_core.platform import fake, wait
-from research_core.platform.errors import NotAvailable
+from research_core.platform.errors import IdentityUnavailable, PlatformError
 from research_core.platform.fake import FakePlatform
 from research_core.store import goals, pins, sessions
 from research_core.store.actors import Actor
+from research_core.tools.base import PLAYER_ID_META, run_tool
 
 LEAGUE = fake.LEAGUE_ID
 DIVISION = fake.DIVISION_ID
@@ -219,19 +220,56 @@ def test_policy_file_researcher_does_not_fall_back_to_the_user(call):
     assert "belongs to the Orchestrator" in result["error"]
 
 
-def test_policy_file_not_available_is_a_clear_message(call, monkeypatch):
-    def unavailable(self, policy_version_id, identity="player"):
-        raise NotAvailable("the platform has no route to download a policy version's file")
+def test_policy_file_takes_a_label(call, platform):
+    version = upload(platform)
+    result = call("platform", {"action": "policy_file", "policy_version": version.label})
+    assert result["ok"] is True and result["policy_version"] == version.id
+    missing = call("platform", {"action": "policy_file", "policy_version": "nope:v9"})
+    assert missing["ok"] is False and missing["context"]["status"] == 404
 
-    monkeypatch.setattr(FakePlatform, "policy_file", unavailable)
+
+def test_policy_file_of_an_image_policy_says_why(call, monkeypatch):
+    def no_file(self, policy_version_id, identity="player"):
+        raise PlatformError("Policy version has no player file", status=409)
+
+    monkeypatch.setattr(FakePlatform, "policy_file", no_file)
     result = call("platform", {"action": "policy_file", "policy_version": "pv_x"})
-    assert result["ok"] is False
-    assert "no route" in result["error"]
+    assert result["ok"] is False and "image policy" in result["error"]
+    assert result["context"]["status"] == 409 and "next" in result["context"]
+
+
+def test_policy_file_without_a_user_identity_keeps_the_players_refusal(call, monkeypatch):
+    real_policy_file = FakePlatform.policy_file
+
+    def no_user(self, policy_version_id, identity="player"):
+        if identity == "user":
+            raise IdentityUnavailable("user")
+        return real_policy_file(self, policy_version_id, identity=identity)
+
+    monkeypatch.setattr(FakePlatform, "policy_file", no_user)
+    result = call("platform", {"action": "policy_file", "policy_version": "pv_nope"})
+    assert result["ok"] is False and result["context"]["status"] == 404
     assert result["context"]["tried"] == ["player"]
-    assert "attach the file" in result["context"]["next"]
 
 
 # --- results, episodes, replays ---------------------------------------------------------------
+
+
+def test_a_coworld_with_no_league_sees_no_other_coworlds_league(ctx_factory):
+    ctx = ctx_factory(coworld="cow_other")
+    results = json.loads(run_tool("platform", {"action": "results", "player": "ply_x"}, ctx))
+    assert results["leagues"] == []
+    forum = json.loads(run_tool("platform", {"action": "forum_list"}, ctx))
+    assert forum["ok"] is False and "slug is required" in forum["error"]
+
+
+def test_the_player_id_stored_by_the_login_check_saves_a_whoami(call, ctx_factory, monkeypatch):
+    def no_whoami(self, identity="player"):
+        raise AssertionError("whoami was called")
+
+    ctx_factory().wstore.set_meta(PLAYER_ID_META, "ply_stored")
+    monkeypatch.setattr(FakePlatform, "whoami", no_whoami)
+    assert call("platform", {"action": "results", "league": LEAGUE})["player"] == "ply_stored"
 
 
 def test_results_for_this_player(call, platform):
@@ -331,9 +369,11 @@ def test_coworld_manifest_summary(call, platform):
 
 def test_forum_reads(call, platform):
     post = platform.forum_post(
-        title="Opening book", body="Greedy wins early.", idempotency_key="k1"
+        title="Opening book", body="Greedy wins early.", idempotency_key="k1", slug=LEAGUE
     )
-    other = platform.forum_post(title="Other", body="Nothing here.", idempotency_key="k2")
+    other = platform.forum_post(
+        title="Other", body="Nothing here.", idempotency_key="k2", slug=LEAGUE
+    )
     listed = call("platform", {"action": "forum_list"})
     assert listed["slug"] == LEAGUE  # from the league's forum_markdown_url
     assert {p["id"] for p in listed["posts"]} == {post["id"], other["id"]}
@@ -408,6 +448,7 @@ def test_platform_down_puts_the_held_task_on_wait(call, ctx_factory, workspace_e
     result = call("platform", {"action": "credits"}, role="researcher", session_id="s-task")
     assert result["ok"] is False
     assert result["context"]["waiting"] is True
+    assert "end your run" in result["context"]["next"]
     assert result["context"]["task"] == task["id"]
     waiting_on = tasks.read(ctx.store, task["id"])["waiting_on"]
     assert waiting_on["kind"] == "platform"

@@ -242,8 +242,7 @@ def test_workspace_status_capabilities_champion_and_window(tmp_path):
         ),
     )
     ctx.store.set_meta("checks_at", now_iso(lambda: NOW - timedelta(hours=2)))
-    ctx.store.set_meta("credits", json.dumps({"balance": 120, "held": 10}))
-    ctx.store.set_meta("stale_overrides", json.dumps(["task", "claim"]))
+    ctx.store.set_meta("credits", json.dumps({"balance": 120}))
     ctx.store.set_meta(
         "league_versions", "The workspace is on g version 0 (cow_0); its leagues run 1"
     )
@@ -269,12 +268,11 @@ def test_workspace_status_capabilities_champion_and_window(tmp_path):
     text = briefing.render(ctx, "chat1", role="orchestrator", now=NOW)
     assert "paused: yes" in text
     assert "watcher heartbeat 3 min ago, work pending" in text
-    assert "credits: 120 (10 held)" in text
+    assert "credits: 120" in text
     assert "CLI versions: coworld installed 1.2.0, lock 1.3.0; lock refreshed 2026-10-27" in text
     assert "softmax-cli" not in text
     assert "Capability check: 2 h ago; 1 of 2 ok" in text
     assert "broken: build (repair T-1)" in text
-    assert "Stale skill overrides: task, claim" in text
     assert "User identity: not provisioned" in text
     assert "Champion in league-1: V-1 (champion since 20" in text
     assert "The workspace is on g version 0 (cow_0); its leagues run 1" in text
@@ -342,3 +340,19 @@ def test_the_briefing_says_when_it_was_written_and_that_it_does_not_update(tmp_p
     first_line = briefing.render(ctx, "chat1", role="orchestrator", now=moment).splitlines()[0]
     assert first_line.startswith("[briefing] Written 2026-11-04 18:05 UTC")
     assert "not updated in this Session" in first_line
+
+
+def test_the_orchestrator_is_told_when_nothing_has_started_setup(tmp_path):
+    ctx = make_ctx(tmp_path)
+    due = "Call workspace.coworld_switch first"
+    assert due in briefing.render(ctx, "chat1", role="orchestrator", now=NOW)
+    assert "Coworld setup" not in briefing.render(ctx, "chat1", role="researcher", now=NOW)
+
+    with ctx.wstore.tx(HARNESS) as tx:
+        tx.event("coworld.setup_needed", "cow_fake", {})
+    text = briefing.render(ctx, "chat1", role="orchestrator", now=NOW)
+    assert due not in text and "Coworld setup: started, not finished" in text
+
+    coworlds.register(ctx.wstore, HARNESS, "cow_fake", folder="cow_fake")
+    coworlds.mark_set_up(ctx.wstore, HARNESS, "cow_fake", mixin_version="1", tool_check_status="ok")
+    assert "Coworld setup" not in briefing.render(ctx, "chat1", role="orchestrator", now=NOW)

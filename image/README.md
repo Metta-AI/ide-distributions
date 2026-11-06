@@ -8,8 +8,6 @@ Lost native receipts remain execution obligations until the supervisor recycles 
 The next boot closes those obligations without replaying their inputs. This is automatic recovery,
 not a forced platform hold or an operator command.
 
-This image builds on distribution PR #116's `research workspace sleep` and
-`research workspace wake`. It includes PR #117's source-acquisition and routed-profile fixes.
 The image owns profile installation, dependency resolution, internal paths, gateway setup,
 watcher activation and the translation from generic lifecycle requests to research commands.
 
@@ -38,7 +36,6 @@ minutes without work. Restart calls wake with the retained filesystem.
 The release dispatcher passes the distribution commit to Metta's generic build workflow.
 That workflow builds `image/Dockerfile`, runs `image/system_tests/start-stop.sh`, and publishes
 an immutable image digest. Hosting consumes that digest without inspecting profile internals.
-Deploy Metta #30090's format readers and release workflow before dispatching this release.
 
 The image also owns the ide-next application adapter. It exposes native session opening,
 durable message admission and cancellation, workspace snapshots, transcripts and run controls.
@@ -63,15 +60,16 @@ No message or attachment contents are captured. See [OpenTelemetry](#opentelemet
 The image obtains its spend-capped model credential from
 `PUT /v2/workspaces/{workspace_id}/inference`, using the bootstrap credential. It installs
 and renews the key internally; hosting never supplies profile paths or model environment
-variables. Deploy that platform endpoint before this image. Queued chat dispatch waits for
+variables. Queued chat dispatch waits for
 a valid inference lease, including after restart. Lifecycle readiness remains independent
 of the optional model service, so an unavailable budget does not prevent stopping a workspace.
 
 A spent key is not an expired one, so the image also keeps the *inference state*,
 `.inference-state` beside the lease file (`core/src/research_core/inference.py`). The
 profiles' `api_request_error` hook sets `budget_exhausted` when Hermes classifies a model call
-as `billing` (a 402, or OpenRouter's 403 "Key limit exceeded"), except within two minutes of a
-key change, when such errors come from runs still finishing on the previous key. It sets
+as `billing` (a 402, or OpenRouter's 403 "Key limit exceeded"), except for a 402 that says a
+smaller response is still affordable, and within two minutes of a key change, when such errors
+come from runs still finishing on the previous key. It sets
 `provider_unavailable` for five minutes after three outage errors within three minutes. The
 lease loop sets `budget_exhausted` when the platform refuses a lease for that reason, and
 renews no later than the refill (the lease's expiry minus the platform's ten-minute grace).
@@ -103,7 +101,7 @@ run-control replies make no stronger guarantees than their declared schema.
 Metta vendors the artifact from an immutable agent commit and records its SHA-256. Its
 frontend types, runtime request validator and browser fixture consume that artifact.
 Changing a public shape requires regenerating the artifact and checking both consumers
-before release. Existing operation names and wire bodies remain unchanged.
+before release.
 
 ## AIDE 1.0.0 backend
 
@@ -192,8 +190,6 @@ The hosted local speech-model path is applied by profile preparation through Her
 configuration API. It is included in `profile_prepare` timing. Startup does not launch a separate
 `hermes config set` process per profile. `IDE_LOCAL_STT_MODEL` selects the bundled model;
 standalone preparation without that setting preserves its existing speech configuration.
-The startup comparison workflow builds the PR base and candidate from their respective source
-and lockfiles, then measures a fresh boot and five retained restarts for each.
 
 ## Container policy builds
 

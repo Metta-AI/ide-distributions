@@ -42,6 +42,8 @@ OPENING = re.compile(r"`([A-Za-z_0-9]+)(?:\.([A-Za-z_0-9]+))?\s*\{")
 ITEM = re.compile(r"([a-z_]+\??(?:\s*\|\s*[a-z_]+\??)*)\s*(?::\s*(.*)|(\{.*\}))?", re.DOTALL)
 NAME = re.compile(r"[a-z_]+")
 QUOTED_VALUE = re.compile(r'"[^"]*"(?:\s+or\s+"[^"]*")*')
+# A literal value: one word, quoted or not. ``<placeholder>`` and alternatives are not read.
+ENUM_VALUE = re.compile(r'"?[a-z_]+"?')
 FRAGMENT = "..."
 # The role that reads each folder or file; anything not listed here is read by both, or is shared
 # text that may show one role's call.
@@ -161,6 +163,9 @@ def _field_problems(label: str, body: str, properties: dict, required) -> tuple[
                 continue
             schema = properties[name].get("items") or properties[name]
             shown_objects = listed_objects(value)
+            allowed = schema.get("enum")
+            if allowed and ENUM_VALUE.fullmatch(value) and value.strip('"') not in allowed:
+                unknown.append(f"{label}: {name} cannot be {value}; it is one of {allowed}")
             if shown_objects and schema.get("type") not in (None, "object"):
                 unknown.append(f"{label}: {name} is a {schema['type']}, not an object")
             if not schema.get("properties"):
@@ -229,6 +234,13 @@ def test_the_scan_finds_signatures_in_every_kind_of_source():
 def test_a_field_the_action_does_not_have_is_found():
     unknown, _ = problems_with(only("`claim.search {query, mood: high}`"))
     assert len(unknown) == 1 and "no field 'mood'" in unknown[0]
+
+
+def test_a_value_outside_the_field_enum_is_found():
+    good = "`task_wait {task, kind: credits, detail}`"
+    assert problems_with(only(good))[0] == []
+    unknown, _ = problems_with(only("`task_wait {task, kind: nap, detail}`"))
+    assert len(unknown) == 1 and "kind cannot be nap" in unknown[0]
 
 
 def test_a_field_of_another_action_is_found():

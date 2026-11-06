@@ -9,11 +9,11 @@ XP requests spend the account's credits. Credits are the platform's: you cannot 
 
 ## Know the balance
 
-`platform.credits` gives the balance, the amount held by pending requests, the next refill (amount and time) and the recent requests with their compute cost. Read it before any batch and whenever a result's credits line looks low. The briefing carries the last reading.
+`platform.credits` gives the balance, the next refill (amount and time) and the recent requests with their compute cost. Read it before any batch and whenever a result's credits line looks low. The briefing carries the last reading.
 
 ## Know the cost
 
-- A batch costs seeds × arms × episodes requests. The `xp.request` result carries an `estimate` from the recent cost per episode (or the mixin's `cost_per_episode` when there is no history) next to the balance that is left.
+- A batch is seeds × arms requests of `episodes` episodes each. The `xp.request` result carries an `estimate` from the recent cost per episode (or the mixin's `cost_per_episode` when there is no history) next to the balance that is left.
 - Before a verdict-sized Experiment, compute the estimate yourself from `platform.credits` and `n_min`; when it exceeds the balance, shrink the seeds, split the batch keeping both arms of each seed together, or wait for the refill. Decide this before `experiment.start`, not after half the pairs ran.
 - Held credits return when a request finishes or is cancelled.
 
@@ -31,7 +31,7 @@ There is no local pre-check: the platform's 402 is the refusal, and the tool rep
 
 ## The per-Experiment setting
 
-`xp.ask_above_requests_per_experiment` (read with `settings.read`) bounds your own initiative: above it, the Orchestrator gets a warning and proceeds; a Researcher is told to `task_ask`. It never refuses, and a user request overrides it.
+`xp.ask_above_requests_per_experiment` (read with `settings.read`) bounds your own initiative and counts an Experiment's requests. Above it, the Orchestrator gets a warning and proceeds. A Researcher's `xp.request` is refused and creates nothing: `task_ask` the Orchestrator, then send again as it answers: with a smaller design, or once it has the user's approval and has raised the setting (`settings_update`, citing their message). It cannot send them for you: only the Task's holder records runs on the Task's Experiment.
 
 ## Failure handling
 

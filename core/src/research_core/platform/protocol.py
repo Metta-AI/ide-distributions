@@ -212,8 +212,16 @@ class Platform(Protocol):
     def forum_search(self, query: str, *, slug: str | None = None) -> list[dict]: ...
 
     def forum_post(
-        self, *, title: str, body: str, idempotency_key: str, identity: Identity = "player"
-    ) -> dict: ...
+        self,
+        *,
+        title: str,
+        body: str,
+        idempotency_key: str,
+        slug: str | None = None,
+        identity: Identity = "player",
+    ) -> dict:
+        """A post in the forum named by ``slug``; with none, in the global forum."""
+        ...
 
     def forum_comment(
         self,
@@ -240,7 +248,7 @@ class Platform(Protocol):
         *,
         title: str,
         body: str,
-        base_revision_id: str,
+        base_revision_id: str | None,
         idempotency_key: str,
         note: str | None = None,
         identity: Identity = "player",

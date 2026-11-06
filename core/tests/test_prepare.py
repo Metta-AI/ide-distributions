@@ -135,7 +135,7 @@ def test_protected_keys_for_role_substitutes_the_role():
     assert orchestrator["tools.tool_search.enabled"] == "off"
     assert orchestrator["cron.catch_up_missed"] is True
     for keys in (orchestrator, researcher):
-        assert keys["agent.disabled_toolsets"] == ["browser", "connections", "cronjob"]
+        assert keys["agent.disabled_toolsets"] == ["browser", "connections", "cronjob", "todo"]
         assert keys["compression.proactive_prune_tokens"] == 64000
     # Compression protection is Orchestrator only (design F.5).
     assert orchestrator["compression.protect_first_n"] == 6
@@ -158,6 +158,13 @@ def test_prepare_rejects_unknown_role(tmp_path, homes):
             cli=prepare.HermesCli("hermes", profile, env, FakeHermes().run),
             env=env,
         )
+
+
+def test_the_checkouts_own_script_belongs_to_no_profile(monkeypatch):
+    monkeypatch.delenv("HERMES_HOME", raising=False)
+    source = REPO / "orchestrator"
+    with pytest.raises(prepare.PrepareError, match="HERMES_HOME"):
+        prepare.load_profile_env(source / "scripts" / "prepare.py", source)
 
 
 def test_prepare_requires_hermes_home():

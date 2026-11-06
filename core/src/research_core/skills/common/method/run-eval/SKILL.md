@@ -12,7 +12,7 @@ Hosted evaluation (an Experience request) is the only oracle; local runs debug, 
 | Question | Shape |
 |---|---|
 | Did my change help? | Two matched arms (`arms: [baseline, candidate]`), identical pinned rosters (`opponents: [<policy version ids>]`), the same seeds; never sampled seats in an A/B |
-| How does V-7 do against the field? | One arm (`arms: [candidate]`), the League fills the other seats (`league: <id>`), more seeds |
+| How does V-7 do against the field? | One arm (`arms: [candidate]`), the League fills the other seats (`league: <id>`), more seeds; with no pairs, `experiment.close` needs an explicit `verdict` with `measurements`, `interpretation` and `reason` |
 | How do we do in role X? | A role-pinned probe with a pinned roster; what can be pinned is game-specific: see the mixin's `<coworld>-eval-design` skill or docs |
 | Does the build even run? | The mixin's `check` command from `MIXIN.md` in your worktree first; then the smallest request the game allows, one seed, one episode |
 
@@ -34,7 +34,7 @@ Never conclude from a rung below the question's weight.
 1. Name the question, pick the shape and the rung. Write the expected effect into the Experiment before anything runs (`experiment`).
 2. Pin seats by explicit policy version id: `platform.active_policies {league, exclude_player: true}` lists the field, `platform.policy_versions` ours. "Latest" in a roster is a reproducibility hole.
 3. Cost: `platform.credits`; the request result carries an `estimate` (`credits` skill). Shrink seeds or split into batches before you start, keeping both arms of a seed together.
-4. `xp.request`. Each accepted request is recorded as a run at once; the result lists created, existing and pending ids. Repeating the call creates only the missing requests.
+4. `xp.request`. Each accepted request is recorded as a run at once; the result lists `created`, `reconciled`, `requests` and `runs`. Repeating the call creates only the missing requests.
 5. `task_wait {task, kind: xp, detail: "X-n's requests", ref: [<request ids>]}` and end your run. Reading starts when the watcher resumes you: `xp.status {experiment}`.
 6. Both arms of an A/B go out in the same window; when the binding gives a batch size, respect it.
 
@@ -42,5 +42,5 @@ Never conclude from a rung below the question's weight.
 
 - Sampled seats (`league`) in an A/B invalidate the comparison: the arms saw different fields.
 - A created or running request counts for nothing until its results are inspected.
-- A platform 4xx on a body means the route changed: read the error's detail and the `softmax-api-routes` skill, do not retry blind.
-- A request above the `xp.ask_above_requests_per_experiment` setting is a warning for the Orchestrator and a `task_ask` suggestion for a Researcher; it never refuses.
+- A platform 4xx: read the error's detail and, if the route or body may have changed, the `softmax-api-routes` skill; do not retry blind.
+- Above the `xp.ask_above_requests_per_experiment` setting a Researcher's request is refused (`credits` skill).

@@ -1639,7 +1639,7 @@ class Coordinator:
             )
         failure = {
             "what_failed": f"Worker {task['held_by']} exhausted {max_attempts} attempts: {why}",
-            "next_step": "Review the failure and reopen with revised instructions",
+            "next_step": "Review the failure and create a new Task with revised instructions",
         }
         tasks.fail(store, Actor.session(task["held_by"]), task["id"], failure=failure)
         emit_event(

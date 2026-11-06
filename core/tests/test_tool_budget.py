@@ -1,5 +1,7 @@
 """The tool surface (design C.2, amendment A3.1): counts, roles and executors."""
 
+from pathlib import Path
+
 import pytest
 
 from research_core.tools import catalog
@@ -24,12 +26,11 @@ ORCHESTRATOR = {
     "github",
 }
 # Actions with a tool of their own (ActionSpec.own_tool). The two roles have different ones.
-OWN_TOOLS_BOTH = {"claim_write", "claim_add_evidence", "experiment_create", "experiment_add_run"}
+OWN_TOOLS_BOTH = {"claim_write", "claim_add_evidence", "experiment_create"}
 OWN_TOOLS_ORCHESTRATOR = {
     "goal_set_status",
     "settings_update",
     "task_abandon",
-    "task_propose",
     "ui_panel_set",
 }
 OWN_TOOLS_RESEARCHER = {
@@ -46,7 +47,6 @@ INPROC = {
     "goal_set_status",
     "task",
     "task_abandon",
-    "task_propose",
     "directive",
     "claim",
     "claim_write",
@@ -73,9 +73,18 @@ def test_a_broken_tool_module_fails_loudly(tmp_path, monkeypatch):
 
 
 def test_tool_counts_match_the_design():
-    assert names("orchestrator") == ORCHESTRATOR and len(ORCHESTRATOR) == 26
-    assert names("researcher") == RESEARCHER and len(RESEARCHER) == 23
+    assert names("orchestrator") == ORCHESTRATOR and len(ORCHESTRATOR) == 24
+    assert names("researcher") == RESEARCHER and len(RESEARCHER) == 22
     assert len(ORCHESTRATOR) <= catalog.TOOL_BUDGET
+
+
+def test_readmes_state_the_tool_counts():
+    """Hermes registers each tool of an action of its own, so the counts are of the whole list."""
+    repo = Path(__file__).resolve().parents[2]
+    for role, tools in (("orchestrator", ORCHESTRATOR), ("researcher", RESEARCHER)):
+        assert f"{len(tools)} tools, listed in" in (repo / role / "README.md").read_text()
+    core = (repo / "core" / "README.md").read_text()
+    assert f"{len(ORCHESTRATOR)} Orchestrator, {len(RESEARCHER)} Researcher" in core
 
 
 def test_executor_table():

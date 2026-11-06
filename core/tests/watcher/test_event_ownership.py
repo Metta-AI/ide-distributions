@@ -31,6 +31,7 @@ EXPECTED_WAKES = {
     "workspace.resumed": None,
     "task.abandoned": None,
     "task.failed": None,
+    "task.failure_review": "management",
     "champion.changed": "management",
     "store.unmarked_write": "management",
     "store.schema_rebuilt": "management",

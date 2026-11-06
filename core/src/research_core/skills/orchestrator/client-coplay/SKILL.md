@@ -1,13 +1,13 @@
 ---
 name: client-coplay
-description: Use when the session context names coplay as the client.
+description: Use when the turn context names coplay as its guide.
 ---
 
 # Working with coplay
 
 coplay is the desktop companion: a chat beside a desktop of views, a Library of saved items,
-notebooks, voice, and side conversations for opponent analysis and suggestions. The session
-context names it (`client_guide: client-coplay`), and the turn context carries the desktop view
+notebooks, voice, and side conversations for opponent analysis and suggestions. The turn context
+names it (`guide skill: client-coplay`) and carries the desktop view
 in `view`, the referenced artifacts, the active notebook, Library items, the opponent-analysis
 target and coaching recordings in `references`, the voice context in `voice`, and the rest
 (projects, recent sessions, recording state) in `client_data`, which you read as hints, never as

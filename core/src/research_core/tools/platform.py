@@ -23,7 +23,7 @@ from pathlib import Path
 from typing import Any
 
 from research_core import refs
-from research_core.platform.errors import NotAvailable
+from research_core.platform.errors import IdentityUnavailable
 from research_core.platform.protocol import Identity, Membership, Platform, PolicyVersion
 from research_core.platform.wait import call_platform, identity_for
 from research_core.store import pins
@@ -33,11 +33,13 @@ from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolErro
 BOTH = frozenset({"orchestrator", "researcher"})
 # ``policy_file`` falls back to the User identity when the Player gets one of these.
 PLAYER_REFUSED_STATUSES = frozenset({401, 403, 404})
+# The file route's answer for a version that has no file, such as an image policy.
+NO_FILE_STATUS = 409
 # ``episodes {league}`` reads the episodes of at most this many active policies.
 LEAGUE_EPISODE_POLICIES = 10
 
 LEAGUE = a.string("The League id (league_...) or a platform URL carrying it.")
-IDENTITY = a.string("Default player; the Researcher is Player only.", enum=["player", "user"])
+IDENTITY = a.string("Default player.", enum=["player", "user"])
 
 
 def handle(call: ToolCall) -> dict:
@@ -163,27 +165,33 @@ def policy_versions(call: ToolCall, platform: Platform) -> dict:
 
 
 def policy_file(call: ToolCall, platform: Platform) -> dict:
-    """Download a policy version's file: the Player first, the User when the Player is refused
-    (A4.6; the Orchestrator only). Written to ``documents/policies/<id>.bin``."""
-    pv = _id(call.get("policy_version"))
-    route = f"GET /v2/policy-versions/{pv}/file"
+    """Download a policy version's file, which only its owner can read: the Player first, the User
+    when the Player is refused (A4.6; the Orchestrator only). Written to
+    ``documents/policies/<id>.bin``."""
+    ref = _id(call.get("policy_version"))
     tried: list[str] = []
     content: bytes | None = None
     used: Identity = "player"
     last: ToolError | None = None
     for identity in _policy_file_identities(call.ctx):
         tried.append(identity)
-        fetch = partial(platform.policy_file, pv, identity=identity)
         try:
-            content = call_platform(call.ctx, route, fetch, identity=identity)
+            pv = _policy_version_id(call, platform, ref, identity)
+            content = call_platform(
+                call.ctx,
+                f"GET /v2/policy-files/{pv}/download",
+                partial(platform.policy_file, pv, identity=identity),
+                identity=identity,
+            )
         except ToolError as error:
-            if isinstance(error.__cause__, NotAvailable):
+            if isinstance(error.__cause__, IdentityUnavailable) and last is not None:
+                tried.pop()  # no User to ask: the Player's refusal is the answer
+                break
+            if error.context.get("status") == NO_FILE_STATUS:
                 raise ToolError(
-                    error.problems,
-                    route=route,
-                    status=error.context.get("status"),
-                    tried=tried,
-                    next="ask the user to attach the file, or rebuild it from the Version's commit",
+                    f"{ref} has no file to download; an image policy has none",
+                    **error.context,
+                    next="use the code of the Version it came from",
                 ) from error
             if error.context.get("status") not in PLAYER_REFUSED_STATUSES:
                 raise
@@ -215,6 +223,24 @@ def policy_file(call: ToolCall, platform: Platform) -> dict:
 
 def _policy_file_identities(ctx: ToolContext) -> tuple[Identity, ...]:
     return ("player",) if ctx.role == "researcher" else ("player", "user")
+
+
+def _policy_version_id(call: ToolCall, platform: Platform, ref: str, identity: Identity) -> str:
+    """The id behind ``ref``: the file route takes only an id, so a ``name:v3`` label is looked up
+    among what this identity owns."""
+    if refs.parse(ref).kind != "policy_label":
+        return ref
+    name, _, number = ref.rpartition(":v")
+    rows = _call(
+        call,
+        "GET /stats/policy-versions",
+        partial(platform.policy_versions, name=name, identity=identity),
+        identity=identity,
+    )
+    for row in rows:
+        if row.version == int(number):
+            return row.id
+    raise ToolError(f"no policy version {ref} among this {identity}'s uploads", status=404)
 
 
 # --- results, episodes, replays -----------------------------------------------------------
@@ -301,7 +327,8 @@ def replay(call: ToolCall, platform: Platform) -> dict:
     ref = f"episode:{episode_id}"
     pinned = pins.find(call.ctx.store, "replay", ref)
     if pinned is not None and Path(pinned["download"]["path"]).is_file():
-        return {"episode": episode_id, "pin": pinned, "existing": True}
+        path = pinned["download"]["path"]
+        return {"episode": episode_id, "path": path, "pin": pinned, "existing": True}
     path = _replay_path(call.ctx, episode_id, call.get("dest"))
     content = _call(
         call,
@@ -360,7 +387,7 @@ def coworld(call: ToolCall, platform: Platform) -> dict:
 
 
 def forum_list(call: ToolCall, platform: Platform) -> dict:
-    slug = call.get("slug") or _default_forum_slug(call, platform)
+    slug = call.get("slug") or default_forum_slug(call, platform)
     sort, limit = call.get("sort") or "hot", call.get("limit") or 20
     posts = _call(
         call,
@@ -402,7 +429,7 @@ def wiki_history(call: ToolCall, platform: Platform) -> dict:
     return {"page_id": page_id, "revisions": rows}
 
 
-def _default_forum_slug(call: ToolCall, platform: Platform) -> str:
+def default_forum_slug(call: ToolCall, platform: Platform) -> str:
     """The forum of the session Coworld's first league (from its ``forum_markdown_url``)."""
     for row in _coworld_leagues(call, platform):
         if row.forum_markdown_url:
@@ -426,8 +453,8 @@ def _id(value: Any) -> str | None:
 
 
 def _this_player(call: ToolCall, platform: Platform) -> str:
-    """The workspace's Player id: ``SOFTMAX_PLAYER_ID``, else the platform's answer."""
-    player = call.ctx.env.get("SOFTMAX_PLAYER_ID")
+    """The workspace's Player id as the context knows it, else the platform's answer."""
+    player = call.ctx.player_id()
     if player:
         return player
     who = _call(call, "GET /whoami", lambda: platform.whoami("player"))
@@ -437,11 +464,10 @@ def _this_player(call: ToolCall, platform: Platform) -> str:
 
 
 def _coworld_leagues(call: ToolCall, platform: Platform) -> list:
-    """The leagues of the session Coworld, or every league when none names it."""
+    """The leagues of the session Coworld."""
     rows = _call(call, "GET /v2/leagues", platform.leagues)
     coworld_id = call.ctx.coworld().coworld_id
-    mine = [row for row in rows if row.coworld_id == coworld_id]
-    return mine or rows
+    return [row for row in rows if row.coworld_id == coworld_id]
 
 
 def _documents(ctx: ToolContext) -> Path:
@@ -525,14 +551,14 @@ SPEC = tool(
             ),
             ActionSpec(
                 "active_policies",
-                "A league's active memberships; exclude_player drops this Player's, "
-                "exclude_user drops every Player of the user (needs the User identity).",
+                "A league's active memberships, with the opponents after the exclusions.",
                 {
                     "league": LEAGUE,
                     "exclude_player": a.boolean("Drop this Player's policies."),
                     "exclude_user": a.boolean("Drop the policies of all the user's Players."),
                 },
                 ("league",),
+                orchestrator_fields=("exclude_user",),
             ),
             ActionSpec(
                 "policy_versions",
@@ -542,10 +568,12 @@ SPEC = tool(
                     "name": a.string("A policy name; every version of it."),
                     "identity": IDENTITY,
                 },
+                orchestrator_fields=("identity",),
             ),
             ActionSpec(
                 "policy_file",
-                "Download a policy version's file into documents/policies/ and return the path.",
+                "Download the file of a policy version you own into documents/policies/ and "
+                "return the path; an image policy has none.",
                 {"policy_version": a.string("The policy version id or name:v3 label.")},
                 ("policy_version",),
             ),
@@ -556,7 +584,8 @@ SPEC = tool(
             ),
             ActionSpec(
                 "episodes",
-                "Episodes of a policy version, or of a league's active policies; give one of them.",
+                "Episodes of a policy version, or of up to ten of a league's active policies "
+                "(truncated says more exist), wherever they played; give one of them.",
                 {"policy_version": a.string("A policy version id."), "league": LEAGUE},
                 example_fields=("league",),
             ),
@@ -584,7 +613,7 @@ SPEC = tool(
                 "List forum posts (the session Coworld's league forum by default).",
                 {
                     "slug": a.string("The forum slug."),
-                    "sort": a.string("Default hot.", enum=["hot", "new"]),
+                    "sort": a.string("Default hot.", enum=["hot", "new", "top"]),
                     "limit": a.integer("How many posts (default 20)."),
                 },
             ),

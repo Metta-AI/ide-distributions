@@ -55,7 +55,6 @@ PREPARATION_BUILTINS = frozenset(
         "search_files",
         "session_search",
         "terminal",
-        "todo_list",
         "vision_analyze",
         "web_extract",
         "web_search",

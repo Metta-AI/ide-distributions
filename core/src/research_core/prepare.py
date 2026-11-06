@@ -23,7 +23,7 @@ In order, ``prepare``:
 6. builds or checks the workspace environment under a file lock;
 7. writes ``<profile>/.softmax-prepared`` and prints one JSON summary line.
 
-``check=True`` (the script's ``--check``) plans steps 3 to 5 against the live config and
+``check=True`` (the script's ``--check``) plans steps 3 and 5 against the live config and
 writes nothing. ``apply_skill_dirs`` is the same profile-pointing step for every profile of
 the sandbox, which a Coworld switch calls after preparation.
 
@@ -88,7 +88,9 @@ PROTECTED_KEYS: dict[str, Any] = {
     "tool_loop_guardrails.hard_stop_after.idempotent_no_progress": 10,
     # Hermes tools these agents never called, each sent on every model call (JAME-178). Hermes
     # disables whole toolsets: `browser` also takes browser_vault, browser_cdp and browser_dialog.
-    "agent.disabled_toolsets": ["browser", "connections", "cronjob"],
+    # `todo`: the plan is Goals and Tasks, and no call in 1,981 used it. `delegation` stays: the
+    # expert-consultation skill needs it, and a child without a Coworld is told so when it tries.
+    "agent.disabled_toolsets": ["browser", "connections", "cronjob", "todo"],
     # Compaction starts above 500,000 tokens on the shipped Kimi models, so old tool output
     # otherwise stays in every request. From this request size, Hermes replaces results over 8,000
     # characters that are older than compression.protect_last_n messages with a one-line summary
@@ -617,6 +619,24 @@ def ensure_workspace_env(
 
 
 # --- entry point ------------------------------------------------------------------------------
+
+
+def load_profile_env(script: Path, source: Path) -> None:
+    """Give the installed script what Hermes would give anything it runs for the profile.
+
+    ``HERMES_HOME`` defaults to the profile the script is installed in, and the profile's ``.env``
+    fills in what the environment does not set. The copy in the checkout belongs to no profile.
+    """
+    home = os.environ.get("HERMES_HOME")
+    if not home:
+        installed_in = script.resolve().parents[1]
+        if installed_in == source.resolve():
+            raise PrepareError("HERMES_HOME must name the profile home to prepare")
+        home = os.environ["HERMES_HOME"] = str(installed_in)
+    from hermes_cli.env_loader import resolve_home_dotenv
+
+    for name, value in resolve_home_dotenv(Path(home)).items():
+        os.environ.setdefault(name, value)
 
 
 def prepare(

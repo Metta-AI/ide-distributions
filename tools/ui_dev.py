@@ -31,6 +31,7 @@ from tests.fixtures.fakegame_repo import COWORLD_ID, make_fakegame_repo  # noqa:
 from research_core import layout  # noqa: E402 - after the sys.path change
 from research_core.scripted_agent import REQUEST, TRIGGERS, ScriptedAgent  # noqa: E402
 from research_core.serve import DEFAULT_PORT, SeamServer  # noqa: E402
+from research_core.store import coworlds  # noqa: E402
 from research_core.watcher import context as watcher_context  # noqa: E402
 from research_core.watcher.hermes_api import FakeHermesRuns  # noqa: E402
 
@@ -59,31 +60,46 @@ def main(argv: list[str] | None = None) -> int:
         agent = ScriptedAgent(env, source, commit, coworld_id=COWORLD_ID)
         hermes = FakeHermesRuns(script=agent)
         agent.hermes = hermes
-        server = SeamServer(ws=ws, hermes=hermes, port=args.port)
-        threading.Thread(target=server.serve_forever, daemon=True, name="seam").start()
+        server = SeamServer(ws=ws, hermes=hermes, port=args.port, env=env)
+        seam = threading.Thread(target=server.serve_forever, daemon=True, name="seam")
+        seam.start()
         stop = threading.Event()
         ticker = threading.Thread(
             target=tick_forever, args=(env, server, args.tick_seconds, stop), daemon=True
         )
         ticker.start()
 
-        print(f"client page:  {server.url}/")
+        print(f"client page:  {server.url}/?coworld={COWORLD_ID}  (or {server.url}/, no Coworld)")
         print(f"workspace:    {ws.root}  (removed on exit)")
         print(f"watcher tick: every {args.tick_seconds:g} s on a thread; Ctrl-C stops")
         print("try these in the page:")
-        print(f"  {REQUEST!r:46} switch to the fake Coworld, upload and submit the starter")
+        print(f"  {REQUEST!r:46} upload and submit the starter (needs the Coworld)")
         for word, effect in TRIGGERS.items():
             print(f"  a message containing {word!r:14} {effect}")
         try:
-            while True:
+            while seam.is_alive():
                 time.sleep(1)
+            print("the seam server stopped; see its traceback above", file=sys.stderr)
+            return 1
         except KeyboardInterrupt:
-            pass
+            return 0
         finally:
             stop.set()
             server.shutdown()
             ticker.join(timeout=args.tick_seconds + 5)
-    return 0
+
+
+def tick_coworld(env: dict[str, str], server: SeamServer, coworld_id: str | None) -> dict:
+    """One workflow pass over the workspace or one Coworld, as ``coordinate_once`` does hosted."""
+    ctx = watcher_context.build(env, hermes=server.coordinator, coworld_id=coworld_id)
+    try:
+        return server.coordinator.advance(ctx)
+    except Exception as error:  # a dev tool keeps ticking and shows the failure
+        return {"errors": [f"{type(error).__name__}: {error}"]}
+    finally:
+        ctx.wstore.close()
+        if ctx.store is not None:
+            ctx.store.close()
 
 
 def tick_forever(env: dict[str, str], server: SeamServer, every_s: float, stop) -> None:
@@ -91,22 +107,13 @@ def tick_forever(env: dict[str, str], server: SeamServer, every_s: float, stop) 
     number = 0
     while not stop.is_set():
         number += 1
-        ctx = watcher_context.build(env, hermes=server.coordinator)
-        try:
-            server.coordinator.reconcile()
-            report = server.coordinator.advance(ctx)
-        except Exception as error:  # a dev tool keeps ticking and shows the failure
-            report = {
-                "has_work": None,
-                "paused": None,
-                "errors": [f"{type(error).__name__}: {error}"],
-            }
-        finally:
-            ctx.wstore.close()
-            if ctx.store is not None:
-                ctx.store.close()
+        server.coordinator.reconcile()
+        with server.stores() as stores:
+            registered = [row["coworld_id"] for row in coworlds.list(stores.wstore)]
+        reports = [tick_coworld(env, server, coworld) for coworld in [None, *registered]]
+        report = {key: value for one in reports for key, value in one.items()}
         stamp = datetime.now().astimezone().strftime("%H:%M:%S %Z")
-        errors = report.get("errors") or []
+        errors = [error for one in reports for error in one.get("errors") or []]
         print(
             f"[{stamp}] workflow {number}: operations={','.join(report)}"
             f" errors={errors if errors else 'none'}",

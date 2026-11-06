@@ -3,10 +3,10 @@ the merge is clean and the mixin's build and check pass on the result (design B.
 
 from __future__ import annotations
 
-from research_core import gitops
-from research_core.store import tasks
+from research_core import coworld_setup, gitops
+from research_core.store import capabilities, tasks
 from research_core.store.actors import Actor
-from research_core.watcher import merge
+from research_core.watcher import checks, merge
 from tests.watcher._support import (
     HARNESS,
     claim,
@@ -175,7 +175,12 @@ def test_merging_a_submission_candidate_wakes_the_orchestrator(tmp_path):
         ctx.store,
         Actor.session(SESSION),
         n,
-        checklist={"commit": sha, "summary": "raised aggression", "submission_candidate": "yes"},
+        checklist={
+            "commit": sha,
+            "summary": "raised aggression",
+            "submission_candidate": "yes",
+            "submission_reason": "beats the champion",
+        },
         commit=sha,
         merge_request="yes",
         submission_candidate="yes",
@@ -187,6 +192,7 @@ def test_merging_a_submission_candidate_wakes_the_orchestrator(tmp_path):
 
     assert [entry["task"] for entry in report["merged"]] == [task["id"]]
     candidates = events_of(ctx.store, "submission.candidate")
+    assert candidates[0]["payload"]["reason"] == "beats the champion"
     assert [e["payload"]["task"] for e in candidates] == [task["id"]]
     assert candidates[0]["payload"]["merge_commit"] == gitops.rev_parse(ctx.coworld.code, "main")
     assert events_of(ctx.store, "task.merged")  # the plain merge event is still there
@@ -197,3 +203,35 @@ def test_merging_a_submission_candidate_wakes_the_orchestrator(tmp_path):
         task["id"]
     ]
     assert other["id"] in [e["subject"] for e in events_of(ctx.store, "task.merged")]
+
+
+def test_a_merge_marks_the_checks_due_only_while_a_capability_is_broken(tmp_path):
+    ctx = make_ctx(tmp_path)
+    setup_code_repo(ctx)
+    make_task_on_branch(ctx, aggression=4, patience=6)
+    merge.run(ctx)
+    assert not ctx.store.get_meta(merge.CHECKS_DUE)
+
+    capabilities.report_failure(ctx.store, ctx.actor, "evaluate", output="x", command="e")
+    make_task_on_branch(ctx, aggression=5, patience=7)
+    merge.run(ctx)
+    assert ctx.store.get_meta(merge.CHECKS_DUE)
+    assert checks.due_mode(ctx) == "full"
+
+
+def test_the_merge_check_installs_the_mixin_toolchains_before_its_commands(tmp_path, monkeypatch):
+    ctx = make_ctx(tmp_path)
+    setup_code_repo(ctx)
+    make_task_on_branch(ctx, aggression=4, patience=6)
+    logs_when_installed = []
+
+    def install(workspace, toolchains):
+        logs_when_installed.append(merge_logs(ctx))
+        return {"toolchains": [], "problems": ["toolchain nim: install it by hand"]}
+
+    monkeypatch.setattr(coworld_setup, "install_toolchains", install)
+
+    report = merge.run(ctx)
+
+    assert logs_when_installed == [[]]  # before build and check wrote their logs
+    assert len(report["merged"]) == 1  # a problem is noted; the commands decide

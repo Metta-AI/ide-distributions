@@ -3,8 +3,10 @@
 Everything is a store write, never a wait on a browser: ``show`` and ``panel_set`` patch the
 conversation's UI state document, ``ask`` opens a question in it, and ``notify`` writes a
 notice. The conversation key follows A3.5: a chat Session writes under its own session id; a
-wake Session, or one with no Session row, writes under the fixed conversation ``workspace``,
-which every client sees. UI state and notices live in the workspace store.
+wake Session writes under its Coworld's shared conversation ``coworld:<id>``, and one with no
+Coworld under ``workspace``. The ``agent-context`` panel always lives in the Coworld's shared
+conversation, where the watcher keeps its computed part: a write sets only the needs. UI state and
+notices live in the workspace store.
 """
 
 from __future__ import annotations
@@ -22,6 +24,7 @@ from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolErro
 
 ORCHESTRATOR = frozenset({"orchestrator"})
 WORKSPACE_CONVERSATION = "workspace"
+AGENT_CONTEXT_PANEL = "agent-context"
 ANSWER_NOTE = "the answer arrives as a UI action; if no client can answer, ask in chat"
 ANSWER_NOTE_NO_CHAT = (
     "nobody reads this Session: the answer arrives later as a UI action; end the run"
@@ -76,6 +79,10 @@ def handle(call: ToolCall) -> dict:
     if call.action == "panel_set":
         panel, kind = call.get("panel"), call.get("kind")
         content = call.get("content")
+        if panel == AGENT_CONTEXT_PANEL:
+            coworld = ctx.coworld_or_none()
+            conversation = coworld_conversation(coworld.coworld_id if coworld else None)
+            content = agent_context_content(ctx, conversation, content)
         if kind == "file":
             content = document_path(ctx, content)
         value = {"kind": kind, "content": content, "at": at}
@@ -102,6 +109,18 @@ def handle(call: ToolCall) -> dict:
             "next": ANSWER_NOTE if conversation == ctx.hermes_session_id() else ANSWER_NOTE_NO_CHAT,
         }
     raise AssertionError(call.action)
+
+
+def agent_context_content(ctx: ToolContext, conversation: str, content: Any) -> dict[str, Any]:
+    """The panel with the given needs and the watcher's computed part unchanged."""
+    needs = content.get("needs") if isinstance(content, dict) else None
+    if not isinstance(needs, list):
+        raise ToolError(
+            'the agent-context panel takes content {"needs": [...]}; the rest is computed'
+        )
+    panels = ui_state.get(ctx.wstore, conversation)["doc"].get("panels") or {}
+    current = (panels.get(AGENT_CONTEXT_PANEL) or {}).get("content") or {}
+    return {"computed": current.get("computed"), "needs": needs}
 
 
 def show_value(ref: str | None, view: str | None, at: str) -> dict[str, str]:

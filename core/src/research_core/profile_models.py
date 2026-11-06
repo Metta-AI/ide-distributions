@@ -1,5 +1,5 @@
 """Each profile's model: what the bridge shows the client and changes on the user's request
-(``contract/CONTRACT.md``, "Profile models").
+(``research_core/contract/CONTRACT.md``, "Profile models").
 
 The model is the profile's own Hermes setting: ``model.default`` and ``model.provider``, with
 ``fallback_providers`` tried in order when the primary fails, all in the profile's
@@ -13,7 +13,8 @@ conversation of that profile; a run already going finishes on the model it start
 
 :class:`Catalog` is OpenRouter's public model list, narrowed to the models that take tool calls
 (the profiles cannot work without them). A change naming an OpenRouter model that is not on
-that list is refused while the list can be read, and accepted as unverified when it cannot.
+that list is refused while a list is held (the last one read, when a refresh fails), and
+accepted as unverified when none ever was.
 """
 
 from __future__ import annotations
@@ -216,7 +217,8 @@ def fetch_openrouter(url: str = CATALOG_URL, timeout: float = CATALOG_TIMEOUT_S)
 
 
 class Catalog:
-    """OpenRouter models that take tool calls, cached for ``ttl_s``; ``None`` when unreachable."""
+    """OpenRouter models that take tool calls, cached for ``ttl_s``; the last good list when
+    unreachable, ``None`` if there never was one."""
 
     def __init__(
         self,

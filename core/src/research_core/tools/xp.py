@@ -8,12 +8,16 @@ closes on (``tools/experiment.py``: ``results.rows`` objects with ``episode_id``
 ``game_version``, ``policy_version`` as the Version's record id, ``seed``, ``seats``,
 ``opponents``, ``metrics``, ``status``, ``reason``).
 
-Rules the tool keeps (A4.4): it never puts a Task on a wait itself; a Researcher calls
+Rules the tool keeps (A4.4): it puts a Task on a wait only when the platform stays down (below);
+a Researcher calls
 ``task_wait {kind: xp, ref: [...]}`` and ends its run, or ``task_wait {kind: credits}`` after a
 credits refusal. There is no local credits pre-check: the platform's refusal (402) is the
 refusal, reported with the balance, the held amount and the next refill. The
-``xp.ask_above_requests_per_experiment`` setting never refuses: above it the Orchestrator gets
-a warning and proceeds, a Researcher gets ``ask_orchestrator`` and a ``task_ask`` suggestion.
+``xp.ask_above_requests_per_experiment`` setting: above it the Orchestrator gets a warning and
+proceeds; a Researcher is refused with ``ask_orchestrator`` and a ``task_ask`` suggestion, and
+nothing is created. The Orchestrator cannot send them for the Researcher (a Task's Experiment
+takes runs from the holder only), so it tells the Researcher to shrink the design or, with the
+user's word, raises the setting.
 
 Every create is an intent (B.13): ``intents.begin(kind="xp", key="X-<n>:<seed>:<arm>")``
 before the call, saving the exact body and a unique idempotency key locally. Recovery
@@ -48,8 +52,9 @@ from research_core.platform import xp as xp_module
 from research_core.platform.errors import CreditsRefused, PlatformError
 from research_core.platform.protocol import Credits, Platform, XpRequest, with_retries
 from research_core.stats.ingest import rows_from_evaluate_output
-from research_core.store import experiments, intents, settings, versions
+from research_core.store import experiments, intents, settings, tasks, versions
 from research_core.store._common import parse_display_id
+from research_core.store.errors import StoreError
 from research_core.tools import _args as a
 from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolError, ToolSpec, tool
 from research_core.transitions import report_capability
@@ -181,6 +186,13 @@ def _plan(call: ToolCall, record: dict) -> dict:
         problems.append(f"{xid} is proposed; start the experiment first (experiment.start)")
     elif record["status"] != "running":
         problems.append(f"{xid} is {record['status']}; runs are added only while it is running")
+    if record["task_id"] is not None:
+        # The store records a run only for the Task's holder; finding out after the platform
+        # accepted the request would spend credits on a run nobody can record.
+        try:
+            tasks.require_holder(ctx.store, record["task_id"], ctx.actor)
+        except StoreError as error:
+            problems.append(f"{xid} belongs to T-{record['task_id']}: {error}")
     methods = record["methods"]
     arms = call.get("arms") or list(ARMS)
     for arm in arms:
@@ -334,7 +346,8 @@ def _ask_orchestrator(record: dict, counts: dict) -> dict:
     task = record.get("task_id")
     question = (
         f"{record['id']} would have {counts['total']} XP requests ({counts['new']} new), above"
-        f" the {ASK_ABOVE_KEY} setting of {counts['limit']}. May I request them?"
+        f" the {ASK_ABOVE_KEY} setting of {counts['limit']}. Should I shrink the design, or will"
+        " you raise the setting with the user's approval?"
     )
     return {
         "ok": False,
@@ -484,7 +497,7 @@ def _evaluate(ctx: ToolContext, record: dict, run: dict) -> dict | None:
     dest = coworld.documents / "xp" / record["id"] / request_id
     files = wait.call_platform(
         ctx,
-        f"GET /v2/experience-requests/{request_id}/download",
+        "GET /v2/episode-requests/download-manifest",
         lambda: platform.xp_download(request_id, include=["results"], dest=dest),
     )
     try:
@@ -658,7 +671,7 @@ SPEC = tool(
         actions=(
             ActionSpec(
                 "request",
-                "Create the requests for an Experiment's seeds and arms (never waits itself).",
+                "Create the requests for an Experiment's seeds and arms.",
                 {
                     "experiment": EXPERIMENT,
                     "candidate": a.string("The candidate Version (default: the locked design's)."),

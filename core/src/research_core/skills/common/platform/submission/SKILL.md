@@ -13,7 +13,7 @@ A policy reaches a League in three steps, each its own tool: a Version (`version
 
 ## Upload
 
-`upload {version: V-7}` sends the exact built bytes and checks the platform's hash against the artifact digest. It records an intent first, so a crash after the platform accepted the bytes never uploads twice; a second call is a no-op. An adopted Version is already uploaded.
+`upload {version: V-7}` sends the exact built bytes and, for a file policy, checks the platform's hash against the artifact digest. It records an intent first and asks the platform on a retry, so a crash after the platform accepted the bytes never uploads twice; it sends again only when the platform has no such version, or on `user_requested: true`. An uploaded Version answers without sending; an adopted one is already uploaded.
 
 ## A user asked
 
@@ -36,6 +36,6 @@ A Researcher never submits. `task_propose_submission {task, version, reason}` re
 ## Options and after
 
 - `auto_champion`: whether the platform makes it the Player's champion when it starts competing: `always` (default: unless the champion is a later upload), `never`, or `lineage` (only if the champion is an earlier version of the same policy).
-- `reason` is kept on the champion record; every autonomous submission sends a notice.
-- After `submit`, say where it stands in platform terms (`submitted`, `qualifying`, `competing`, `champion`) and nothing else. A `rejected` submission is a finding: read the platform's notes, record a claim, fix the Version.
-- A policy the user uploaded elsewhere becomes a Version with `version.adopt {policy_version | label, summary}`, so it can be submitted and compared.
+- Every autonomous submission sends a notice.
+- After `submit`, say where it stands in platform terms (`submitted`, `qualifying`, `competing`, `champion`) and nothing else. A `rejected` submission is a finding: read its `notes` (`GET /v2/league-submissions?policy_version_id=` through `softmax_api`), record a claim, fix the Version.
+- A policy this Player uploaded outside this workspace becomes a Version with `version.adopt {policy_version | label, summary}`, so it can be submitted and compared. The tool sees only this Player's uploads; another Player's policy is refused.

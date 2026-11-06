@@ -143,10 +143,10 @@ def has_work(ctx: TickContext) -> bool:
 
 def work_reasons(ctx: TickContext) -> list[str]:
     """Why the workspace must stay awake, one short reason per cause, in a fixed order: live
-    Researcher runs (``session:<id>:running``), Tasks waiting on a background process
-    (``task:T-n:waiting:process``), an autonomous-submission candidate
-    (``submission:candidate``) and queued wakes (``wake:queued``). Empty means sleep is fine.
-    The heartbeat records the list; ``scripts/activity.py`` hands it to the host."""
+    Researcher runs (``session:<id>:running``), queued transitions (``transition:queued``), Tasks
+    waiting on a background process (``task:T-n:waiting:process``), an autonomous-submission
+    candidate (``submission:candidate``) and queued wakes (``wake:queued``). Empty means sleep is
+    fine. The heartbeat records the list; ``research watcher status`` shows it."""
     reasons = [f"session:{sid}:running" for sid in dispatch.live_task_sessions(ctx)]
     if ctx.store is not None:
         if ctx.store.one("SELECT 1 FROM transition_commands WHERE result IS NULL LIMIT 1"):

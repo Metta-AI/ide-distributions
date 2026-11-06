@@ -495,7 +495,6 @@ def claim_read(situation: Situation, args: dict) -> dict:
 
 
 def claim_inspect(situation: Situation, args: dict) -> dict:
-    skill = f"{usability_context.COWORLD}-replay-inspection"
     return {
         "claim": _ref("C", args.get("claim") or "C-5"),
         "inspections": [
@@ -505,13 +504,15 @@ def claim_inspect(situation: Situation, args: dict) -> dict:
                 "note": "The tick where it goes wrong.",
                 "type": "replay",
                 "ref": "episode:ereq_1 xp:none",
-                "summary": f"episode ereq_1 (pinned); read it with the {skill} skill",
+                "summary": (
+                    "episode ereq_1 (pinned); the game's replay skill, if it has one, is listed "
+                    "in the session context"
+                ),
                 "episode": "ereq_1",
                 "seat": None,
                 "phase": None,
                 "xp_request": "none",
                 "pin": {"path": "documents/replays/ereq_1.json"},
-                "skill": skill,
             }
         ],
     }
@@ -836,7 +837,11 @@ def experiment_read(situation: Situation, args: dict) -> dict:
 
 
 def experiment_search(situation: Situation, args: dict) -> dict:
-    records = [_x3(), _x6()]
+    records = [_x3()]
+    # X-6 is the comparison these situations ask to set up: finding it makes updating it the
+    # sensible act, on any tool text, so a search there would measure the fixture.
+    if situation.acts != ("experiment.create",):
+        records.append(_x6())
     if situation.x5 != "absent":
         records.append(_x5(situation))
     hits = [r for r in records if _matches(args["query"], r["summary"], *r["tags"])]
@@ -1096,6 +1101,7 @@ def platform_credits(situation: Situation) -> dict:
 def _post(post_id: str = "p-9") -> dict:
     return {
         "id": post_id,
+        "forum": "fakegame",
         "title": "Tips for new players",
         "body": "Scout before the first fight, and watch your supply line.",
         "content_format": "markdown",
@@ -1347,7 +1353,6 @@ BUILTINS: dict[str, Callable[[Situation, dict], dict]] = {
         "duration_seconds": 0.2,
     },
     "process_manage": lambda s, a: {"processes": []},
-    "todo_list": lambda s, a: {"todos": [], "revision": 1, "summary": {"total": 0}},
     "session_search": lambda s, a: {"success": True, "results": [], "count": 0},
     "web_search": lambda s, a: {"success": True, "data": {"web": []}},
     "web_extract": lambda s, a: {"results": []},

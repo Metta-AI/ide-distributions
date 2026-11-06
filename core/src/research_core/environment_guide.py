@@ -105,8 +105,8 @@ def _environments(venv_python: Path, tools: Path) -> list[str]:
         f"- The workspace environment `{venv_python}` runs this tool, the `research` CLI, the "
         "platform tools, mixin commands and the watcher. It holds `coworld`, `softmax`, "
         "`numpy` and `PyYAML`.",
-        f"- Mixin-declared toolchains (another Python, Nim) install under "
-        f"`{tools}/<kind>-<version>`.",
+        f"- Mixin-declared toolchains live under `{tools}/<kind>-<version>`: `python` ones are "
+        "installed for you, any other kind (Nim) by hand.",
         "",
     ]
 
@@ -116,14 +116,14 @@ def _paths(checkout: Path | None, coworld) -> list[str]:
     if coworld is not None:
         lines.append(
             f"- Writable: everything under `{coworld.root}` except its bookkeeping folder: "
-            "`code/` (commit on a branch in a worktree, never on `main` directly), `documents/`, "
-            "`worktrees/`, and `source/` (a clone; re-fetched by setup)."
+            "`code/` (after setup, commit on a branch in a worktree, never on `main` directly), "
+            "`documents/` and `worktrees/`. `source/` is a clone to read, not to edit."
         )
     else:
         lines.append("- Writable: the session Coworld's `code/`, `documents/` and `worktrees/`.")
     lines += [
         f"- Read-only: the profile source checkout `{checkout or '(unknown)'}` (plugin, store "
-        "library and schema, tools, prompts, cron definitions). Report a bug there instead of "
+        "library and schema, tools, prompts). Report a bug there instead of "
         "patching it; `config.yaml` is writable but `prepare.py` re-applies the protected keys.",
         "- Shipped skills live in that checkout, whatever Hermes's skill index says about "
         "fixing them. Where it is read-only, as in hosting, `skill_manage` `patch`, `write_file` "
@@ -197,10 +197,11 @@ def _sleep_and_wake() -> list[str]:
     return [
         "## Sleep and wake",
         "",
-        f"- The watcher runs every {WATCHER_TICK_S} seconds (a Hermes cron job without a model). "
+        f"- The watcher runs every {WATCHER_TICK_S} seconds (`research serve`, with no model). "
         "It starts Task runs, resolves waits, recovers dead runs and runs capability checks.",
-        "- `task_wait` ends your run; the same Session resumes with its history when the wait "
-        "resolves. Nothing you started in the foreground survives the end of a run.",
+        "- After `task_wait`, end your run; the watcher continues the Task when the wait resolves, "
+        "usually in a new Session with the Task's record, worktree and recent messages. Nothing "
+        "you started in the foreground survives the end of a run.",
         "- Long mixin commands run detached with their output in a log file; a result with "
         "`background` means the command outlived the tool budget and is still running.",
         "- The sandbox may sleep while nothing runs; the watcher's heartbeat says when it last "

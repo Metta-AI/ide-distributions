@@ -17,7 +17,8 @@ A chat run that fails is classified (``run_failures.py``, in the Coordinator's o
 transition): a budget, rate-limit or provider failure holds the message, which the snapshot
 reports as ``waiting``, and the dispatcher resumes it with a continuation prompt in the same
 Session once its hold has passed and the inference gate is open; other failures end ``failed``
-with an ``error_class`` beside Hermes's error (``contract/CONTRACT.md``, "Message admissions").
+with an ``error_class`` beside Hermes's error (``research_core/contract/CONTRACT.md``, "Message
+admissions").
 Each resume holds longer than the last. ``GET /status``'s ``has_work`` counts neither a held
 message nor the messages queued behind it, on purpose: a budget wait lasts until the daily
 refill and must not keep the workspace awake; the message resumes once the workspace is awake.
@@ -339,7 +340,8 @@ class SeamServer:
     def status(self) -> dict:
         """What ``research watcher status`` prints (``watcher/cli.py``): the last heartbeat and
         its age, the has-work signal with its reasons, and the pause state, from the workspace
-        store's meta and the ``paused`` setting. Nothing else is read."""
+        store's meta, settings and admissions and every registered Coworld store's unfinished
+        transitions."""
         with self.stores() as stores:
             wstore = stores.wstore
             heartbeat = wstore.get_meta(HEARTBEAT_KEY)

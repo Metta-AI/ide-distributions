@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+from functools import partial
+
 from research_core.platform.wait import call_platform, identity_for
 from research_core.tools import _args as a
 from research_core.tools import _writes as w
 from research_core.tools.base import ActionSpec, ToolCall, ToolSpec, tool
+from research_core.tools.platform import default_forum_slug
 
 BOTH = frozenset({"orchestrator", "researcher"})
 
@@ -18,66 +21,64 @@ def handle(call: ToolCall) -> dict:
     platform = ctx.platform()
     if call.action == "post":
         title = str(call.get("title"))
-        key = w.digest("post", title, body)
-        intent = w.begin_intent(call, kind="forum", key=key, subject=None)
-        if intent.get("existing") and intent.get("state") == "done":
-            return {"post": intent.get("result"), "reconciled": True, "identity": identity}
-        route = "POST posts"
-        try:
-            post = call_platform(
-                ctx,
-                route,
-                lambda: platform.forum_post(
-                    title=title, body=body, idempotency_key=key, identity=identity
-                ),
-                identity=identity,
-            )
-        except Exception as error:
-            w.finish_intent(call, intent, state="failed", result={"error": str(error)})
-            raise
-        w.finish_intent(call, intent, state="done", result=post)
-        what = f"forum post {post.get('id', '')}".strip()
-        result = {"post": post, "identity": identity}
+        slug = call.get("slug") or default_forum_slug(call, platform)
+        written = "post"
+        key = w.digest("post", identity, slug, title, body)
+        route = f"POST /v2/forums/{slug}/posts"
+        send = partial(
+            platform.forum_post,
+            title=title,
+            body=body,
+            idempotency_key=key,
+            slug=slug,
+            identity=identity,
+        )
     else:
         post_id = str(call.get("post_id"))
         parent = call.get("parent_id")
-        key = w.digest("comment", post_id, str(parent or ""), body)
-        intent = w.begin_intent(call, kind="forum", key=key, subject=None)
-        if intent.get("existing") and intent.get("state") == "done":
-            return {"comment": intent.get("result"), "reconciled": True, "identity": identity}
-        route = f"POST posts/{post_id}/comments"
-        try:
-            comment = call_platform(
-                ctx,
-                route,
-                lambda: platform.forum_comment(
-                    post_id, body=body, idempotency_key=key, parent_id=parent, identity=identity
-                ),
-                identity=identity,
-            )
-        except Exception as error:
-            w.finish_intent(call, intent, state="failed", result={"error": str(error)})
-            raise
-        w.finish_intent(call, intent, state="done", result=comment)
-        what = f"forum comment on {post_id}"
-        result = {"comment": comment, "identity": identity}
+        written = "comment"
+        key = w.digest("comment", identity, post_id, str(parent or ""), body)
+        route = f"POST /v2/posts/{post_id}/comments"
+        send = partial(
+            platform.forum_comment,
+            post_id,
+            body=body,
+            idempotency_key=key,
+            parent_id=parent,
+            identity=identity,
+        )
+    intent = w.begin_intent(call, kind="forum", key=key, subject=None)
+    if intent.get("existing") and intent.get("state") == "done":
+        return {written: intent.get("result"), "reconciled": True, "identity": identity}
+    try:
+        result = call_platform(ctx, route, send, identity=identity)
+    except Exception as error:
+        w.finish_intent(call, intent, state="failed", result={"error": str(error)})
+        raise
+    what = (
+        f"forum post {result.get('id', '')}".strip()
+        if written == "post"
+        else f"forum comment on {post_id}"
+    )
     with ctx.store.tx(ctx.actor) as tx:
         tx.event(
             "platform.forum_post",
             what,
             {"action": call.action, "identity": identity, "cites": call.get("cites")},
         )
+    # Last, so a crash before it leaves the intent pending, and the retry (the same idempotency key)
+    # still records the write and tells the user.
     w.notice_user_write(call, identity, what)
-    return result
+    w.finish_intent(call, intent, state="done", result=result)
+    return {written: result, "identity": identity}
 
 
 SPEC = tool(
     ToolSpec(
         name="forum_post",
         description=(
-            "Post or comment on the Coworld's forum as your Player (or, for the Orchestrator, as "
-            "the User). The platform_writes.forum setting bounds posts you make on your own; a "
-            "user request (cites) always runs."
+            "Post or comment on the session Coworld's forum as your Player. The "
+            "platform_writes.forum setting bounds posts you make on your own."
         ),
         handler=handle,
         roles=BOTH,
@@ -89,10 +90,12 @@ SPEC = tool(
                 {
                     "title": a.string("The post title."),
                     "body": a.string("The post body, Markdown."),
+                    "slug": a.string("Another forum's slug; default the session Coworld's."),
                     "identity": a.string("Default player.", enum=["player", "user"]),
                     "cites": a.string("The user's message that asked for this, if any."),
                 },
                 ("title", "body"),
+                orchestrator_fields=("identity", "cites"),
             ),
             ActionSpec(
                 "comment",
@@ -105,6 +108,7 @@ SPEC = tool(
                     "cites": a.string("The user's message that asked for this, if any."),
                 },
                 ("post_id", "body"),
+                orchestrator_fields=("identity", "cites"),
             ),
         ),
     )

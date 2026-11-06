@@ -47,8 +47,9 @@ HANDLERS: dict[str, Handler] = {
         _function("workspace.resumed"),
         # Abandoning a Task stops its run.
         _function("task.abandoned"),
-        # A failed Task feeds the repair counter of its capability.
+        # A failed Task feeds the repair counter of its capability, or asks for a reader.
         _function("task.failed"),
+        _wake("task.failure_review", "management", batch_by_kind=True),
         _wake("champion.changed", "management", batch_by_kind=True),
         _wake("store.unmarked_write", "management"),
         _wake("store.schema_rebuilt", "management"),

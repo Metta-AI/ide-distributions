@@ -590,7 +590,7 @@ CHAMPION = _spec(
 CAPABILITY = _spec(
     "capability",
     "capabilities",
-    "One checked capability: a mixin command, a platform login, GitHub access or a build route.",
+    "One checked capability: a mixin command, a platform login, a CLI or GitHub access.",
     [
         _f("name", "text", "The capability's name, the record's key.", required=True),
         _f("kind", "text", "What kind of capability: a mixin command, a CLI, a login, a route."),

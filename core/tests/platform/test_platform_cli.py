@@ -81,6 +81,8 @@ def test_whoami_user_with_a_credential(env, monkeypatch, capsys):
         ["softmax", "player", "use", "ply_other"],
         ["softmax", "player", "unset"],
         ["softmax", "--verbose", "login"],
+        ["coworld", "player", "use", "ply_other"],
+        ["coworld", "player", "unset"],
     ],
 )
 def test_exec_refuses_identity_changing_commands(env, workspace_venv, capsys, command):

@@ -16,8 +16,8 @@ protocol's dataclasses or plain dicts (``model_dump(mode="json")``), never pydan
 ``last_identity`` names the identity of the most recent call; forum and wiki writes also carry
 ``"identity"`` in their result.
 
-Routes the installed clients do not have: a policy-file download (``policy_file`` raises
-``NotAvailable``) and the champion route (``set_champion`` posts through ``request``).
+Routes the installed clients do not have go through the raw client: the policy-file download, the
+champion route, a post to a named forum and a wiki edit with no base revision.
 
 Upload recovery (B.13) reads ``POST /stats/policies/lookup`` through the upload client
 (``lookup_policy_upload``) with the exact inputs ``upload_inputs`` computed before the upload
@@ -35,7 +35,7 @@ from datetime import datetime
 from functools import partial
 from pathlib import Path
 from typing import Any, cast
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 from uuid import UUID
 
 import httpx
@@ -47,11 +47,16 @@ from coworld.episode_downloads import DownloadResult, download_episodes
 from coworld.player_files import InvalidPlayerFile
 from coworld.upload import CoworldUploadClient, _upload_container_image, policy_upload_inputs
 from softmax_client.auth import fetch_cogames_whoami
-from softmax_client.forum_wiki import ForumWikiClient, WikiEditConflictResponse
+from softmax_client.forum_wiki import (
+    CreatePostRequest,
+    ForumWikiClient,
+    WikiEditConflictResponse,
+    WikiEditPublic,
+)
 from softmax_client.http import observatory_client
 
 from research_core.platform import identity as identities
-from research_core.platform.errors import CreditsRefused, NotAvailable, PlatformError
+from research_core.platform.errors import CreditsRefused, PlatformError
 from research_core.platform.protocol import (
     AutoChampion,
     Credits,
@@ -84,6 +89,7 @@ class RealPlatform:
         self._forum_clients: dict[Identity, ForumWikiClient] = {}
         self._http_clients: dict[Identity, httpx.Client] = {}
         self.last_identity: Identity | None = None
+        self._known_player_id: str | None = None
 
     @property
     def server(self) -> str:
@@ -166,6 +172,17 @@ class RealPlatform:
 
     # -- identity and credits ----------------------------------------------------------------
 
+    def _player_id(self) -> str | None:
+        """``SOFTMAX_PLAYER_ID``, else what one ``whoami`` names: hosting does not set the variable.
+        None when the credential is not a Player's."""
+        if self._known_player_id is None:
+            self._known_player_id = identities.player_id(self._env)
+        if self._known_player_id is None:
+            who = self.whoami()
+            if who.kind == "player":
+                self._known_player_id = who.subject_id
+        return self._known_player_id
+
     def whoami(self, identity: Identity = "player") -> WhoAmI:
         token = identities.token_for(self._env, identity)
         self.last_identity = identity
@@ -206,6 +223,7 @@ class RealPlatform:
         a ``content_hash`` on the returned version, a value other than ours is refused.
         """
         client = self._upload()
+        player_id = self._player_id()  # before the bytes leave: a failure here costs nothing
         content_hash = hashlib.sha256(content).hexdigest()
         body = {
             "name": name,
@@ -245,7 +263,7 @@ class RealPlatform:
             name=version.name,
             version=version.version,
             content_hash=content_hash,
-            player_id=identities.player_id(self._env),
+            player_id=player_id,
         )
 
     def upload_image_policy(
@@ -253,6 +271,7 @@ class RealPlatform:
     ) -> PolicyVersion:
         """Use the same archive upload and completion path as coworld upload-policy."""
         client = self._upload()
+        player_id = self._player_id()
         uploaded = self._call(
             "container image upload", lambda: _upload_container_image(client, archive_path)
         )
@@ -266,7 +285,7 @@ class RealPlatform:
             id=version.id,
             name=version.name,
             version=version.version,
-            player_id=identities.player_id(self._env),
+            player_id=player_id,
         )
 
     def upload_inputs(
@@ -274,13 +293,12 @@ class RealPlatform:
     ) -> dict[str, Any]:
         """coworld's exact deduplication inputs for a file or image archive upload.
 
-        The Player id comes from ``SOFTMAX_PLAYER_ID``, else from one ``whoami`` read: the
-        lookup route requires it, while the upload route defaults it from the token.
+        The lookup route requires the Player id, while the upload route defaults it from the token.
         """
-        player_id = identities.player_id(self._env) or self.whoami().subject_id
+        player_id = self._player_id()
         if not player_id:
             raise PlatformError(
-                "the Player id is unknown (SOFTMAX_PLAYER_ID is unset and whoami named none);"
+                "the Player id is unknown (SOFTMAX_PLAYER_ID is unset and whoami named no Player);"
                 " the upload lookup needs it",
                 retryable=False,
             )
@@ -346,17 +364,24 @@ class RealPlatform:
         return [_policy_version_row(row) for row in rows]
 
     def policy_file(self, policy_version_id: str, identity: Identity = "player") -> bytes:
-        """Not available: the platform has no route to download a policy version's file.
-
-        When one appears, try the Player first and the User only when the Player is refused
-        (A4.6). Until then the agent asks the user to attach the file, or rebuilds it from the
-        Version's commit.
-        """
-        raise NotAvailable(
-            "the platform has no route to download a policy version's file "
-            f"(asked for {policy_version_id} as {identity}); ask the user to attach the file, "
-            "or rebuild it from the Version's commit"
+        """The owner-bound download. The route answers with a URL valid for five minutes, 404 for a
+        version the caller does not own and 409 for one with no file, such as an image policy."""
+        http = self._http(identity)
+        path = f"/v2/policy-files/{_uuid(policy_version_id)}/download"
+        route = f"GET {path}"
+        ticket = self._call(route, lambda: _ok(http.get(path)).json())
+        url = ticket["download_url"]
+        content = self._call(
+            f"GET {_without_query(url)}",
+            lambda: _ok(httpx.get(url, timeout=UPLOAD_TIMEOUT)).content,
         )
+        if hashlib.sha256(content).hexdigest() != ticket["content_hash"]:
+            raise PlatformError(
+                f"the downloaded file of {policy_version_id} does not match the platform's hash",
+                route=route,
+                retryable=False,
+            )
+        return content
 
     # -- leagues, standings, memberships, submissions ----------------------------------------
 
@@ -441,10 +466,10 @@ class RealPlatform:
         auto_champion: AutoChampion = "always",
         player_id: str | None = None,
     ) -> Submission:
-        """Submit as the workspace's Player (``SOFTMAX_PLAYER_ID`` unless a player is named)."""
+        """Submit as the workspace's Player unless a player is named."""
         api = self._api()
         policy_version = _uuid(policy_version_id)
-        as_player = player_id or identities.player_id(self._env)
+        as_player = player_id or self._player_id()
         row = self._call(
             "POST /v2/league-submissions",
             lambda: api.submit_to_league(
@@ -565,14 +590,30 @@ class RealPlatform:
         return [_dump(hit) for hit in page.entries]
 
     def forum_post(
-        self, *, title: str, body: str, idempotency_key: str, identity: Identity = "player"
+        self,
+        *,
+        title: str,
+        body: str,
+        idempotency_key: str,
+        slug: str | None = None,
+        identity: Identity = "player",
     ) -> dict:
+        """The typed client reaches only the global forum; a named one goes through ``request``."""
+        if slug is not None:
+            request = CreatePostRequest(title=title, body=body, idempotency_key=idempotency_key)
+            post = self.request(
+                "POST",
+                f"/v2/forums/{quote(slug, safe='')}/posts",
+                json=request.model_dump(mode="json"),
+                identity=identity,
+            )
+            return {**post, "identity": identity}
         client = self._forum(identity)
-        post = self._call(
+        created = self._call(
             "POST /v2/posts",
             lambda: client.create_post(title=title, body=body, idempotency_key=idempotency_key),
         )
-        return {**_dump(post), "identity": identity}
+        return {**_dump(created), "identity": identity}
 
     def forum_comment(
         self,
@@ -628,25 +669,33 @@ class RealPlatform:
         *,
         title: str,
         body: str,
-        base_revision_id: str,
+        base_revision_id: str | None,
         idempotency_key: str,
         note: str | None = None,
         identity: Identity = "player",
     ) -> dict:
-        """Compare-and-swap edit; a lost race returns ``{"conflict": True, ...}``, not an error."""
-        client = self._forum(identity)
-        result = self._call(
-            f"PUT /v2/wikis/{wiki}/pages/{page}",
-            lambda: client.edit_wiki_page(
-                wiki,
-                page_slug=page,
-                title=title,
-                body=body,
-                base_revision_id=base_revision_id,
-                idempotency_key=idempotency_key,
-                note=note,
-            ),
-        )
+        """Compare-and-swap edit; a lost race returns ``{"conflict": True, ...}``, not an error.
+
+        No base creates the page. The route allows that, but the typed client's request requires a
+        base, so this goes through the raw client.
+        """
+        http = self._http(identity)
+        path = f"/v2/wikis/{quote(wiki, safe='')}/pages/{quote(page, safe='/')}"
+        request = {
+            "title": title,
+            "body": body,
+            "idempotency_key": idempotency_key,
+            "base_revision_id": base_revision_id,
+            "note": note,
+        }
+
+        def edit() -> WikiEditPublic | WikiEditConflictResponse:
+            response = http.put(path, json={k: v for k, v in request.items() if v is not None})
+            if response.status_code == 409:
+                return WikiEditConflictResponse.model_validate(response.json())
+            return WikiEditPublic.model_validate(_ok(response).json())
+
+        result = self._call(f"PUT {path}", edit)
         if isinstance(result, WikiEditConflictResponse):
             return {
                 "conflict": True,

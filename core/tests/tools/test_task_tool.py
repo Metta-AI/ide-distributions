@@ -12,6 +12,7 @@ import research_core.tools.task  # noqa: F401
 from research_core import gitops
 from research_core.store import claims, sessions, settings, versions
 from research_core.store.actors import Actor
+from research_core.tools import catalog
 from research_core.tools.base import run_tool
 
 GOAL = {"action": "create", "title": "Beat the house", "end_state": "rank first", "reason": "asked"}
@@ -206,7 +207,7 @@ def test_claim_from_a_second_session_is_refused(call, goal, code_repo):
     call("task", task_args())
     claim(call)
     refused = claim(call, session_id="r2")
-    assert refused["ok"] is False and "recorded assignment" in refused["error"]
+    assert refused["ok"] is False and "no assignment" in refused["error"]
 
 
 def test_claim_needs_a_session_and_a_code_repository(call, ctx_factory, goal):
@@ -226,7 +227,7 @@ def test_claim_needs_a_session_and_a_code_repository(call, ctx_factory, goal):
 def test_claim_rejects_unapproved_or_blocked_tasks(call, goal, code_repo):
     as_researcher(call, task_args(action="propose"))
     refused = claim(call)
-    assert refused["ok"] is False and "recorded assignment" in refused["error"]
+    assert refused["ok"] is False and "no assignment" in refused["error"]
 
 
 def test_orchestrator_cannot_claim_and_researcher_cannot_create(call, goal):
@@ -250,6 +251,17 @@ def test_a_task_actions_own_tool_goes_through_the_same_transition(call, goal, co
         session_id="r1",
     )
     assert waiting["record"]["waiting_on"]["kind"] == "xp"
+
+
+def test_a_user_wait_needs_a_ref_that_can_resolve_it(call, goal, code_repo):
+    call("task", task_args())
+    claim(call)
+    wait = {"action": "wait", "task": "T-1", "kind": "user", "detail": "the user's call"}
+    for bad in ({}, {"ref": "the user"}, {"ref": "G-1"}):
+        refused = as_researcher(call, wait | bad)
+        assert refused["ok"] is False and "a user wait needs ref" in refused["error"]
+    for good in ("max_researchers", "T-1"):
+        assert as_researcher(call, wait | {"ref": good})["ok"] is True
 
 
 def test_wait_ask_answer_and_message(call, goal, code_repo):
@@ -314,6 +326,23 @@ def complete_args(**overrides):
     }
     args.update(overrides)
     return args
+
+
+def test_a_rejection_needs_no_merge_choice(call, ctx_factory, goal, code_repo):
+    call("task", task_args())
+    claim(call)
+    claims.write(
+        ctx_factory().store,
+        Actor.session("r1"),
+        summary="Scouts open left.",
+        body="12 of 20 episodes.",
+        tags=["opening"],
+        evidence=EVIDENCE,
+    )
+    assert as_researcher(call, complete_args(claims=["C-1"]))["ok"] is True
+    rejected = call("task", {"action": "review", "task": "T-1", "accept": False, "reason": "no"})
+    assert rejected["ok"] is True, rejected
+    assert rejected["record"]["status"] != "complete"
 
 
 def test_complete_research_task_and_review(call, ctx_factory, goal, code_repo):
@@ -486,3 +515,10 @@ def test_settings_gate_reads_the_coworld_store(call, ctx_factory, goal):
     gate = {"action": "update", "key": "approval_required.task_types", "cites": "m"}
     call("settings", {**gate, "value": ["ideation"]})
     assert settings.get(ctx_factory().store, "approval_required.task_types") == ["ideation"]
+
+
+def test_a_proposal_offers_no_ideation_round():
+    """The store allows it only on an ideation Task, and a round is set when that is created."""
+    spec = catalog.TOOLS["task"]
+    assert "ideation_round" not in spec.accepted(spec.action("propose"))
+    assert "ideation_round" in spec.accepted(spec.action("create"))

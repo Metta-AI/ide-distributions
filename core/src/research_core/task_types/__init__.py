@@ -1,8 +1,8 @@
 """Task types: the deliverables a Task of each type must show before it completes (design B.4).
 
 Each type is a file ``<type>.md`` beside this module. The file opens with a fenced ```json
-block, the front matter, followed by the Researcher instructions (the body; entry 7 writes
-them). Stdlib only: the plugin loads these inside Hermes.
+block, the front matter, followed by the Researcher instructions (the body). Stdlib only: the
+plugin loads these inside Hermes.
 
 Front matter: ``required`` lists Task fields that must be set at completion; ``checklist``
 lists items with ``key`` (the entry in the completion checklist), ``text`` (what the item is,

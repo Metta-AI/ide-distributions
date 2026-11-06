@@ -4,7 +4,8 @@ A tool is a :class:`ToolSpec`: a name, the roles that get it, where it executes,
 flat parameter set or a list of actions with flat optional inputs, and a handler that takes a
 :class:`ToolCall` and returns a JSON-ready dict. :func:`run_tool` validates the arguments
 against the role's view of the tool, reports every problem at once, runs the handler and
-renders the result as JSON text. It never raises: Hermes gets a string in every case.
+renders the result as JSON text. A failing call never raises: Hermes gets a string. Only a tool
+module that cannot load raises, on the first call that loads the catalog.
 
 A call is checked against its selected action: a missing required field, a field of another
 action given a value, an unknown field or a wrong type refuses the call before anything runs.
@@ -75,6 +76,9 @@ class ActionSpec:
     # the required fields as required, which the grouped tool's schema cannot. The grouped tool no
     # longer offers the action but still runs a call that names it.
     own_tool: bool = False
+    # Fields only the Orchestrator can use. A Researcher's schema and refusals leave them out; a
+    # call that sends one anyway still reaches the handler, which says why it does not apply.
+    orchestrator_fields: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -96,6 +100,7 @@ class ToolSpec:
     # action's hidden fields, so a retry of an older grouped call can keep its operation_id.
     split_from: tuple[str, str] | None = None
     hidden_params: dict[str, dict] = field(default_factory=dict)
+    orchestrator_fields: tuple[str, ...] = ()  # see ActionSpec.orchestrator_fields
 
     def actions_for(self, role: Role) -> list[ActionSpec]:
         """Every action a call may name for this role, offered here or as a tool of its own."""
@@ -132,19 +137,25 @@ class ToolSpec:
             }
             takers: dict[str, list[ActionSpec]] = {}
             for action in actions:
-                for name in action.params:
-                    takers.setdefault(name, []).append(action)
+                for name in self.offered(action, role):
+                    if name in action.params:
+                        takers.setdefault(name, []).append(action)
             for name, taking in takers.items():
                 schema = taking[0].params[name]
                 described = field_description(name, taking, len(actions))
                 properties[name] = {**schema, "description": described}
-        for name, schema in self.params.items():
+        for name, schema in self.offered(None, role).items():
             properties.setdefault(name, schema)
         return properties
 
-    def offered(self, action: ActionSpec | None) -> dict[str, dict]:
-        """The fields a model is told about: the action's own inputs plus the tool's common ones."""
-        return {**(action.params if action else {}), **self.params}
+    def offered(self, action: ActionSpec | None, role: Role | None = None) -> dict[str, dict]:
+        """The fields a model is told about: the action's own inputs plus the tool's common ones;
+        with a role, those it can use."""
+        fields = {**(action.params if action else {}), **self.params}
+        if role == "researcher":
+            kept_back = {*self.orchestrator_fields, *(action.orchestrator_fields if action else ())}
+            return {name: schema for name, schema in fields.items() if name not in kept_back}
+        return fields
 
     def accepted(self, action: ActionSpec | None) -> dict[str, dict]:
         """The fields one call may carry: the offered ones plus the action's hidden ones."""
@@ -210,6 +221,7 @@ def own_tool(grouped: ToolSpec, action: ActionSpec) -> ToolSpec:
         example_fields=action.example_fields,
         split_from=(grouped.name, action.name),
         hidden_params=action.hidden_params,
+        orchestrator_fields=(*action.orchestrator_fields, *grouped.orchestrator_fields),
     )
 
 
@@ -313,7 +325,8 @@ class ToolContext:
         )
         if not coworld_id:
             raise ToolError(
-                "this session has no Coworld; open a session with session_context.coworld"
+                "this session has no Coworld; the client must open a session for one, so tell "
+                "the user. A delegated child never has one: return your findings to the parent"
             )
         return self.workspace.coworld(coworld_id)
 
@@ -384,7 +397,7 @@ def validate_args(
         else:
             action_name = str(raw)
             required.extend(spec.action(action_name).required)  # type: ignore[union-attr]
-    known = {*properties, *spec.hidden_params} | {
+    known = {*properties, *spec.params, *spec.hidden_params} | {
         name for action in spec.actions or () for name in (*action.params, *action.hidden_params)
     }
     accepted = spec.accepted(spec.action(action_name)) if action_name else None
@@ -513,7 +526,7 @@ def usage(spec: ToolSpec, role: Role, action: str | None) -> dict:
             **({"own_tools": own} if own else {}),
         }
     selected = spec.action(action) if action else None
-    schemas = spec.offered(selected)
+    schemas = spec.offered(selected, role)
     required = [*(selected.required if selected else ()), *spec.required]
     optional = [name for name in schemas if name not in required]
     names = [*required, *(selected.example_fields if selected else spec.example_fields)]
@@ -580,7 +593,7 @@ def error_payload(problems: list[str], context: dict | None = None) -> dict:
 
 
 def run_tool(name: str, args: Mapping[str, Any], ctx: ToolContext) -> str:
-    """Validate, run and render a tool call as JSON text. Never raises."""
+    """Validate, run and render a tool call as JSON text. Raises only if the catalog cannot load."""
     from opentelemetry import trace
     from opentelemetry.trace import StatusCode
 

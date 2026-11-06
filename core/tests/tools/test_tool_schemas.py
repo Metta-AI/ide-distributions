@@ -82,17 +82,47 @@ def test_every_field_and_key_is_described():
 
 
 def test_a_field_shared_by_actions_has_one_shape():
-    """The tool list shows a shared field once, shaped as its first action declares it."""
+    """A grouped tool shows a shared field once, shaped as its first action declares it. An action
+    with a tool of its own is not in the group's schema, so its shape may differ."""
     problems = []
     for spec in specs():
         shapes: dict[str, tuple[str, dict]] = {}
         for action in spec.actions or ():
+            if action.own_tool:
+                continue
             for name, schema in action.params.items():
                 shape = {k: v for k, v in schema.items() if k != "description"}
                 first = shapes.setdefault(name, (action.name, shape))
                 if first[1] != shape:
                     problems.append(f"{spec.name}.{name}: {first[0]} and {action.name} differ")
     assert problems == []
+
+
+def test_a_researcher_is_not_offered_what_only_the_orchestrator_can_use():
+    def offered(tool):
+        return catalog.TOOLS[tool].schema("researcher")["parameters"]["properties"]
+
+    for tool, field in (
+        ("platform", "exclude_user"),
+        ("platform", "identity"),
+        ("forum_post", "identity"),
+        ("forum_post", "cites"),
+        ("wiki_edit", "identity"),
+        ("softmax_api", "identity"),
+        ("version", "worktree"),
+    ):
+        assert field not in offered(tool), (tool, field)
+        schema = catalog.TOOLS[tool].schema("orchestrator")["parameters"]["properties"]
+        assert field in schema, (tool, field)
+
+
+def test_an_update_shaped_action_has_an_example_that_changes_something():
+    """Everything an update takes is optional, so an example of the required fields alone would be
+    refused as "nothing to update" when a model copies it."""
+    for spec in specs():
+        for action in spec.actions or ():
+            if action.name in ("update", "update_run"):
+                assert action.example_fields, (spec.name, action.name)
 
 
 def test_claim_evidence_items_carry_the_handler_rules():

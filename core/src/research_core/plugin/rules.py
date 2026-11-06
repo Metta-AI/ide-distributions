@@ -19,10 +19,18 @@ class Rule:
     tool: str
     note: str
     capability: str | None = None  # the capability whose repair Task the note points at
+    note_for: dict[str, str] | None = None  # the note for a role that lacks the named tool
 
 
-def _rule(name: str, pattern: str, tool: str, note: str, capability: str | None = None) -> Rule:
-    return Rule(name, re.compile(pattern, re.IGNORECASE), tool, note, capability)
+def _rule(
+    name: str,
+    pattern: str,
+    tool: str,
+    note: str,
+    capability: str | None = None,
+    note_for: dict[str, str] | None = None,
+) -> Rule:
+    return Rule(name, re.compile(pattern, re.IGNORECASE), tool, note, capability, note_for)
 
 
 RULES: tuple[Rule, ...] = (
@@ -30,18 +38,21 @@ RULES: tuple[Rule, ...] = (
         "raw-submit",
         r"\bcoworld\s+submit\b",
         "submit",
-        "A raw `coworld submit` leaves no Version or submission record, so the briefing, the "
-        "champion sync and the user's clients will not know about it. Use the submit tool "
-        "(it records the intent, the result and a notice).",
+        "A raw `coworld submit` leaves no Version link or submission record and tells the user's "
+        "clients nothing. Use the submit tool (it records the intent, the result and a notice).",
         "upload",
+        note_for={
+            "researcher": "A Researcher does not submit, and a raw `coworld submit` leaves no "
+            "record. Propose the Version with task_propose_submission."
+        },
     ),
     _rule(
         "raw-upload",
         r"\bcoworld\s+upload-policy\b|\bsoftmax\s+upload\b",
         "upload",
-        "A raw upload leaves no Version record and cannot be submitted by the submit tool. Use "
-        "version.create and then the upload tool; it sends the exact built bytes and checks the "
-        "hash.",
+        "A raw upload leaves no Version record, so the submit tool cannot use it until "
+        "version.adopt records one. Use version.create and then the upload tool, which sends the "
+        "exact built bytes.",
         "upload",
     ),
     _rule(
@@ -49,16 +60,15 @@ RULES: tuple[Rule, ...] = (
         r"\bcoworld\s+xp-request\s+create\b",
         "xp",
         "A raw XP request is not recorded on any Experiment, so its results are lost to the "
-        "decision rule and the watcher cannot wait for it. Use xp.request.",
+        "decision rule. Use xp.request.",
         "evaluate",
     ),
     _rule(
         "identity-change",
         r"\bsoftmax\s+(login|logout|set-token|get-token)\b|\bcoworld\s+player\s+(use|unset)\b",
         "softmax_api",
-        "Identity is fixed for this workspace: the Player credential and, for the Orchestrator, "
-        "the User identity are provided. Use the platform or softmax_api tools, which pick the "
-        "identity for you, instead of logging in or switching players.",
+        "Identity is fixed for this workspace. Use the platform or softmax_api tools, which act "
+        "as the Player by default, instead of logging in or switching players.",
     ),
     _rule(
         "force-push",
@@ -66,6 +76,11 @@ RULES: tuple[Rule, ...] = (
         "task",
         "Force-pushing a shared branch loses other Sessions' work. Keep every commit on your "
         "Task branch and finish with task.complete; the watcher merges reviewed work.",
+        note_for={
+            "orchestrator": "Force-pushing a shared branch loses other Sessions' work. Keep every "
+            "commit on your branch and finish with workspace.change_complete; the watcher merges "
+            "reviewed work."
+        },
     ),
     _rule(
         "store-access",
@@ -105,11 +120,13 @@ def matches(tool_name: str, args: Any) -> list[Rule]:
     return [rule for rule in RULES if rule.pattern.search(joined)]
 
 
-def notes_for(tool_name: str, args: Any, broken: dict[str, str] | None = None) -> list[str]:
+def notes_for(
+    tool_name: str, args: Any, broken: dict[str, str] | None = None, role: str | None = None
+) -> list[str]:
     """The notes to append to a tool result. ``broken`` maps capability → maintenance Task id."""
     notes = []
     for rule in matches(tool_name, args):
-        note = f"[note] {rule.note}"
+        note = f"[note] {(rule.note_for or {}).get(role, rule.note)}"
         if broken and rule.capability and rule.capability in broken:
             task = broken[rule.capability]
             note += (

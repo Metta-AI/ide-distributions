@@ -17,7 +17,7 @@ from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolErro
 
 BOTH = frozenset({"orchestrator", "researcher"})
 CLAIM = a.string("The claim, such as C-3.")
-# No enum: a mixin may register more evidence types (evidence_types.register_type).
+# No enum: the description below names each type with its reference format.
 EVIDENCE_TYPE = a.string("The evidence type, such as code or claim.")
 EVIDENCE_REF = a.string("The reference, in the type's format (see claim_write's evidence.ref).")
 STANCE = a.string("How the evidence bears on the claim.", enum=list(claims.STANCES))
@@ -39,7 +39,7 @@ EVIDENCE_LINK = a.obj(
     },
     required=("type", "ref", "stance"),
 )
-TAGS = a.strings("Keywords from the shared vocabulary, including the Goal's tags.")
+TAGS = a.strings("Keywords from the shared vocabulary, and the Goal's id (G-n) to count for it.")
 
 _EVIDENCE_SELECTOR = re.compile(r"^(?:[A-Z]-[0-9]+#)?(?:evidence-)?(?P<number>[1-9][0-9]*)$")
 
@@ -148,7 +148,6 @@ def inspect_env(ctx: ToolContext) -> evidence_types.InspectEnv:
         code_repo=coworld.code,
         hermes_state_db=Path(hermes_home).expanduser() / "state.db" if hermes_home else None,
         documents=coworld.documents,
-        coworld_id=coworld.coworld_id,
     )
 
 
@@ -230,6 +229,7 @@ SPEC = tool(
                     "note": NOTE,
                 },
                 ("claim", "status"),
+                example_fields=("superseded_by",),
             ),
             ActionSpec(
                 "inspect_evidence",

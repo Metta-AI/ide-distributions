@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from research_core.store import capabilities, ui_state
 from research_core.store._common import now_iso
+from research_core.tools.base import PLAYER_ID_META
 from research_core.watcher import context_panel
 from tests.watcher._support import advance, events_of, make_ctx, make_goal, working_session
 
@@ -12,6 +13,14 @@ def panel(ctx) -> dict:
     return ui_state.get(ctx.wstore, "coworld:cow_fake" if ctx.coworld else "workspace")["doc"][
         "panels"
     ]["agent-context"]
+
+
+def test_the_panel_names_the_player_the_login_check_stored(tmp_path):
+    """Hosting does not set SOFTMAX_PLAYER_ID; the watcher's login check keeps the id in meta."""
+    ctx = make_ctx(tmp_path)
+    assert context_panel.compute(ctx)["player"] is None
+    ctx.wstore.set_meta(PLAYER_ID_META, "ply_from_login")
+    assert context_panel.compute(ctx)["player"] == "ply_from_login"
 
 
 def test_panel_written_once_and_only_again_on_change(tmp_path):

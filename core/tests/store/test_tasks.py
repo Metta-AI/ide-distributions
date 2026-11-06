@@ -748,6 +748,33 @@ def test_complete_ideation_requires_two_to_five_proposals_for_the_goal(
     assert finish(proposals)["status"] == "complete"
 
 
+def test_complete_ideation_counts_proposals_the_orchestrator_already_decided(
+    coworld_store, harness, researcher, goal
+):
+    """A management wake decides a proposal while the Researcher still writes the next one."""
+    task = claimed_task(coworld_store, harness, researcher, goal, type="ideation", ideation_round=1)
+    proposals = [
+        tasks.propose(
+            coworld_store, researcher, goal_id=goal, type="research", title=f"p{i}", description="d"
+        )["id"]
+        for i in range(3)
+    ]
+    tasks.approve(coworld_store, harness, proposals[0])
+    tasks.reject(coworld_store, harness, proposals[1], next_step="not this")
+
+    done = tasks.complete(
+        coworld_store,
+        researcher,
+        task["id"],
+        checklist={"proposed_tasks": proposals},
+        merge_request="no",
+        merge_reason="ideas only",
+        result="r",
+    )
+
+    assert done["status"] == "complete"
+
+
 def test_complete_maintenance_requires_commit_summary_and_capability(
     coworld_store, harness, researcher
 ):
@@ -913,6 +940,19 @@ def test_review_accept_sets_merge_pending_or_not_merged(
     assert len(kinds(coworld_store)) == before
     with pytest.raises(StoreError, match="merge"):
         tasks.set_merge(coworld_store, harness, task["id"], "sort of merged")
+
+
+def test_review_queues_a_merge_again_after_it_failed(
+    coworld_store, harness, researcher, session_actor, goal
+):
+    # merge-conflicts tells the Orchestrator to do this once a fix has merged.
+    task = finished(coworld_store, harness, researcher, goal)
+    tasks.review(coworld_store, session_actor, task["id"], accept=True, merge="yes", reason="ok")
+    tasks.set_merge(coworld_store, harness, task["id"], "not merged: merge conflict in a.py")
+    again = tasks.review(
+        coworld_store, session_actor, task["id"], accept=True, merge="yes", reason="fixed"
+    )
+    assert again["merge"] == "pending"
 
 
 def test_review_reopen_same_task(coworld_store, harness, researcher, session_actor, goal):

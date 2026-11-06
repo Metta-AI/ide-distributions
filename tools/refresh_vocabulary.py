@@ -15,15 +15,6 @@ from pathlib import Path
 REPO = Path(__file__).resolve().parents[1]
 SOURCE = "docs/ai/design/vocabulary.md"
 SECTIONS = ("Entity hierarchy", "The terms (authoritative)")
-NOTES = """
-Notes for these profiles:
-
-- **Agent** is Softmax's alternative name for a Policy. You are also called an agent; when a
-  sentence could mean either, say Policy or PolicyVersion for the thing that competes.
-- **Promotion** is the Commissioner moving an entry between Divisions. Our own act of
-  submitting a candidate as our Champion is a **champion submission** (`research champion`,
-  `champion_submit`), never "promotion".
-"""
 
 
 def section(text: str, title: str) -> str:
@@ -59,7 +50,6 @@ def main() -> int:
         section(text, SECTIONS[0]),
         "",
         section(text, SECTIONS[1]),
-        NOTES,
     ]
     target = REPO / "core/src/research_core/prompts/vocabulary.md"
     target.write_text("\n".join(parts).rstrip() + "\n", encoding="utf-8")

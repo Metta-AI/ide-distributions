@@ -1,9 +1,10 @@
 """Check the prompt text the profiles ship (design D.7, plan task 7.6).
 
 Structural checks always run: word budgets and the leak test (through the prompt builder),
-canonical vocabulary (never "promotion"), no store path, no retired machinery words, every tool
-named in a SOUL or skill exists for that role, every skill named in a SOUL exists. The model
-check runs only when ``OPENROUTER_API_KEY`` is set: it asks a model to find statements that
+canonical vocabulary (never "promotion"), no store path, no machinery words, every dotted
+`tool.action` named in a SOUL or skill exists for that role (a common skill: for either role),
+every skill named in a SOUL exists. The model
+check runs only with ``--model`` and ``OPENROUTER_API_KEY``: it asks a model to find statements that
 contradict each other across a role's SOUL and skills, and fails on a non-NONE answer.
 
 Usage: python tools/check_prompts.py [--model] [--model-id openai/gpt-5-mini]
@@ -41,7 +42,7 @@ WAKE_ROLES = {
 FORBIDDEN = (
     (re.compile(r"\bpromot(e|ion|ed|ing)\b", re.IGNORECASE), "says 'promotion'; say submission"),
     (re.compile(r"\.state/|store\.db"), "names a store path"),
-    (re.compile(r"\bkanban\b|\bcoordinator\b", re.IGNORECASE), "names retired machinery"),
+    (re.compile(r"\bkanban\b|\bcoordinator\b", re.IGNORECASE), "names internal machinery"),
 )
 TOOL_REF = re.compile(
     r"`((?:goal|task|claim|experiment|version|directive|settings|ui|workspace|upload|submit|xp|"
@@ -82,9 +83,6 @@ def structural(role: str) -> list[str]:
         if wake_role == role and (WAKES / f"{wake}.md").exists():
             texts[_label(WAKES / f"{wake}.md")] = (WAKES / f"{wake}.md").read_text()
     names = skill_names()
-    # Until the skills ship, a SOUL may name skills that do not exist yet; the check is for
-    # a shipped tree, so skill existence is enforced only once some skill exists.
-    check_skill_names = bool(names)
     for where, text in texts.items():
         for pattern, message in FORBIDDEN:
             if pattern.search(text):
@@ -97,7 +95,7 @@ def structural(role: str) -> list[str]:
                 continue
             if not any(build.tool_available(r, ref) for r in allowed_roles):
                 problems.append(f"{where}: names `{ref}`, which the {role} does not have")
-        for name in set(SKILL_REF.findall(text)) if check_skill_names else ():
+        for name in set(SKILL_REF.findall(text)):
             if name not in names and name != "hermes-agent":
                 problems.append(f"{where}: names the `{name}` skill, which does not exist")
     return problems

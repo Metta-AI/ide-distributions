@@ -27,8 +27,8 @@ Watcher bookkeeping read from ``meta`` (the watcher and the doctor write these k
   ``false``), ``player_id`` (from the login check; ``SOFTMAX_PLAYER_ID`` wins), ``cli_versions``
   (JSON ``{"<cli>": {"installed", "lock"}, "lock_refreshed": "<date>"}``, A7.8);
 - Coworld store: ``checks_at`` (ISO time of the last capability check), ``credits`` (JSON
-  ``{"balance", "held"?, "next_refill"?}`` from that check), ``stale_overrides`` (JSON list of
-  skill names whose upstream changed, A7.3), ``league_versions`` (one line from champion sync
+  ``{"balance", "held"?, "next_refill"?}`` from that check), ``league_versions`` (one line from
+  champion sync
   when no league runs the Coworld or its leagues run another version than the workspace).
 """
 
@@ -238,19 +238,41 @@ def _workspace_status(inputs: Inputs) -> Section:
     stale = _cli_staleness(inputs.wstore)
     if stale:
         lines.append(stale)
+    setup = _setup_status(inputs)
+    if setup:
+        lines.append(setup)
     if inputs.store is None:
         lines.append("No session Coworld: open a Coworld session to access game work.")
     return Section(lines=lines)
+
+
+def _setup_status(inputs: Inputs) -> str | None:
+    """Only the Orchestrator's own workspace.coworld_switch starts setup, so say when it is due."""
+    if inputs.coworld_id is None or inputs.role != "orchestrator":
+        return None
+    row = inputs.wstore.one(
+        "SELECT set_up_at FROM coworlds WHERE coworld_id = ?", (inputs.coworld_id,)
+    )
+    if row is not None and row["set_up_at"]:
+        return None
+    started = inputs.wstore.one(
+        "SELECT 1 FROM events WHERE kind = 'coworld.setup_needed' AND subject = ?",
+        (inputs.coworld_id,),
+    )
+    if started:
+        return "Coworld setup: started, not finished"
+    # The imperative is measured: 7 of 8 Kimi runs set up before building, against 1 of 8 for
+    # "not started; workspace.coworld_switch starts it".
+    return (
+        "Coworld setup: not started. Call workspace.coworld_switch first: nothing builds before it."
+    )
 
 
 def _credits(inputs: Inputs) -> str:
     credits = _meta_json(inputs.store, "credits") if inputs.store is not None else None
     if not isinstance(credits, dict) or credits.get("balance") is None:
         return "unknown"
-    text = f"{credits['balance']}"
-    if credits.get("held"):
-        text += f" ({credits['held']} held)"
-    return text
+    return f"{credits['balance']}"
 
 
 def _cli_staleness(wstore: Store) -> str | None:
@@ -281,7 +303,7 @@ def _capabilities(inputs: Inputs) -> Section:
         )
         broken = [row for row in rows if row["status"] == "broken"]
         if checked is None:
-            lines.append("Capability check: none yet (the watcher runs it within the hour)")
+            lines.append("Capability check: none yet (the watcher runs it on its next tick)")
         else:
             ok = sum(1 for row in rows if row["status"] == "ok")
             lines.append(f"Capability check: {_age(checked, inputs.now)}; {ok} of {len(rows)} ok")
@@ -289,14 +311,6 @@ def _capabilities(inputs: Inputs) -> Section:
             task_id = row["maintenance_task_id"]
             repair = f"repair T-{task_id}" if task_id else "no repair Task yet"
             entries.append(f"broken: {row['name']} ({repair})")
-        stale = _meta_json(inputs.store, "stale_overrides")
-        if isinstance(stale, list) and stale:
-            names = ", ".join(
-                str(item.get("skill", item) if isinstance(item, dict) else item) for item in stale
-            )
-            lines.append(
-                f"Stale skill overrides: {names} (the upstream skill changed; the user decides)"
-            )
     if inputs.role == "orchestrator":
         provisioned = bool(inputs.ctx.env.get("SOFTMAX_USER_CREDENTIAL"))
         lines.append(
@@ -337,7 +351,7 @@ def _champion_and_versions(inputs: Inputs) -> Section:
     )
     for row in rows:
         if row["state"] == "none":
-            lines.append(f"Champion in {row['league_id']}: none (empty league)")
+            lines.append(f"Champion in {row['league_id']}: none (this Player has no membership)")
             continue
         version = f"V-{row['version_id']}" if row["version_id"] else "an outside policy version"
         since = f" since {str(row['since'])[:10]}" if row["since"] else ""

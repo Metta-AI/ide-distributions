@@ -12,9 +12,9 @@ steers or resumes the holder's run with them (entry 5).
 
 from __future__ import annotations
 
-from research_core import gitops, task_types
+from research_core import gitops, refs, task_types
 from research_core.coordinator import Coordinator
-from research_core.store import admissions, sessions, tasks
+from research_core.store import admissions, sessions, settings, tasks
 from research_core.store.registry import TASK_STATUSES, TASK_TYPES, WAIT_KINDS
 from research_core.tools import _args as a
 from research_core.tools.base import ActionSpec, ToolCall, ToolContext, ToolError, ToolSpec
@@ -27,13 +27,17 @@ BOTH = frozenset({"orchestrator", "researcher"})
 
 TASK = a.string("The Task, such as T-3.")
 YES_NO = ["yes", "no"]
+# The kinds a call chooses: task_ask sets a question wait, a platform error a platform wait.
+TASK_WAIT_KINDS = [kind for kind in WAIT_KINDS if kind not in ("question", "platform")]
 EXPERIMENT = a.string("The Experiment the Task runs, such as X-2.")
 # Arguments of ``complete`` that are the checklist entries of the same name
 # (the keys of the Task types' checklists, task_types/*.md, besides commit and
 # submission_candidate, which are fields of their own).
 CHECKLIST_FIELDS = {
     "claims": a.any_of(
-        'Claims recorded, such as ["C-3"], or "none: <reason>".', a.STRINGS, a.STRING
+        'Claims recorded, such as ["C-3"], or "none: <reason>" where the type allows it.',
+        a.STRINGS,
+        a.STRING,
     ),
     "experiment": EXPERIMENT,
     "versions": a.strings('Versions tested, such as ["V-4"].'),
@@ -71,11 +75,13 @@ CREATE_PARAMS = {
         enum=["deliverable", "steps", "effort"],
     ),
     "end_detail": a.string("What done means under end_condition. Required with end_condition."),
-    "experiment": EXPERIMENT,
+    "experiment": a.string("The Experiment an improvement Task runs, such as X-2."),
     "priority": a.string("Default normal.", enum=["normal", "high"]),
     "depends_on": a.strings('Tasks that must complete first, such as ["T-1"].'),
-    "ideation_round": a.integer("Round number of an ideation Task."),
 }
+# Nothing reads a round number and only an ideation Task may carry one, so it is not offered; a
+# chat keeps the schema it started with until the next release's refresh.
+CREATE_HIDDEN = {"ideation_round": {"type": "integer"}}
 
 
 # --- handlers -----------------------------------------------------------------------------
@@ -98,7 +104,7 @@ def handle_create(call: ToolCall) -> dict:
         "end_detail": call.get("end_detail"),
         "priority": call.get("priority") or "normal",
         "depends_on": a.record_numbers(call.get("depends_on"), "task", "depends_on"),
-        "ideation_round": call.get("ideation_round"),
+        "ideation_round": call.get("ideation_round") if call.get("type") == "ideation" else None,
     }
     if call.get("experiment") is not None:
         fields["experiment_id"] = a.record_number(
@@ -138,7 +144,7 @@ def handle_claim(call: ToolCall) -> dict:
     if not (coworld.code / ".git").exists():
         raise ToolError(
             "the Coworld's code repository is not set up (code/ is not a git repository);"
-            " the setup wake creates it, so ask the Orchestrator to run the Coworld setup"
+            " the setup wake creates it, so end your run"
         )
     with admissions.dispatch_lock(ctx.wstore):
         assignment = ctx.wstore.one(
@@ -147,8 +153,8 @@ def handle_claim(call: ToolCall) -> dict:
         )
         if assignment is None or assignment["session_id"] != session_id:
             raise ToolError(
-                "task.claim requires this session's recorded assignment; "
-                "ask the Orchestrator to use task.assign"
+                f"this Session has no assignment for T-{n}, and only the Orchestrator assigns "
+                "Tasks (task_ask needs a Task you hold); end your run"
             )
         branch = f"task/{n}"
         try:
@@ -257,6 +263,14 @@ def handle(call: ToolCall) -> dict:
     if call.action == "reject":
         return {"record": tasks.reject(store, actor, n, next_step=call.get("next_step"))}
     if call.action == "wait":
+        ref = call.get("ref")
+        if call.get("kind") == "user" and not (
+            ref in settings.SETTINGS or refs.parse(str(ref)).record_kind == "task"
+        ):
+            raise ToolError(
+                "a user wait needs ref: the setting or Task (T-n) the user's answer changes; "
+                "nothing else ends it. For a decision, use task_ask"
+            )
         record = tasks.wait(
             store,
             actor,
@@ -353,7 +367,7 @@ SPEC = durable_tool(
         name="task",
         description=(
             "Tasks: units of work under a Goal with a type checklist, held by one Researcher "
-            "Session, with waits and messages. Goals and Tasks are the plan."
+            "Session, with waits and messages."
         ),
         handler=dispatch,
         roles=BOTH,
@@ -395,16 +409,21 @@ SPEC = durable_tool(
                 "create",
                 "Create an accepted Task (stored as proposed when its type needs the user's "
                 "approval and no cites is given).",
-                {**CREATE_PARAMS, "cites": CITES},
+                {
+                    **CREATE_PARAMS,
+                    "cites": CITES,
+                },
                 ("type", "title", "description"),
                 ORCHESTRATOR,
                 example_fields=("goal",),
+                hidden_params=CREATE_HIDDEN,
             ),
             ActionSpec(
                 "propose",
                 "Suggest a Task for the Orchestrator to approve or reject.",
                 CREATE_PARAMS,
                 ("type", "title", "description"),
+                RESEARCHER,
                 example_fields=("goal",),
                 own_tool=True,
             ),
@@ -435,8 +454,9 @@ SPEC = durable_tool(
             ),
             ActionSpec(
                 "message",
-                "Send the Researcher a note: the watcher delivers it to a live run, or when its "
-                "wait resolves.",
+                "Send the Researcher a note: the watcher delivers it to a live run, resumes a "
+                "stopped one with it, or holds it until a wait resolves. A Task not in progress "
+                "never gets it.",
                 {"task": TASK, "text": a.string("The note.")},
                 ("task", "text"),
                 ORCHESTRATOR,
@@ -456,13 +476,15 @@ SPEC = durable_tool(
                     "task": TASK,
                     "accept": a.boolean("true to accept, false to reopen with the reason."),
                     "merge": a.string(
-                        "yes merges the commit the Task recorded, no leaves it unmerged.",
+                        "When accepting: yes merges the commit the Task recorded, no leaves it "
+                        "unmerged.",
                         enum=YES_NO,
                     ),
                     "reason": a.string("The verdict's reason."),
                 },
-                ("task", "accept", "merge", "reason"),
+                ("task", "accept", "reason"),
                 ORCHESTRATOR,
+                example_fields=("merge",),
             ),
             ActionSpec(
                 "reject",
@@ -483,7 +505,7 @@ SPEC = durable_tool(
                 "Record what the Task waits on, then end the run; the watcher resumes it.",
                 {
                     "task": TASK,
-                    "kind": a.string("What kind of thing it waits on.", enum=list(WAIT_KINDS)),
+                    "kind": a.string("What kind of thing it waits on.", enum=TASK_WAIT_KINDS),
                     "detail": a.string("What exactly it waits for."),
                     "ref": a.any_of(
                         "What to watch: a pid (process), request ids (xp), a policy version id "
@@ -526,6 +548,7 @@ SPEC = durable_tool(
                 },
                 ("task",),
                 RESEARCHER,
+                example_fields=("commit", "merge", "result"),
                 # A command accepted before the release that removed it replays with it.
                 hidden_params={"checklist": {"type": "object"}},
             ),

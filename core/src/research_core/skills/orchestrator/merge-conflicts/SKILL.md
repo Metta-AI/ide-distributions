@@ -7,15 +7,15 @@ description: Use when a merge conflicted with main or failed its checks.
 
 The watcher merges accepted work with no model: `main` clean, the recorded commit, `--no-ff`,
 then the mixin's build and check again. When the branch conflicts with `main` or a check fails,
-`main` is unchanged and a management wake brings it to you with the Task, the branch, the commit
-and the check's log path in the payload. Choose one of three outcomes; never force a merge and
+`main` is unchanged and a management wake brings it to you with the Task and the reason in the
+payload, plus the files on a conflict or the command, log path and output tail on a failed check. Choose one of three outcomes; never force a merge and
 never commit on `main` directly.
 
 ## Read first
 
 1. `task.read {task: T-n}`: the recorded commit, the branch, the merge reason and what the Task
    was for.
-2. The log the payload names: full output, exit code, the failing command. A result tail is
+2. The log the payload names, if any: full output, exit code, the failing command. A result tail is
    2,000 characters; the log is complete.
 3. In the Coworld's `code/` folder, read-only: `git log main..task/<n>` and `git diff main...task/<n>`
    for what the branch changes, and `git log task/<n>..main` for what moved on `main` since it branched.
@@ -27,7 +27,7 @@ function):
 
 1. `workspace.worktree_open` gives `worktrees/orch-<n>/` on branch `orch/<n>` from
    `main`. Work there.
-2. Merge the Task branch into your worktree branch, resolve each conflict keeping the intent of
+2. Merge the Task's recorded commit into your worktree branch, resolve each conflict keeping the intent of
    both changes, and run the mixin's `check` command from `MIXIN.md` (game-specific checks: see
    the mixin's docs). A change that only silences the check is not a resolution.
 3. Commit on your branch with a message naming the Task.
@@ -40,8 +40,9 @@ function):
 When the fix needs real work (a toolchain pin, a mixin command that broke on `main`, a build
 that fails on both branches): `task.create {type: "maintenance", title, description, priority:
 "high", goal, depends_on}` with the branch, the commit, the failing command and the log path in
-`description`. Make the Task that waits for the fix depend on it with `task.link`. Write the
-description so a Researcher can start without you.
+`description`. Write the description so a Researcher can start without you. T-n is complete, so it
+takes no dependency: when the fix has merged, `task.review {task: T-n, accept: true, merge: "yes",
+reason}` queues its merge again.
 
 ## Outcome 3: the user
 

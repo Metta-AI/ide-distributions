@@ -1,9 +1,12 @@
 # Hosting the research distributions
 
 Softmax hosting runs the `orchestrator` and `researcher` profiles in one sandbox per user. The
-profiles own the agents' behaviour, records, tools, skills and the watcher; hosting owns
-credentials, the image, the Hermes gateway, storage, sleep and the bridge. This page is the
-handoff: what the rebuilt distributions need from hosting, and what they guarantee in return.
+profiles own the agents' behaviour, records, tools, skills and the watcher. `image/` owns installing
+them, the Hermes gateway, `research serve` and starting sleep (`image/README.md`). Hosting supplies
+the durable volume, `/tmp`, `/run/workspace/bootstrap.json` (workspace id, platform URL, credential),
+`BUILDKIT_HOST`, snapshots and the relay. This page is the handoff: what the rebuilt distributions
+need, and what they guarantee in return. A host running the profiles without the image does
+itself what this page gives to the image.
 The design is `docs/designs/ide-profile-refactor-2026-10-28-final.html` (Appendix G lists the
 metta changes); the build decisions are in `docs/plans/ide-profile-refactor/00-overview.md`.
 
@@ -18,10 +21,11 @@ metta changes); the build decisions are in `docs/plans/ide-profile-refactor/00-o
   writable.
 - Hermes v0.22.6 or later, the version `image/Dockerfile` and CI pin, with its interpreter at a
   fixed path. Older versions have no `hermes sessions refresh-prompts`, so a release would not reach
-  open chats ("Open chats after a release"). The plugin, `prepare.py` and the watcher launcher are
-  stdlib-only Python and run under that interpreter.
+  open chats ("Open chats after a release"). The plugin (stdlib and OpenTelemetry, which the
+  image build installs there), `prepare.py` and the watcher launcher run under that interpreter.
 - `uv`, `git`, and the toolchains Coworld mixins declare (today: none shipped; a mixin may ask
-  for another Python or Nim, which `prepare.py`/setup install under `$IDE_WORKSPACE/tools/`).
+  for another Python, which setup and the watcher install under `$IDE_WORKSPACE/tools/`; any
+  other kind, such as Nim, is installed there by hand).
 
 ## Install and prepare
 
@@ -31,22 +35,22 @@ hermes profile install <checkout>/researcher --name researcher --yes     # one o
 <hermes python> <profile>/scripts/prepare.py --source <checkout>/<folder> --hermes <hermes> [--check]
 ```
 
-Run `prepare.py` after every install and every `hermes profile update`, with
-`HERMES_HOME=<profile home>` (Hermes sets it for anything it runs for a profile; set it yourself
-when you call the script). With `IDE_WORKSPACE` unset the workspace defaults to
-`$HERMES_REAL_HOME/workspace`, so set `IDE_WORKSPACE` explicitly. It:
+Run `prepare.py` after every install and every `hermes profile update`; `image/runtime.py` does at
+every boot. The installed script takes `HERMES_HOME` from where it is installed and fills in what
+the environment does not set from that profile's `.env`. With `IDE_WORKSPACE` unset the workspace
+defaults to `$HERMES_REAL_HOME/workspace`, so set `IDE_WORKSPACE` explicitly. It:
 
 1. writes `<profile>/local/core-path.txt` (where the plugin finds `research_core`);
 2. creates or migrates the workspace store and every registered Coworld store;
 3. re-applies the config keys the machinery relies on (`approvals.mode: off`, no deny list,
    memory off, `tools.tool_search.enabled: off`, the plugin and toolset, `cron.catch_up_missed`,
    the Orchestrator's compaction settings, the tool-result prune trigger, the disabled Hermes
-   toolsets), removes retired keys, sets every profile's `skills.external_dirs`,
+   toolsets), removes retired keys, sets the profile's `skills.external_dirs`,
    `skills.trusted_project_dirs` (every registered Coworld's code) and `terminal.cwd` (the
    workspace root), and applies shipped values only where the owner kept an earlier default; it does not change the
    model (the one exception: an Orchestrator on `moonshotai/kimi-k3` with no recorded model
-   change moves once to `moonshotai/kimi-k3.1-pro`, see `contract/CONTRACT.md`, "Profile
-   models"), but adds the OpenRouter host pins for the Kimi models (`provider_routing.models`,
+   change moves once to `moonshotai/kimi-k3.1-pro`, see
+   `core/src/research_core/contract/CONTRACT.md`, "Profile models"), but adds the OpenRouter host pins for the Kimi models (`provider_routing.models`,
    Moonshot only) unless the owner set routing for that model or for every model
    (Hermes applies a per-model entry over the rules for every model, so route a Kimi model
    differently with an entry under `provider_routing.models`);
@@ -111,16 +115,16 @@ The Hermes behaviour this depends on is listed in the module's docstring and exe
 
 | Variable | Who sets it | Meaning |
 |---|---|---|
-| `IDE_WORKSPACE` | hosting | The one workspace root of the sandbox, identical for every profile. It holds the workspace environment, the stores and one folder per Coworld; it must live on the durable, backed-up volume. |
-| `IDE_WORKSPACE_ENV` | hosting (optional) | A prebuilt workspace environment. |
-| `IDE_RESEARCHER_PROFILES` | hosting | Comma-separated Researcher profile names (`researcher`, or `researcher-1,researcher-2`). |
-| `SOFTMAX_PLAYER_CREDENTIAL` | hosting | The credential of the Player the workspace acts as, selected at workspace creation. Both profiles read it. |
+| `IDE_WORKSPACE` | the image (`image/Dockerfile`) | The one workspace root of the sandbox, identical for every profile. It holds the workspace environment, the stores and one folder per Coworld; it must live on the durable, backed-up volume. |
+| `IDE_WORKSPACE_ENV` | the image (`image/Dockerfile`) | A prebuilt workspace environment. |
+| `IDE_RESEARCHER_PROFILES` | `image/runtime.py` | Comma-separated Researcher profile names (`researcher`, or `researcher-1,researcher-2`). |
+| `SOFTMAX_PLAYER_CREDENTIAL` | `image/runtime.py`, from `bootstrap.json` | The credential of the Player the workspace acts as, selected at workspace creation. Both profiles read it. |
 | `SOFTMAX_PLAYER_ID` | optional; `image/runtime.py` does not set it | That Player's id. Without it, the tools ask the platform (`GET /whoami`), and the watcher's login check stores the answer for the briefing and the environment guide. |
-| `SOFTMAX_USER_CREDENTIAL` | hosting, Orchestrator only | The user's User identity token (design B.16). Optional until provisioned; without it User-identity reads and writes are reported unavailable. It is deliberately not passed to terminal commands. |
-| `COGAMES_API_URL` | hosting | Softmax API server. |
-| `API_SERVER_KEY`, `API_SERVER_HOST`, `API_SERVER_PORT` | hosting | The Hermes API server. The watcher reads them from the Orchestrator profile's `.env`. **Every profile must carry the same `API_SERVER_KEY`**: Hermes authenticates `/p/<profile>/v1/runs` with that profile's key. |
-| `OPENROUTER_API_KEY` | the image (`image/inference.py`) | The OpenRouter key both profiles use. The image leases a spend-capped key from the platform (`PUT /v2/workspaces/{id}/inference`) and writes it into each profile's `.env`; outside the image, whoever runs the profiles supplies it. The model itself is not the host's concern: each profile's `config.yaml` names it, and the user changes it through `research serve` (`contract/CONTRACT.md`, "Profile models"). |
-| `IDE_INFERENCE_LEASE_FILE` | the image (`image/runtime.py`) | The lease file: the installed key's expiry, fingerprint and when it changed. Beside it, `.inference-state` records why model work is blocked and until when (`budget_exhausted` until the lease file names a new key after the daily refill, or `provider_unavailable` for a few minutes after repeated outages), plus the last failed model call. Every run start (chat, wakes, Researchers) waits while the lease is missing or the state blocks; see `core/src/research_core/inference.py`. A chat message whose run fails mid-way on the budget, a rate limit or a provider outage waits (admission status `waiting`) and resumes with a continuation prompt when the gate opens (`core/src/research_core/run_failures.py`, `contract/CONTRACT.md` "Message admissions"). Unset outside the image: always available. |
+| `SOFTMAX_USER_CREDENTIAL` | nothing yet | The user's User identity token (design B.16), for the Orchestrator only. `bootstrap.json` has no such field and `image/runtime.py` would not write it to `.env`, so hosted, User-identity reads and writes are reported unavailable. It is deliberately not passed to terminal commands. |
+| `COGAMES_API_URL` | `image/runtime.py`, from `bootstrap.json` | Softmax API server. |
+| `API_SERVER_KEY`, `API_SERVER_HOST`, `API_SERVER_PORT` | `image/runtime.py` | The Hermes API server. The watcher reads them from the Orchestrator profile's `.env`. **Every profile must carry the same `API_SERVER_KEY`**: Hermes authenticates `/p/<profile>/v1/runs` with that profile's key. |
+| `OPENROUTER_API_KEY` | the image (`image/inference.py`) | The OpenRouter key both profiles use. The image leases a spend-capped key from the platform (`PUT /v2/workspaces/{id}/inference`) and writes it into each profile's `.env`; outside the image, whoever runs the profiles supplies it. The model itself is not the host's concern: each profile's `config.yaml` names it, and the user changes it through `research serve` (`core/src/research_core/contract/CONTRACT.md`, "Profile models"). |
+| `IDE_INFERENCE_LEASE_FILE` | the image (`image/runtime.py`) | The lease file: the installed key's expiry, fingerprint and when it changed. Beside it, `.inference-state` records why model work is blocked and until when (`budget_exhausted` until the lease file names a new key after the daily refill, or `provider_unavailable` for a few minutes after repeated outages), plus the last failed model call. Every run start (chat, wakes, Researchers) waits while the lease is missing or the state blocks; see `core/src/research_core/inference.py`. A chat message whose run fails mid-way on the budget, a rate limit or a provider outage waits (admission status `waiting`) and resumes with a continuation prompt when the gate opens (`core/src/research_core/run_failures.py`, `core/src/research_core/contract/CONTRACT.md` "Message admissions"). Unset outside the image: always available. |
 | `IDE_PLATFORM`, `IDE_FAKE_FAULTS` | tests only | `fake` selects the platform test double. |
 
 ## Gateway, sleep and drain
@@ -155,6 +159,10 @@ update`, `prepare.py` for each profile, the gateway, then `research workspace wa
 sleep-owned pause so the coordinator resumes drained work. A new image therefore takes effect at
 the next wake.
 
+A deliberate pause (the `paused` setting set by the user or the Orchestrator) is different: wake does
+not clear it, and it holds new chat messages as well as background work. Anything with access to the
+workspace lifts it with `research store apply --actor user:<id> --store workspace workspace.resume '{"cites": "<message ref>"}'`.
+
 Steering records its target run before transport. Explicit rejection can retry safely; an ambiguous
 reply closes delivery without replay while that known run remains tracked. It does not recycle
 the workspace. Unknown native run status or an expired/scope-invalid start receipt ends delivery as interrupted
@@ -176,17 +184,17 @@ hosted workspaces continue to recover automatically through their supervisor.
 
 ## The bridge (the seam)
 
-The bridge does transport only. For each user message it POSTs `{"input": <message + "\n\nContext
-v1:\n" + json>, "session_id"}` to the Orchestrator's runs route, where the JSON block is the
-client's typed context validated against `research context-schema` and stamped with the client's
-identity, the Session's Coworld and `contract_version: 1`. If the Session has a live run, new inputs wait in the durable inbox. It streams each store's `events` table to clients as Server-Sent Events
+`research serve` is the seam. In the image it runs beside the gateway, and clients reach it through
+`image/application.py` over the platform's relay, which does transport only. It stores each user
+message with its context block, the client's typed context validated against `research
+context-schema` and stamped with the client's identity, the Session's Coworld and `contract_version:
+1`. A run's request keeps them apart (`{"input": [message], "context": block, "instructions"}`), and
+the block reaches the model through the `pre_llm_call` hook (`plugin/turn.py`). If the Session has a live run, new inputs wait in the durable inbox. It streams each store's `events` table to clients as Server-Sent Events
 (`research store events --after <seq>` and `--follow` show the rows; one cursor per store), and
 applies user edits through `research store apply --actor user:<id> <op> <json>`. Notices
-(`events` rows of kind `notice`) must reach every client. `research serve` is the reference
-implementation of all of this against a local Hermes. The full contract layer (`session-open`,
-capabilities, panels, the agent-context panel) ships later in its own stack.
+(`events` rows of kind `notice`) must reach every client.
 
-The model routes of `contract/CONTRACT.md` ("Profile models") are served by `research serve`
+The model routes of `core/src/research_core/contract/CONTRACT.md` ("Profile models") are served by `research serve`
 itself, which the workspace image runs: it reads each profile's `config.yaml` (`model`,
 `fallback_providers`) and changes them with `hermes config set` under each profile's home. The
 IDE reaches `research serve` only through the operations in `image/contract.py`, and that list
@@ -233,14 +241,14 @@ run `research store quiesce` in the background and initiate the snapshot when it
 line appears. It checkpoints each database's WAL into its file, takes and holds the write lock
 on the workspace store, every Coworld store and (with `HERMES_HOME` set) that profile's Hermes
 `state.db`, fsyncs each file and its directory, and holds for at most 30 seconds (`--max-hold`;
-a `--then` command still running is killed). Readers continue and writers wait, so the snapshot
-is one consistent recovery point across the databases and the ordinary files on the volume.
+a `--then` command still running is killed). Readers continue and database writers wait, so the
+snapshot is one consistent recovery point across the databases. Nothing stops writes to ordinary
+files, so a document or worktree may be mid-write from a tool process.
 Keep the hold short: a connection opened before the hold began (the seam server's, Hermes's own
 to `state.db`) waits only its usual five seconds before reporting "database is locked", so
 initiate the snapshot within that time; stores opened during the hold wait for the whole of
-it. One
-bounded risk remains: a repository may have a git write in flight from a tool process at that
-moment. Git writes objects and refs through temporary files and renames, so such a snapshot
+it. For a
+repository, the risk is bounded: git writes objects and refs through temporary files and renames, so such a snapshot
 still restores to a readable repository, at worst with a stale `.lock` file or an unfinished
 temporary object to remove.
 
@@ -251,20 +259,21 @@ untouched and the workspace is paused until the matching release runs again.
 
 ## Releases
 
-A push to `main` touching `core/`, `orchestrator/`, `researcher/`, `pyproject.toml` or
-`uv.lock` dispatches Metta's image release. A release ships only if the acceptance scenario
-("submit the starter as my champion" on a new workspace ends in a submission) passes on the fake
-platform in CI and on the release canary. The nightly read-only platform check
-(`research platform check --read-only`) blocks a release when a route the tools use fails. The
-daily lock refresh keeps `coworld` and `softmax-cli` current.
+A push to `main` touching the paths in `.github/workflows/release-hermes.yml` (what the image holds)
+dispatches Metta's image release, unless the last nightly read-only platform check (`research
+platform check --read-only`) failed. Metta's `deploy-hermes-agent.yml` builds `image/Dockerfile`,
+runs `image/system_tests/start-stop.sh`, publishes the digest and dispatches its qualification job.
+None of these sends a model request. The acceptance scenario ("submit the starter as my champion" on
+a new workspace ends in a submission) runs scripted, with no model, as a pull request check
+(`core/tests/scenarios/test_seam_end_to_end.py`); its real-gateway form needs a model key, so it
+runs by hand (`docs/local-end-to-end.md`). The daily lock refresh keeps `coworld` and `softmax-cli`
+current.
 
 ## Checks hosting should run once (design H "Validation")
 
 - S1: several Researcher runs in one profile stay isolated; a Session resumes after a gateway
   restart (`core/tests/hermes/test_spike_s1.py`, needs a model key).
 - S3: the bridge reads a store with WAL under gVisor.
-- S4: whether the profile venv is writable (not needed any more: the workspace environment is
-  the one `prepare.py` manages).
 
 ## Model requests
 

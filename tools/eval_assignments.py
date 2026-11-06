@@ -96,7 +96,7 @@ def main() -> None:
                         ],
                         "tools": [{"type": "function", "function": SPEC.schema("orchestrator")}],
                         "tool_choice": "required",
-                        "provider": {"only": ["Moonshot AI"], "allow_fallbacks": False},
+                        "provider": {"only": ["moonshotai"], "allow_fallbacks": False},
                     }
                 ).encode(),
                 headers={"Authorization": f"Bearer {key}", "Content-Type": "application/json"},
