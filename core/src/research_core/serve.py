@@ -701,17 +701,21 @@ class SeamServer:
                             " AND dispatch_started=0",
                             (json.dumps(payload), row["op_id"]),
                         )
-                (run_id,) = await asyncio.gather(
-                    asyncio.to_thread(
-                        self.coordinator.start,
-                        profile=row["profile"],
-                        session_id=row["session_id"],
-                        text=payload["input"],
-                        instructions=payload["instructions"],
-                        idempotency_key=row["native_key"] or row["op_id"],
-                    ),
-                    return_exceptions=True,
-                )
+                with span(
+                    "workspace.dispatch",
+                    context=propagator.extract(payload.get("trace_context", {})),
+                ):
+                    (run_id,) = await asyncio.gather(
+                        asyncio.to_thread(
+                            self.coordinator.start,
+                            profile=row["profile"],
+                            session_id=row["session_id"],
+                            text=payload["input"],
+                            instructions=payload["instructions"],
+                            idempotency_key=row["native_key"] or row["op_id"],
+                        ),
+                        return_exceptions=True,
+                    )
                 if isinstance(run_id, RunsError):
                     with stores.wstore.tx(actor) as tx:
                         tx.execute(

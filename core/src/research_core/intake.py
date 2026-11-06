@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict
 from research_core.store import admissions, sessions
 from research_core.store.actors import Actor
 from research_core.store.db import Store
-from research_core.telemetry import span
+from research_core.telemetry import propagator, span
 
 
 class OpenRegistration(BaseModel):
@@ -51,6 +51,10 @@ def accept(
         current.add_event("writer.acquired")
         existing = admissions.read(store, op_id, kind, request)
         if existing is None:
+            if kind == "message":
+                carrier: dict[str, str] = {}
+                propagator.inject(carrier)
+                payload = json.dumps({**json.loads(payload), "trace_context": carrier})
             tx.execute(
                 "INSERT INTO client_admissions"
                 " (op_id,kind,request,session_id,message,payload,status,created_at)"

@@ -35,6 +35,7 @@ from websockets.asyncio.client import ClientConnection, connect
 from websockets.exceptions import ConnectionClosed, InvalidHandshake
 
 from research_core.run_failures import CONTINUATION_PREFIX
+from research_core.telemetry import propagator, span
 
 log = logging.getLogger(__name__)
 
@@ -496,6 +497,7 @@ class Bound(BaseModel):
 class Frame(BaseModel):
     frontend_id: UUID
     message: dict[str, JsonValue]
+    trace_context: dict[str, str] = Field(default_factory=dict)
 
 
 class Refusal(Exception):
@@ -688,7 +690,9 @@ class Backend:
         self, client: httpx.AsyncClient, method: str, path: str, command: bool = False, **kwargs
     ) -> bytes:
         """A native reply's body, or the refusal its status means."""
-        response = await client.request(method, path, timeout=30, **kwargs)
+        headers = dict(kwargs.pop("headers", {}))
+        propagator.inject(headers)
+        response = await client.request(method, path, timeout=30, headers=headers, **kwargs)
         if response.is_success:
             return response.content
         if "op_id was already used for different input" in response.text:
@@ -1397,6 +1401,8 @@ class Backend:
         ((run_id, control),) = found
         answer = params.response.model_dump(exclude={"kind"})
         action = "approval" if control.kind == "approval" else "clarify"
+        headers = {"Idempotency-Key": request_id}
+        propagator.inject(headers)
         response = await self.gateway.post(
             f"v1/runs/{quote(run_id, safe='')}/{action}",
             json={
@@ -1404,7 +1410,7 @@ class Backend:
                 "execution_generation": control.execution_generation,
                 **answer,
             },
-            headers={"Idempotency-Key": request_id},
+            headers=headers,
             timeout=30,
         )
         if response.status_code == 400:
@@ -1421,40 +1427,41 @@ class Backend:
     # --- the connection -----------------------------------------------------------------------
 
     async def answer(self, socket: ClientConnection, frame: Frame) -> None:
-        message = frame.message
-        request_id, method = str(message["id"]), str(message["method"])
-        handlers = {
-            "session.open": (Open, self.open),
-            "chat.send": (Send, self.send_chat),
-            "chat.history": (History, self.history),
-            "chat.events": (Events, self.read_events),
-            "chat.cancel": (ChatCancel, self.cancel_chat),
-            "state.list": (StateList, self.list_state),
-            "state.get": (StateGet, self.get_state),
-            "task.cancel": (TaskCancel, self.cancel_task),
-            "input.respond": (Respond, self.respond),
-        }
-        reply: dict[str, JsonValue] = {"jsonrpc": "2.0", "id": request_id}
-        if method not in handlers:
-            reply["error"] = Refusal("unsupported", f"{method} is not supported").error()
+        with span("workspace.aide.request", context=propagator.extract(frame.trace_context)):
+            message = frame.message
+            request_id, method = str(message["id"]), str(message["method"])
+            handlers = {
+                "session.open": (Open, self.open),
+                "chat.send": (Send, self.send_chat),
+                "chat.history": (History, self.history),
+                "chat.events": (Events, self.read_events),
+                "chat.cancel": (ChatCancel, self.cancel_chat),
+                "state.list": (StateList, self.list_state),
+                "state.get": (StateGet, self.get_state),
+                "task.cancel": (TaskCancel, self.cancel_task),
+                "input.respond": (Respond, self.respond),
+            }
+            reply: dict[str, JsonValue] = {"jsonrpc": "2.0", "id": request_id}
+            if method not in handlers:
+                reply["error"] = Refusal("unsupported", f"{method} is not supported").error()
+                await self.send(socket, frame.frontend_id, reply)
+                return
+            model, handler = handlers[method]
+            try:
+                params = model.model_validate(message["params"])
+            except ValidationError as error:  # the relay checked the contract; these are our limits
+                reply["error"] = {"code": -32602, "message": str(error)}
+                await self.send(socket, frame.frontend_id, reply)
+                return
+            try:
+                reply["result"] = await handler(frame.frontend_id, request_id, params)
+            except Refusal as refusal:  # the contract's typed application errors
+                reply["error"] = refusal.error()
+            except httpx.TransportError as error:  # the seam or gateway dropped mid-request
+                unknown = method in COMMANDS
+                refusal = Refusal("unavailable", type(error).__name__, unknown=unknown)
+                reply["error"] = refusal.error()
             await self.send(socket, frame.frontend_id, reply)
-            return
-        model, handler = handlers[method]
-        try:
-            params = model.model_validate(message["params"])
-        except ValidationError as error:  # the relay checked the contract; these are our limits
-            reply["error"] = {"code": -32602, "message": str(error)}
-            await self.send(socket, frame.frontend_id, reply)
-            return
-        try:
-            reply["result"] = await handler(frame.frontend_id, request_id, params)
-        except Refusal as refusal:  # the contract's typed application errors
-            reply["error"] = refusal.error()
-        except httpx.TransportError as error:  # the seam or gateway dropped mid-request
-            unknown = method in COMMANDS
-            refusal = Refusal("unavailable", type(error).__name__, unknown=unknown)
-            reply["error"] = refusal.error()
-        await self.send(socket, frame.frontend_id, reply)
 
     def closed(self, frontend_id: UUID) -> None:
         """The relay reports a frontend connection ended: its subscriptions end with it."""

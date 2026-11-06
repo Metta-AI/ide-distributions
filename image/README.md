@@ -251,7 +251,10 @@ Native model/tool spans are children of the turn. Hermes isolates tool workers, 
 tool handlers explicitly bind the unique active turn for their native session. Subprocesses
 carry W3C trace context through `TRACEPARENT`/`TRACESTATE`; adapter HTTP requests use the same
 propagator through normal trace headers. Durable asynchronous intake and native execution
-remain separate traces correlated by exact `op.id` and native session/run IDs. No latest-run
+continue the platform W3C context carried in relay metadata. Durable message admissions retain
+that original context across retries, queued dispatch and restarts. Native model/tool turns recover
+the exact native message binding and link their asynchronous turn spans to the admitted request
+using standard OpenTelemetry span links. Direct native sessions have their own trace. No latest-run
 heuristic or process-global session context is used.
 
 Distribution outcomes preserve `validation_rejected`, `tool_rejected`, `store_rejected`,
