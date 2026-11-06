@@ -60,7 +60,9 @@ def quiesce_busy_timeout_ms(store_path: Path, now: datetime | None = None) -> in
 
     A store opened while ``research store quiesce`` holds the write locks waits the quiesce's
     ``max_hold_s`` plus the usual 5 s, so its first write lands after the release instead of
-    failing. The marker is looked for in the store's own ``.state`` (the workspace store) and in
+    failing. ``Store.open`` sets this only after ``connect_writable``, so a restored copy not yet in
+    WAL mode still fails its switch after 5 s. The marker is looked for in the store's own
+    ``.state`` (the workspace store) and in
     the workspace's ``.state`` two folders up (a Coworld store). A marker older than its own
     max hold is a leftover of a quiesce that did not clean up, and is ignored.
     """

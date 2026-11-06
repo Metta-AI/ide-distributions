@@ -108,8 +108,8 @@ before release.
 `image/aide.py` also connects every workspace to the platform's AIDE backend socket
 (`/v2/workspaces/{id}/aide/1.0.0/backend`, subprotocol `aide.1.0.0`, the bootstrap credential)
 and answers the [AIDE 1.0.0](https://softmax.com/docs/aide) JSON-RPC methods. It runs beside the
-legacy connection, gates neither readiness nor sleep, and reconnects forever; nothing reaches
-it until the platform routes a frontend to it. The contract stays in Metta; this image does not
+legacy connection, gates neither readiness nor sleep, and reconnects forever; no frontend reaches
+it until the platform routes one to it. The contract stays in Metta; this image does not
 bundle or validate it, the relay does.
 
 Each method maps to the same seam and gateway calls as the legacy adapter. The AIDE request id
@@ -124,11 +124,16 @@ Run progress is durable. One consumer per open request reads the gateway's run s
 translates each event to an AIDE `ChatEvent` (consecutive text deltas merge for 250 ms), appends
 it to the workspace store's `request_events` log through the seam (`POST /message-events`), and
 only then pushes it. `chat.events` reads that log alone (`GET /message-events`); the gateway's
-in-memory run buffer only bridges a consumer's restart. Consumers start with the backend and
-resume after their log's last row. A run the gateway lost ends `interrupted` once the seam
-settles it, and its logged events stay readable for as long as the request record. A session the
-gateway does not have reads as having no messages, so its requests still close: any other failure
-in a consumer ends the backend, which recycles the whole runtime.
+in-memory run buffer only bridges a dropped run stream. Consumers start with the backend and
+resume after their log's last row. A restart recycles the gateway too, so what had not reached
+the log and pushes not yet sent are lost. A run the gateway lost ends `interrupted` once the seam
+settles it, and its logged events stay readable for as long as the request record.
+
+A session the gateway does not have reads as having no messages, so its requests still close, and
+a consumer follows a dropped run stream again. Any other failure in a consumer, or a seam error
+answer to the event watcher's `recover()` or `changed()`, ends the backend, which recycles the
+whole runtime. Nothing retries the failed call, so a failure that lasts across boots can
+crash-loop the workspace.
 
 The normal image smoke checks execute the real packaged adapter against its running
 seam, including the previously accepted-by-the-stub invalid actor field. Real model

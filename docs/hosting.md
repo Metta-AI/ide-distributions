@@ -177,6 +177,8 @@ Recovery frequency is available as `runtime_recovery_count` in `/status` and `re
 The image emits a typed `workspace_runtime_recovery` event before recycling, with workspace and boot IDs.
 The packaged fault test records recovery elapsed seconds, container restart count, and validates the event.
 When it fails, the fault container's log is in the startup evidence as `recovery-container.log`.
+Other recycles, such as a failed AIDE consumer (`image/README.md`) or a failed `/status` read, emit
+no such event and are not counted.
 
 Standalone local `research serve` does not own the gateway's lifecycle. After stopping that gateway
 and its workers, use `research workspace recover --runtime-stopped` to acknowledge interruption.
@@ -208,10 +210,10 @@ The durable state is `$IDE_WORKSPACE` (stores, code repositories, worktrees, doc
 profile's Hermes `state.db`. SQLite runs in WAL mode with `synchronous=FULL` on every writable
 connection, so a committed record survives a crash of the process or the machine; the bridge may
 read the stores with a read-only connection (check S3: WAL reads under gVisor from a second
-process). A writer waits up to 5 s for another writer, including during a store's first switch to
-WAL, where SQLite itself would not wait; a lock held longer than that still fails the call as
-`database is locked`. Nothing on the volume survives losing the volume, so backups are part of the
-contract:
+process). A store's writer waits up to 5 s for each lock another connection holds, including during
+a store's first switch to WAL, where SQLite itself would not wait; a lock held longer than that
+fails the call as `database is locked`. A quiesce changes that wait, as described below. Nothing on
+the volume survives losing the volume, so backups are part of the contract:
 
 - **Hourly encrypted snapshots of the volume are the required minimum**, keeping the daily
   history as it is (a longer retention, not a shorter one). This bounds the loss at one hour of
@@ -248,10 +250,11 @@ on the workspace store, every Coworld store and (with `HERMES_HOME` set) that pr
 a `--then` command still running is killed). Readers continue and database writers wait, so the
 snapshot is one consistent recovery point across the databases. Nothing stops writes to ordinary
 files, so a document or worktree may be mid-write from a tool process.
-Keep the hold short: a connection opened before the hold began (the seam server's, Hermes's own
-to `state.db`) waits only its usual five seconds before reporting "database is locked", so
-initiate the snapshot within that time; stores opened during the hold wait for the whole of
-it. For a
+Keep the hold short: a store connection opened before the hold began waits only its usual five
+seconds before reporting "database is locked", so initiate the snapshot within that time. Stores
+opened during the hold wait for the whole of it, except a restored copy not yet in WAL mode, whose
+switch to WAL fails after five seconds. Hermes retries its own writes to `state.db`, for 20 s by
+default. For a
 repository, the risk is bounded: git writes objects and refs through temporary files and renames, so such a snapshot
 still restores to a readable repository, at worst with a stale `.lock` file or an unfinished
 temporary object to remove.

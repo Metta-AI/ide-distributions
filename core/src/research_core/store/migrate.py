@@ -44,7 +44,7 @@ def connect_writable(path: Path) -> sqlite3.Connection:
 
     ``FULL`` fsyncs the WAL on every commit, so a committed record survives a power loss when
     the storage honours fsync (``NORMAL`` would only promise consistency, not the last commits).
-    Every writable connection the library opens goes through here.
+    Every connection that writes a live store goes through here.
     """
     conn = sqlite3.connect(path, isolation_level=None)
     conn.execute(f"PRAGMA busy_timeout = {BUSY_TIMEOUT_MS}")

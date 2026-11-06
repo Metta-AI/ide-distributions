@@ -267,7 +267,8 @@ async def run(stack: AsyncExitStack) -> None:
                     connected=relay_connected,
                 )
             )
-            # The AIDE backend runs beside the legacy connection and gates nothing.
+            # The AIDE backend runs beside the legacy connection and gates no startup step; like
+            # the services below, its exit recycles the runtime.
             aide_backend = group.create_task(
                 serve_aide(
                     platform_url=bootstrap.platform_url,
