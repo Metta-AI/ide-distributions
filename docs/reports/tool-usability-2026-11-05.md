@@ -39,7 +39,7 @@ at `4b1760d0` for the first three rows and `962fe369` for the others. Fixes are 
   calls `task.read` first, and sometimes ends the Task as failed. The prompt edits cause it together:
   main's prompts restore it, and no single group of them does. The fix is not shown to help. Every
   rate here predates `95377a74`, which corrected its fixture: it showed V-12 not uploaded and a balance
-  of 4 against a need of 2, which cannot go with a credit refusal. The corrected fixture is not measured.
+  of 4 against a need of 2, which cannot go with a credit refusal. The corrected fixture is measured in [`tool-usability-2026-11-06.md`](tool-usability-2026-11-06.md).
 - **`r-hard-fail-args` is ambiguous.** The prompt says to release when a directive forbids the only
   path, and this situation describes that, so `task.release` is arguably right.
 - **The large `experiment.create` drops were the test's fault.** The fixture returned the very

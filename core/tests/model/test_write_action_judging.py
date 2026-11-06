@@ -8,15 +8,19 @@ before it are answered, and how host failures count.
 from __future__ import annotations
 
 import json
+import re
 from pathlib import Path
 
 import pytest
 
 from research_core.watcher.hermes_api import RunStatus, RunsUnavailable
 from tests.hermes.test_spike_s1 import Host
-from tests.model import harness, write_actions
+from tests.model import harness, real_session, write_actions
+from tests.model import test_mid_turn_recovery as mid_turn_checks
+from tests.model import test_ordinary_creation as ordinary_checks
+from tests.model import test_real_session as real_session_checks
 from tests.model.forcing_proxy import ForcedCall, ForcingProxy
-from tests.model.real_session import MAX_DETOURS, RealGateway
+from tests.model.real_session import MAX_DETOURS, ORDINARY_CASES, RealGateway
 from tests.model.write_actions import Case, run_case
 
 CLAIM_WRITE = Case("orchestrator", "claim", "write", "Record a claim.")
@@ -566,3 +570,132 @@ def test_the_later_line_counts_only_runs_that_went_on():
     forced = harness.Result("m", "h", "c", "invalid", later_attempts=[])
     recovered = harness.Result("m", "h", "c", "invalid", later_attempts=["invalid", "valid"])
     assert harness._recovered_later([unforced, forced, recovered]) == "1/2"
+
+
+# --- ordinary creation: nothing forced --------------------------------------------------------
+
+
+ORDINARY = ORDINARY_CASES[0]
+GOOD_TASK = {
+    "action": "create",
+    "type": "research",
+    "goal": "G-1",
+    "title": "Why do we lose early fights?",
+    "description": "Study 20 replays of lost games.",
+}
+REFUSAL = {"ok": False, "error": "goal is required", "problems": ["goal is required"]}
+
+
+def stored_task_call(call_id: str, args: dict) -> dict:
+    """One call as a Session stores it, in whichever form the role's tools take it."""
+    name, sent = harness.ShippedSchemas().outgoing(ORDINARY.role, ORDINARY.tool, args)
+    raw = {"id": call_id, "function": {"name": name, "arguments": json.dumps(sent)}}
+    return {"role": "assistant", "tool_calls": [raw]}
+
+
+def tool_answer(call_id: str, content: dict) -> dict:
+    return {"role": "tool", "tool_call_id": call_id, "content": json.dumps(content)}
+
+
+def test_ordinary_cases_force_nothing_and_are_outside_the_agreed_rate_lists():
+    ids = [case.id for case in ORDINARY_CASES]
+    assert len(set(ids)) == len(ids) == 3
+    assert all(id_.startswith("orchestrator-task.create-ordinary-") for id_ in ids)
+    assert all(case.refused is None for case in ORDINARY_CASES)
+    listed = {case.id for case in [*real_session.CASES, *real_session.RECOVERY_CASES]}
+    assert not listed & set(ids)
+    assert all(harness.refusals_in(case.label) == 0 for case in ORDINARY_CASES)
+
+
+def test_ordinary_instructions_name_no_tool_or_field_and_only_seeded_records():
+    for case in ORDINARY_CASES:
+        assert not re.search(r"task[._]|end_condition|end_detail|\btype\b", case.instruction)
+        assert set(re.findall(r"\b[GTCX]-\d+\b", case.instruction)) <= {real_session.GOAL}
+
+
+@pytest.mark.parametrize("case", ORDINARY_CASES, ids=lambda case: case.id)
+def test_an_ordinary_case_is_judged_by_the_same_rules(case):
+    name, sent = harness.ShippedSchemas().outgoing(case.role, case.tool, GOOD_TASK)
+    tool, args = harness.ShippedSchemas().canonical(case.role, name, sent)
+    assert write_actions.is_judged(case, tool, args)
+    call = harness.Call("c", name, sent, json.dumps(sent))
+    assert write_actions.judge(case, call, args) == ("valid", "")
+
+
+def test_an_ordinary_valid_call_waits_for_the_real_tools_answer():
+    gateway = RealGateway(Path("/"), Path("h"), "k", "m")
+    result = harness.Result("m", "h", "c", "wrong_tool")
+    good = stored_task_call("g", GOOD_TASK)
+    assert gateway._judge_new_calls(ORDINARY, [good], result) is False
+    answered = [good, tool_answer("g", {"ok": True, "record": {"id": "T-3"}})]
+    assert gateway._judge_new_calls(ORDINARY, answered, result) is True
+    assert result.outcome == "valid"
+
+
+def test_an_ordinary_call_the_real_tool_refuses_is_invalid_and_the_run_goes_on():
+    gateway = RealGateway(Path("/"), Path("h"), "k", "m")
+    result = harness.Result("m", "h", "c", "wrong_tool")
+    stored = [stored_task_call("a", GOOD_TASK), tool_answer("a", REFUSAL)]
+    assert gateway._judge_new_calls(ORDINARY, stored, result) is False
+    assert result.outcome == "invalid" and "the tool refused it" in result.detail
+    assert result.later_attempts == []
+
+
+def test_an_ordinary_recovery_is_recorded_without_changing_the_first_verdict():
+    gateway = RealGateway(Path("/"), Path("h"), "k", "m")
+    result = harness.Result("m", "h", "c", "wrong_tool")
+    bad = stored_task_call("b", {"action": "create", "title": "T"})
+    stored = [bad, tool_answer("b", REFUSAL), stored_task_call("g", GOOD_TASK)]
+    assert gateway._judge_new_calls(ORDINARY, stored, result) is False  # no answer to it yet
+    stored.append(tool_answer("g", {"ok": True}))
+    assert gateway._judge_new_calls(ORDINARY, stored, result) is True
+    assert result.outcome == "invalid"
+    assert result.later_attempts == ["valid"]
+    assert harness._recovered_later([result]) == "1/1"
+
+
+def test_an_ordinary_run_carries_its_own_label(monkeypatch):
+    runs = FinishedRun("completed", GOOD_TASK)
+    runs.stored = [stored_task_call("g", GOOD_TASK), tool_answer("g", {"ok": True})]
+    gateway = RealGateway(Path("/"), Path("h"), "k", "m", runs=runs)
+    monkeypatch.setattr(gateway, "open_session", lambda role: "s")
+    monkeypatch.setattr(gateway, "_billed_replies", lambda *_: [])
+    result = gateway.run_case("m", ORDINARY)
+    assert (result.host, result.outcome) == (real_session.ORDINARY_LABEL, "valid")
+
+
+def test_a_valid_call_keeps_its_verdict_when_the_run_ends_with_no_answer_stored():
+    gateway = RealGateway(Path("/"), Path("h"), "k", "m")
+    result = harness.Result("m", "h", "c", "valid")
+    gateway._judge_end(RunStatus("r", "completed", "s", None, None, terminal=True), [], result)
+    assert result.outcome == "valid"
+
+
+@pytest.mark.parametrize(
+    ("checks", "label"),
+    [
+        (real_session_checks, real_session.HOST_LABEL),
+        (mid_turn_checks, real_session.MID_TURN_LABEL),
+    ],
+)
+def test_ordinary_failures_do_not_move_the_agreed_rate(checks, label, monkeypatch):
+    monkeypatch.delenv("IDE_TOOL_CALL_CASES", raising=False)
+    counted = [harness.Result("m", label, "orchestrator task.create", "valid")] * 20
+    counted += [harness.Result("m", label, "c (after 1 refused)", "valid")] * 20
+    ignored = [harness.Result("m", real_session.ORDINARY_LABEL, ORDINARY.label, "invalid")] * 40
+    monkeypatch.setattr(harness, "RESULTS", harness.Results(items=[*counted, *ignored]))
+    if checks is real_session_checks:
+        checks.test_the_agreed_rate(0)
+    checks.test_the_agreed_rate(1)
+
+
+def test_the_ordinary_rate_counts_only_ordinary_runs(monkeypatch):
+    monkeypatch.delenv("IDE_TOOL_CALL_CASES", raising=False)
+    other = [harness.Result("m", real_session.HOST_LABEL, "c", "invalid")] * 40
+    mine = [harness.Result("m", real_session.ORDINARY_LABEL, ORDINARY.label, "valid")] * 20
+    monkeypatch.setattr(harness, "RESULTS", harness.Results(items=[*other, *mine]))
+    ordinary_checks.test_ordinary_first_try_rate()
+    bad = [harness.Result("m", real_session.ORDINARY_LABEL, ORDINARY.label, "invalid")] * 2
+    monkeypatch.setattr(harness, "RESULTS", harness.Results(items=[*mine, *bad]))
+    with pytest.raises(AssertionError, match="20/22"):
+        ordinary_checks.test_ordinary_first_try_rate()
