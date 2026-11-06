@@ -769,8 +769,9 @@ class Backend:
         return found
 
     async def messages(self, session_id: str, limit: int, offset: int) -> list[NativeMessage]:
-        """Native messages newest first with their admissions' context; empty until the
-        session's native opening completes."""
+        """Native messages newest first, ``offset`` counted from the newest, with their admissions'
+        context; empty until the session's native opening completes. The gateway pages from the
+        newest but returns each page oldest first."""
         opening = await self.call(
             self.seam, "GET", "/session-pending", params={"session_id": session_id}
         )
@@ -782,7 +783,7 @@ class Backend:
             f"api/sessions/{quote(session_id, safe='')}/messages",
             params={"order": "latest", "limit": limit, "offset": offset},
         )
-        native = NativePage.model_validate_json(page).data
+        native = NativePage.model_validate_json(page).data[::-1]
         if not native:
             return []
         annotated = await self.call(
