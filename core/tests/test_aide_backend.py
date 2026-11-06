@@ -14,7 +14,7 @@ import pytest
 
 from research_core import run_failures
 from research_core.serve import SeamServer
-from research_core.store import goals, settings, tasks
+from research_core.store import admissions, goals, sessions, settings, tasks
 from research_core.watcher.hermes_api import FakeHermesRuns
 from tests.test_serve import COWORLD_ID, HARNESS, make_ctx
 
@@ -821,6 +821,54 @@ def test_scope_mismatches_are_forbidden_and_unscoped_sessions_are_hidden(system)
         assert unscoped["error"]["code"] == -32602
 
     run(system, scenario)
+
+
+def test_a_request_whose_session_the_gateway_does_not_have_closes_its_log(system):
+    """The packaged lost-receipt fixture: a store session with no native one must not end the
+    backend, or the workspace crash-loops on every boot that recovers this request's consumer."""
+    server = system[2]
+
+    async def scenario(backend, gateway, ctx, hermes):
+        with server._deliver_lock:  # the row reaches the dispatcher only in its lost-receipt form
+            sessions.register(
+                ctx.wstore, HARNESS, session_id="no-native", profile="orchestrator", kind="chat"
+            )
+            request_id = admissions.enqueue(
+                ctx.wstore,
+                HARNESS,
+                key="no-native",
+                session_id="no-native",
+                profile="orchestrator",
+                text="never replayed",
+                origin="client",
+            )
+            with ctx.wstore.tx(HARNESS) as tx:
+                tx.execute(
+                    "UPDATE client_admissions SET dispatch_started=1,resolution_required=1,"
+                    "error='Lost receipt' WHERE op_id=?",
+                    (request_id,),
+                )
+
+        def outcome():
+            return ctx.wstore.one(
+                "SELECT event FROM request_events WHERE request_id=? AND kind='finished'",
+                (request_id,),
+            )
+
+        await until(outcome)
+        assert json.loads(outcome()["event"])["status"] == "interrupted"
+        await until(lambda: not backend.consumers)
+        history = await call(
+            backend, "chat.history", {"session_id": "no-native", "scope": WORKSPACE, "limit": 5}
+        )
+        assert history["result"]["items"] == []
+        # The next backend finds the log closed and starts nothing for it.
+        restarted = backend.restart()
+        await until(lambda: restarted.start.done())
+        assert not restarted.consumers
+
+    run(system, scenario)
+    assert not [name for name, _ in system[1].calls if name == "start"]
 
 
 def test_history_pages_by_a_stable_boundary_reads_forward_and_bounds_each_reply(system):

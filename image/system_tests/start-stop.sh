@@ -18,6 +18,7 @@ cleanup() {
   docker logs "$name" > "$scratch/container.log" 2>&1 || true
   cat "$scratch/container.log"
   docker logs "$name-aide" > "$scratch/aide.log" 2>&1 || true
+  docker logs -t "$name-recovery" > "$scratch/recovery-container.log" 2>&1 || true
   docker rm -f "$name" "$name-recovery" "$name-aide" >/dev/null 2>&1 || true
   docker volume rm "$volume" "$volume-aide" >/dev/null 2>&1 || true
   if [[ -z "${STARTUP_ARTIFACTS:-}" ]]; then rm -rf "$scratch"; fi
