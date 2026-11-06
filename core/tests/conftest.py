@@ -10,6 +10,7 @@ from research_core import telemetry
 
 @pytest.fixture(autouse=True)
 def spans(monkeypatch):
+    monkeypatch.setenv("OTEL_SDK_DISABLED", "false")
     exporter = InMemorySpanExporter()
     provider = TracerProvider()
     provider.add_span_processor(SimpleSpanProcessor(exporter))
