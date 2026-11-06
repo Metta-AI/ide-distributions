@@ -37,6 +37,12 @@ RUN mkdir /opt/workspace-plugins \
            ln -s "$plugin" /opt/workspace-plugins/; \
          fi; \
        done
+# What names this image on every telemetry record: a hash of the sources it was built from, because
+# the build has no git history. image/runtime.py passes it on as IDE_IMAGE.
+RUN cd /opt/distribution \
+    && find pyproject.toml uv.lock core orchestrator researcher image contract -type f \
+         ! -path '*/__pycache__/*' -print0 \
+       | sort -z | xargs -0 sha256sum | sha256sum | cut -c1-16 > image-id
 ENV PYTHONUNBUFFERED=1 \
     HERMES_NEMO_RELAY_PLUGINS_TOML=/opt/distribution/image/relay-plugins.toml \
     HOME=/workspace/host \

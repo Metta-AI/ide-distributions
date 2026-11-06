@@ -64,6 +64,8 @@ async def run(stack: AsyncExitStack) -> None:
     bootstrap = Bootstrap.model_validate_json(Path("/run/workspace/bootstrap.json").read_text())
     os.environ["IDE_WORKSPACE_ID"] = bootstrap.workspace_id
     os.environ["IDE_RUNTIME_ID"] = boot_id
+    image_id = Path("/opt/distribution/image-id").read_text().strip()
+    os.environ["IDE_IMAGE"] = f"distribution-{image_id}"
     startup = telemetry.tracer().start_span(
         "workspace.startup", attributes={"workspace.state": workspace_state}
     )

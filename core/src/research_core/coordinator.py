@@ -21,6 +21,7 @@ from uuid import NAMESPACE_URL, uuid4, uuid5
 from opentelemetry.trace import StatusCode
 
 from research_core import inference, layout, run_failures, transitions
+from research_core.agent_telemetry import observed
 from research_core.store import admissions, events, notices, sessions, settings, tasks
 from research_core.store._common import now_iso, parse_iso
 from research_core.store.actors import Actor
@@ -116,6 +117,8 @@ class Coordinator:
         # The inference state beside this file classifies a failed chat run (``run_failures``).
         self.inference_lease_file = inference_lease_file
         self.clock = clock
+        # The last report recorded per Coworld: this loop can run twice a second with nothing new.
+        self._last_reports: dict[str | None, dict[str, Any]] = {}
 
     def status(self, run_id: str, *, profile: str):
         return self.native.status(run_id, profile=profile)
@@ -586,6 +589,7 @@ class Coordinator:
             tx.event("client.delivery_failed", row["op_id"], {"reason": reason, "replayed": False})
 
     def reconcile_inputs(self, store: Store) -> None:
+        retired = []
         if self.runtime_id:
             with store.tx(ACTOR) as tx:
                 store.set_meta("runtime_id", self.runtime_id)
@@ -604,6 +608,13 @@ class Coordinator:
                     " WHERE execution_uncertain=1 AND runtime_id IS NOT NULL AND runtime_id!=?",
                     (self.runtime_id,),
                 )
+        if retired:
+            observed.record(
+                "coordinator",
+                "runtime_recovered",
+                owner_instance=self.instance_id,
+                details={"retired_runtimes": len(retired)},
+            )
         for row in store.q("SELECT * FROM client_admissions WHERE resolution_required=1"):
             self.close_unreplayable(store, row, row["error"])
 
@@ -1176,7 +1187,7 @@ class Coordinator:
             tx.event(
                 "client.waiting",
                 row["op_id"],
-                {"error_class": error_class, "resume_after": resume_after},
+                {"error_class": error_class, "resume_after": resume_after, "run_id": status.run_id},
             )
 
     def resume_if_due(self, store: Store, row) -> Any | None:
@@ -1321,6 +1332,15 @@ class Coordinator:
                                     row["op_id"],
                                 ),
                             )
+                        observed.record(
+                            "execution",
+                            "successor",
+                            admission_id=row["op_id"],
+                            execution_attempt_id=successor["op_id"],
+                            session_id=target["id"],
+                            parent_session_id=row["session_id"],
+                            reason="rerouted" if reroute else "delivery_retry",
+                        )
                         continue
                 # A steer is a delivery to an existing attempt, not a new worker attempt.
                 if row["delivery_mode"] == "start":
@@ -1610,6 +1630,19 @@ class Coordinator:
                     " WHERE op_id=?",
                     (successor_id, tx.at, predecessor["op_id"]),
                 )
+        if predecessor is not None:
+            observed.record(
+                "execution",
+                "successor",
+                admission_id=predecessor["op_id"],
+                execution_attempt_id=successor_id,
+                assignment_id=assignment["op_id"],
+                session_id=target,
+                parent_session_id=session["id"],
+                task_id=f"T-{session['task_id']}",
+                profile=session["profile"],
+                reason="new_session",
+            )
         return {"session": target, "delivered": "queued", "key": key}
 
     def retry_worker(
@@ -1707,7 +1740,22 @@ class Coordinator:
             report["wakes"] = self.advance_events(ctx)
         report["heartbeat"] = heartbeat.run(ctx)
         report["context_panel"] = context_panel.run(ctx)
+        self._record_report(ctx, report)
         return report
+
+    def _record_report(self, ctx: TickContext, report: dict[str, Any]) -> None:
+        """The report as numbers. An unchanged one says nothing."""
+        details = observed.report_details(report)
+        coworld_id = ctx.coworld.coworld_id if ctx.coworld is not None else None
+        if self._last_reports.get(coworld_id) != details:
+            self._last_reports[coworld_id] = details
+            observed.record(
+                "coordinator",
+                "report",
+                coworld_id=coworld_id,
+                owner_instance=self.instance_id,
+                details=details,
+            )
 
     def advance_events(self, ctx: TickContext) -> dict[str, Any]:
         if settings.get(ctx.stores, "paused"):
@@ -1788,7 +1836,7 @@ class Coordinator:
             (key, ctx.orchestrator_profile),
         )
         if pending is None:
-            admissions.enqueue(
+            op_id = admissions.enqueue(
                 ctx.wstore,
                 ctx.actor,
                 key=key,
@@ -1799,6 +1847,22 @@ class Coordinator:
                 else render_wake(handler.wake, event, ctx),
                 instructions=WAKE_INSTRUCTIONS,
                 origin="wake",
+            )
+            observed.record(
+                "wake",
+                "started",
+                admission_id=op_id,
+                session_id=session["id"],
+                profile=ctx.orchestrator_profile,
+                coworld_id=ctx.coworld.coworld_id if ctx.coworld is not None else None,
+                native_event_type=event.kind,
+                reason=handler.wake,
+                details={
+                    "batch_size": len(batch),
+                    "first_seq": batch[0].seq,
+                    "last_seq": batch[-1].seq,
+                    "attempts": attempts,
+                },
             )
         report["started"].append(f"{label}:{event.seq}->{session['id']}")
 

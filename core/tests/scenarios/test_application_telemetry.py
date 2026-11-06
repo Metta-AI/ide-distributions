@@ -1,0 +1,672 @@
+"""What ``research serve``, the coordinator and short commands record, read back from the stream.
+
+The bridge's own code (``image/application.py``) drives a real seam over HTTP, on the fake gateway.
+The dispatcher runs one pass at a time, so the order of records is the order of the test's steps.
+"""
+
+# ruff: noqa: E402
+# The image's modules are importable only after the path below is set.
+from __future__ import annotations
+
+import asyncio
+import json
+import os
+import subprocess
+import sys
+import threading
+import types
+from collections.abc import Iterable
+from datetime import datetime, timedelta
+from pathlib import Path
+from typing import Any
+from uuid import NAMESPACE_URL, uuid4, uuid5
+
+import httpx
+import pytest
+from opentelemetry import trace
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3] / "image"))
+# The image's inference gate needs python-dotenv, which this environment lacks. Tests pass one.
+sys.modules.setdefault("inference", types.SimpleNamespace(Availability=object))
+import application
+from application import Operation, response
+
+from research_core import attachments, layout, transitions
+from research_core.agent_telemetry import observed
+from research_core.agent_telemetry.rebuild import LogsSearch, rebuild_session
+from research_core.agent_telemetry.stream import STREAM_VARIABLE
+from research_core.coordinator import Coordinator
+from research_core.messages import UserMessage
+from research_core.plugin import executor
+from research_core.plugin.messages import record_native_message
+from research_core.serve import SeamServer
+from research_core.store import sessions
+from research_core.store.actors import Actor
+from research_core.store.db import Store
+from research_core.tools.base import ToolContext, run_tool
+from research_core.tools.catalog import TOOLS
+from tests.telemetry.conftest import raw_lines, stored_records
+from tests.telemetry.fake_datadog import FakeDatadog
+from tests.test_coordinator_transitions import assigned
+from tests.test_serve_run_failures import Dispatch
+from tests.watcher._support import COWORLD, coordinator, make_ctx, make_task
+
+SECRET = "sk-seeded-0123456789abcdefghij"
+
+
+class Seam:
+    """A real ``research serve`` HTTP server. Nothing dispatches until the test says so."""
+
+    def __init__(self, tmp_path: Path) -> None:
+        self.ctx = make_ctx(tmp_path)
+        self.hermes = self.ctx.hermes
+        self.server = SeamServer(ws=self.ctx.ws, hermes=self.hermes, env=dict(self.ctx.env))
+        threading.Thread(target=self.server._http.serve_forever, daemon=True).start()
+
+    def dispatch(self) -> None:
+        self.server._last_native_poll.clear()  # Each pass may read a run's outcome.
+        asyncio.run(self.server.dispatch_messages())
+
+    def bridge(
+        self, name: str, args: dict[str, Any], *, op_id: str | None = None, gate=None
+    ) -> tuple[int, str, str, bytes]:
+        """One envelope through the bridge. Returns status, request ID, operation ID and body."""
+        request_id, op_id = str(uuid4()), op_id or str(uuid4())
+        operation = Operation(id=request_id, op_id=op_id, name=name, args=args)
+
+        async def call() -> tuple[int, bytes]:
+            async with (
+                httpx.AsyncClient(base_url=self.server.url) as seam,
+                httpx.AsyncClient(base_url="http://gateway.invalid") as gateway,
+            ):
+                async with response(operation, seam, gateway, gate or _Gate(True)) as result:
+                    return result.status_code, await result.aread()
+
+        status, body = asyncio.run(call())
+        return status, request_id, op_id, body
+
+    def records(self) -> list[dict[str, Any]]:
+        self.server.telemetry.flush(10)
+        if application._telemetry is not None:
+            application._telemetry.flush(10)
+        return stored_records(Path(os.environ[STREAM_VARIABLE]))
+
+
+class _Gate:
+    def __init__(self, available: bool) -> None:
+        self._available = available
+
+    def available(self) -> bool:
+        return self._available
+
+    def blocking(self) -> None:
+        return None
+
+
+@pytest.fixture
+def seam(tmp_path):
+    application._telemetry = None  # A process has one, on the stream it started with.
+    seam = Seam(tmp_path)
+    yield seam
+    seam.server.shutdown()
+
+
+def _open_args() -> dict[str, Any]:
+    return {"client": {"id": "ide", "kind": "web"}, "coworld": COWORLD}
+
+
+def _message_args(session_id: str, text: str = "Hello") -> dict[str, Any]:
+    return {
+        "session_id": session_id,
+        "coworld": COWORLD,
+        "message": {"role": "user", "content": text},
+        "context": {"contract_version": 1},
+    }
+
+
+def _operations(records: Iterable[dict], **wanted: Any) -> list[dict]:
+    return [
+        record
+        for record in records
+        if record["family"] == "operation"
+        and all(record.get(name) == value for name, value in wanted.items())
+    ]
+
+
+def _store_event(records: Iterable[dict], kind: str, **wanted: Any) -> dict:
+    (record,) = _operations(records, action="store_event", native_event_type=kind, **wanted)
+    return record
+
+
+def _assigned(seam: Seam) -> dict[str, Any]:
+    ctx = seam.ctx
+    task = make_task(ctx, type="maintenance")
+
+    class Command:
+        env = ctx.env
+        store = ctx.store
+        wstore = ctx.wstore
+        actor = Actor.harness()
+
+        def coworld(self):
+            return ctx.coworld
+
+    return Coordinator.reserve(
+        Command(),
+        task_id=int(task["id"][2:]),
+        task_updated=task["updated"],
+        profile="researcher",
+        assignment_id=task["id"],
+        context=f"Assignment context {SECRET}",
+        rationale=f"Rationale {SECRET}",
+    )
+
+
+def test_one_chat_joins_from_admission_to_run_to_session(seam, monkeypatch):
+    monkeypatch.setenv("IDE_WORKSPACE", str(seam.ctx.ws.root))
+    message_op_id = str(uuid4())
+    opening = seam.bridge("session.open", {**_open_args(), "message_op_id": message_op_id})
+    assert opening[0] == 200, opening
+    session_id = json.loads(opening[3])["session_id"]
+    message = seam.bridge("session.message", _message_args(session_id), op_id=message_op_id)
+    assert message[0] == 200, message
+    seam.dispatch()
+    run_id = seam.ctx.wstore.one(
+        "SELECT run_id FROM client_admissions WHERE op_id=?", (message_op_id,)
+    )[0]
+
+    # The gateway's side: the hook that names the admission's native row and its run.
+    record_native_message(
+        span_for_session=lambda _: trace.INVALID_SPAN,
+        session_id=session_id,
+        conversation_history=[{"role": "user", "_row_id": 77}],
+        run_id=run_id,
+    )
+    # A tool call inside that run, and the Task it leads to.
+    tool_ctx = ToolContext(
+        role="orchestrator",
+        actor=Actor.session(session_id),
+        workspace=seam.ctx.ws,
+        env={
+            "IDE_SESSION_ID": session_id,
+            "IDE_TOOL_CALL_ID": "call_1",
+            "IDE_RUN_ID": run_id,
+            "IDE_COWORLD_ID": COWORLD,
+        },
+    )
+    created = json.loads(
+        run_tool(
+            "goal", {"action": "create", "title": "G", "end_state": "E", "reason": "R"}, tool_ctx
+        )
+    )
+    assert created["ok"], created
+    assignment = _assigned(seam)
+    seam.dispatch()
+    seam.hermes.complete(run_id)
+    seam.dispatch()
+
+    records = seam.records()
+
+    # Opening: the bridge's ID, the operation's and the derived admission ID, on one record.
+    (opened,) = _operations(records, action="admission", native_event_type="session_open")
+    assert opened["stage"] == "accepted"
+    assert opened["request_id"] == opening[1]
+    assert opened["operation_id"] == opening[2]
+    assert opened["admission_id"] == str(uuid5(NAMESPACE_URL, f"session-open:{message_op_id}"))
+    assert opened["session_id"] == session_id
+    assert (opened["session_scope"], opened["coworld_id"]) == ("coworld", COWORLD)
+
+    # Admission -> run -> Session, in order, each by its own join field.
+    (admitted,) = _operations(records, action="admission", native_event_type="message")
+    assert admitted["stage"] == "accepted"
+    assert admitted["request_id"] == message[1]
+    assert admitted["admission_id"] == admitted["operation_id"] == message_op_id
+    started = _store_event(records, "client.started", admission_id=message_op_id)
+    assert (started["run_id"], started["session_id"]) == (run_id, session_id)
+    (bound,) = _operations(records, action="admission", stage="bound")
+    assert bound["admission_id"] == message_op_id
+    assert (bound["run_id"], bound["session_id"]) == (run_id, session_id)
+    assert bound["hermes_message_id"] == "77"
+    (tool,) = _operations(records, action="workspace_tool")
+    assert (tool["outcome"], tool["tool_name"]) == ("succeeded", "goal")
+    assert (tool["tool_call_id"], tool["run_id"], tool["session_id"]) == (
+        "call_1",
+        run_id,
+        session_id,
+    )
+    goal = _store_event(records, "goal.created")
+    assert (goal["goal_id"], goal["session_id"]) == (created["record"]["id"], session_id)
+    finished = _store_event(records, "client.finished", admission_id=message_op_id)
+    assert finished["outcome"] == "completed"
+    chain = [opened, admitted, started, bound, goal, tool, finished]
+    sequences = [record["sequence"] for record in chain]
+    assert sequences == sorted(sequences), sequences
+
+    # The Task assignment: a Session with its scope, the admission that starts it, and its run.
+    task_session = assignment["session_id"]
+    registered = _store_event(records, "session.started", session_id=task_session)
+    assert (registered["kind"], registered["session_scope"]) == ("task", "coworld")
+    assert registered["task_id"].startswith("T-")
+    assigned = _store_event(records, "task.assigned")
+    assert assigned["assignment_id"] == assigned["admission_id"] == assignment["op_id"]
+    assert assigned["session_id"] == task_session
+    worker = _store_event(records, "client.started", admission_id=assignment["op_id"])
+    assert worker["session_id"] == task_session
+    assert worker["run_id"] != run_id
+    # The prompt, with the secret, reaches Datadog only inside the model request.
+    assert SECRET not in json.dumps(records)
+    assert seam.ctx.store.q("SELECT 1 FROM events WHERE kind='goal.created'")
+
+
+def test_a_rolled_back_transaction_records_nothing(seam):
+    class Boom(Exception):
+        pass
+
+    with pytest.raises(Boom):
+        with seam.ctx.wstore.tx(Actor.harness()) as tx:
+            tx.event("notice", "rolled-back", {})
+            raise Boom
+    with seam.ctx.wstore.tx(Actor.harness()) as tx:
+        tx.event("drain.done", "committed", {})
+    records = seam.records()
+    assert [r for r in records if r.get("native_event_type") == "notice"] == []
+    assert _store_event(records, "drain.done")["details"]["store_seq"] > 0
+
+
+def test_an_event_not_listed_sends_only_its_type(seam):
+    with seam.ctx.wstore.tx(Actor.harness()) as tx:
+        tx.event("drain.done", f"subject {SECRET}", {"text": SECRET, "count": 3})
+    record = _store_event(seam.records(), "drain.done")
+    assert set(record["details"]) == {"store_seq"}
+    assert record["reported_actor"] == "harness"
+    assert SECRET not in json.dumps(record)
+
+
+def test_no_secret_reaches_a_record_from_an_exception_or_a_message(seam, monkeypatch):
+    opened = seam.bridge("session.open", _open_args())
+    session_id = json.loads(opened[3])["session_id"]
+
+    def fails(*_: Any, **__: Any) -> None:
+        raise attachments.AttachmentError(f"could not read {SECRET}")
+
+    monkeypatch.setattr(attachments, "prepare", fails)
+    text = f"My key is {SECRET}"
+    delivered = seam.bridge("session.message", _message_args(session_id, text))
+    assert delivered[0] == 200
+    seam.dispatch()
+    refused = seam.bridge("session.message", _message_args(SECRET, text))
+    assert refused[0] != 200
+
+    wstore = seam.ctx.wstore
+    (failed,) = wstore.q("SELECT payload FROM events WHERE kind='client.delivery_failed'")
+    assert SECRET in failed["payload"], "the seeded exception reached the store event"
+    assert wstore.q("SELECT 1 FROM client_admissions WHERE message LIKE ?", (f"%{SECRET}%",))
+
+    records = seam.records()
+    assert SECRET not in json.dumps(records)
+    (attachment,) = _operations(records, action="attachment", stage="failed")
+    assert attachment["reason"] == "attachmenterror"
+    assert attachment["admission_id"] == delivered[2]
+    assert _store_event(records, "client.delivery_failed", admission_id=delivered[2])
+
+
+def test_refusals_carry_the_bridge_id_and_reach_rebuild(seam):
+    opened = seam.bridge("session.open", _open_args())
+    session_id = json.loads(opened[3])["session_id"]
+
+    gated = seam.bridge("session.message", _message_args(session_id), gate=_Gate(False))
+    assert gated[0] == 503
+    invalid = seam.bridge("session.message", {"session_id": session_id})
+    assert invalid[0] == 422
+    unsupported = seam.bridge("no.such.operation", {})
+    assert unsupported[0] == 501
+    unknown = seam.bridge("session.cancel", {"op_id": str(uuid4())})
+    assert unknown[0] == 404
+    history = seam.bridge("session.messages", {"session_id": "no-such-session"})
+    assert history[0] == 404
+    model_request = str(uuid4())
+    model = httpx.post(
+        f"{seam.server.url}/models",
+        json={"actor": "session:x"},
+        headers={"X-Bridge-Request-Id": model_request},
+    )
+    assert model.status_code == 400
+
+    records = seam.records()
+    refused = {r["request_id"]: r for r in _operations(records, stage="refused")}
+    assert refused[gated[1]]["reason"] == "inference_unavailable"
+    assert refused[gated[1]]["session_id"] == session_id
+    assert refused[gated[1]]["details"] == {"status": 503}
+    assert refused[invalid[1]]["reason"] == "invalid"
+    assert refused[unsupported[1]]["reason"] == "unsupported"
+    assert refused[unsupported[1]]["native_event_type"] == "unknown"
+    assert refused[unknown[1]]["reason"] == "not_found"
+    assert refused[unknown[1]]["native_event_type"] == "message_cancel"
+    assert refused[history[1]]["reason"] == "session_selection"
+    assert refused[history[1]]["native_event_type"] == "session.messages"
+    assert refused[model_request]["native_event_type"] == "models"
+    assert refused[model_request]["details"] == {"status": 400}
+
+    datadog = FakeDatadog()
+    datadog.take_lines(raw_lines(Path(os.environ[STREAM_VARIABLE])))
+    report = rebuild_session(LogsSearch(datadog.url, "a", "b"), session_id)
+    datadog.close()
+    stages = [event["stage"] for event in report["events"] if event.get("admission_id") == gated[2]]
+    assert stages == ["refused"]
+
+
+def test_a_refusal_makes_no_call_to_the_seam():
+    calls = []
+
+    def seam_transport(request: httpx.Request) -> httpx.Response:
+        calls.append(request.url.path)
+        return httpx.Response(200, json={})
+
+    async def call() -> int:
+        operation = Operation(id=str(uuid4()), op_id=str(uuid4()), name="no.such", args={})
+        transport = httpx.MockTransport(seam_transport)
+        async with httpx.AsyncClient(transport=transport, base_url="http://seam") as seam_client:
+            async with response(operation, seam_client, seam_client, _Gate(True)) as result:
+                return result.status_code
+
+    assert asyncio.run(call()) == 501
+    assert calls == []
+
+
+def test_a_retried_request_has_a_new_id_and_no_second_acceptance(seam):
+    opened = seam.bridge("session.open", _open_args())
+    session_id = json.loads(opened[3])["session_id"]
+    args = _message_args(session_id)
+    first = seam.bridge("session.message", args)
+    second = seam.bridge("session.message", args, op_id=first[2])
+    records = seam.records()
+    accepted = _operations(records, action="admission", native_event_type="message")
+    assert [r["request_id"] for r in accepted] == [first[1], second[1]]
+    assert {r["admission_id"] for r in accepted} == {first[2]}
+    assert _store_event(records, "client.accepted", admission_id=first[2])
+
+
+def test_a_held_chat_records_its_old_run_and_resumes_on_a_new_one(tmp_path):
+    dispatch = Dispatch(tmp_path)
+    try:
+        op_id = dispatch.say("tune the policy")
+        old_run = dispatch.start_and_fail(
+            op_id, "HTTP 429: slow down", "rate_limit", status_code=429
+        )
+        held = dispatch.admission(op_id)
+        dispatch.clock.now = datetime.fromisoformat(held["resume_after"]) + timedelta(seconds=1)
+        dispatch.tick()
+        dispatch.server.telemetry.flush(10)
+        records = stored_records(Path(os.environ[STREAM_VARIABLE]))
+    finally:
+        dispatch.close()
+    waiting = _store_event(records, "client.waiting", admission_id=op_id)
+    assert waiting["run_id"] == old_run
+    assert waiting["reason"] == "rate_limited"
+    assert waiting["session_id"] == dispatch.session_id
+    assert waiting["details"]["resume_after_s"] > 0
+    resumed = _store_event(records, "client.resumed", admission_id=op_id)
+    assert (resumed["details"]["resume"], resumed["details"]["resumes"]) == (1, 1)
+    started = _operations(
+        records, action="store_event", native_event_type="client.started", admission_id=op_id
+    )
+    assert [r["run_id"] == old_run for r in started] == [True, False]
+    assert started[1]["details"]["resumes"] == 1
+
+
+def test_a_resumed_run_records_no_binding(tmp_path, monkeypatch):
+    """The hook finds a resumed admission on each model call, and it binds nothing to it."""
+    monkeypatch.setattr(
+        "research_core.plugin.executor.profile_env",
+        lambda **_: {"IDE_WORKSPACE": str(tmp_path), "IDE_SESSION_ID": "test-harness"},
+    )
+    dispatch = Dispatch(tmp_path)
+    try:
+        op_id = dispatch.say("tune the policy")
+        dispatch.start_and_fail(op_id, "HTTP 429: slow down", "rate_limit", status_code=429)
+        held = dispatch.admission(op_id)
+        dispatch.clock.now = datetime.fromisoformat(held["resume_after"]) + timedelta(seconds=1)
+        dispatch.tick()
+        assert dispatch.admission(op_id)["status"] == "running"
+        record_native_message(
+            span_for_session=lambda _: trace.INVALID_SPAN,
+            session_id=dispatch.session_id,
+            conversation_history=[{"role": "user", "_row_id": 9}],
+        )
+        dispatch.server.telemetry.flush(10)
+        records = stored_records(Path(os.environ[STREAM_VARIABLE]))
+    finally:
+        dispatch.close()
+    assert not _operations(records, action="admission", stage="bound")
+
+
+def test_a_durable_command_names_its_owner_epoch_and_attempts(seam, monkeypatch):
+    ctx = seam.ctx
+    sessions.register(
+        ctx.wstore,
+        Actor.harness(),
+        session_id="planner",
+        profile="orchestrator",
+        kind="wake",
+        coworld_id=COWORLD,
+    )
+    tool_ctx = ToolContext(
+        role="orchestrator",
+        actor=Actor.session("planner", 3),
+        workspace=ctx.ws,
+        env={"IDE_SESSION_ID": "planner"},
+    )
+    tool_ctx.store, tool_ctx.wstore = ctx.store, ctx.wstore
+    monkeypatch.setattr(transitions, "REQUEST_WAIT_SECONDS", 0)
+    args = {"action": "create", "type": "maintenance", "title": "Repair", "description": "It"}
+    pending = transitions.request(tool_ctx, "task", args, "repair-1")
+    transitions.apply(ctx, "coordinator:one")
+    records = seam.records()
+    command_id = pending["command_id"]
+    requested = _store_event(records, "transition.requested", command_id=command_id)
+    assert (requested["tool_name"], requested["session_id"]) == ("task", "planner")
+    assert requested["lease_epoch"] == 3
+    applied = _store_event(records, "transition.applied", command_id=command_id)
+    assert applied["owner_instance"] == "coordinator:one"
+    assert applied["lease_epoch"] == 3
+    assert applied["details"]["attempts"] == 1
+
+
+def test_a_failed_command_sends_no_error_text(seam):
+    ctx = seam.ctx
+    with ctx.store.tx(Actor.harness()) as tx:
+        tx.event("transition.retry_waiting", "cmd-1", {"error": SECRET, "retry_at": tx.at})
+        tx.event("transition.refused", "cmd-2", {"problems": [SECRET]})
+    records = seam.records()
+    assert SECRET not in json.dumps(records)
+    assert _store_event(records, "transition.retry_waiting")["details"]["retry_at_s"] > 0
+    assert _store_event(records, "transition.refused")["command_id"] == "cmd-2"
+
+
+def test_a_coordinator_report_is_numbers_and_says_nothing_when_unchanged(seam):
+    owner = seam.server.coordinator
+    ctx = seam.ctx
+    reports = []
+    for _ in range(3):
+        reports.append(owner.advance(ctx))
+        reports[-1]["heartbeat"]  # A real report, whose text must not leak below.
+    records = seam.records()
+    written = _operations(records, action="coordinator", stage="report")
+    assert 1 <= len(written) < 3
+    first = written[0]
+    assert first["owner_instance"] == owner.instance_id
+    assert first["coworld_id"] == COWORLD
+    assert all(isinstance(value, bool | int | float) for value in first["details"].values())
+
+
+def test_a_wake_names_its_admission_and_the_events_it_covers(seam):
+    ctx = seam.ctx
+    with ctx.store.tx(Actor.harness()) as tx:
+        seq = tx.event("task.asked", "T-1", {"question": "what next?"})
+    coordinator(ctx).advance_events(ctx)
+    (wake,) = _operations(seam.records(), action="wake", stage="started")
+    [row] = ctx.wstore.q("SELECT * FROM client_admissions")
+    assert (wake["admission_id"], wake["session_id"]) == (row["op_id"], row["session_id"])
+    assert (wake["native_event_type"], wake["coworld_id"]) == ("task.asked", COWORLD)
+    assert (wake["details"]["first_seq"], wake["details"]["batch_size"]) == (seq, 1)
+
+
+def test_a_failed_worker_names_its_successor(seam):
+    ctx = seam.ctx
+    predecessor = assigned(ctx)
+    ctx.hermes.fail(predecessor["run_id"], "crash")
+    owner = coordinator(ctx)
+    owner.reconcile()
+    owner.advance_attempts(ctx)
+    (record,) = _operations(seam.records(), action="execution", stage="successor")
+    successor = ctx.wstore.one("SELECT * FROM client_admissions WHERE origin='continuation'")
+    assert record["admission_id"] == predecessor["op_id"]
+    assert record["execution_attempt_id"] == successor["op_id"]
+    assert record["session_id"] == successor["session_id"]
+    assert record["parent_session_id"] == predecessor["session_id"]
+    assert record["reason"] == "new_session"
+
+
+def test_a_new_runtime_records_what_it_retired(seam):
+    ctx = seam.ctx
+    assigned(ctx)
+    with ctx.wstore.tx(Actor.harness()) as tx:
+        tx.execute("UPDATE client_admissions SET runtime_id='old', execution_uncertain=1")
+    Coordinator(ctx.ws, ctx.hermes, "new").reconcile_inputs(ctx.wstore)
+    (record,) = _operations(seam.records(), action="coordinator", stage="runtime_recovered")
+    assert record["details"] == {"retired_runtimes": 1}
+
+
+def test_a_failed_pass_records_its_type_and_no_text(seam, monkeypatch):
+    def fails() -> None:
+        seam.server.stopping.set()  # So that the loop ends after this pass.
+        raise RuntimeError(SECRET)
+
+    monkeypatch.setattr(seam.server, "coordinate_once", fails)
+    asyncio.run(seam.server.coordinate_forever())
+    records = seam.records()
+    (record,) = _operations(records, action="coordinator", stage="failed")
+    assert (record["native_event_type"], record["reason"]) == ("workflow", "runtimeerror")
+    assert SECRET not in json.dumps(records)
+
+
+def test_report_details_keep_counts_and_drop_text():
+    details = observed.report_details(
+        {
+            "waits": {"errors": [{"error": SECRET}], "resolved": []},
+            "merge": {"skipped": f"paused {SECRET}"},
+            "store_checks": {"cow:Fake": {"unmarked_writes": 2}},
+            "dispatch": {"slots": 2, "deferred": None},
+            "heartbeat": {"has_work": True},
+        }
+    )
+    assert details == {
+        "waits.errors": 1,
+        "waits.resolved": 0,
+        "merge.skipped": True,
+        "store_checks.cow_fake.unmarked_writes": 2,
+        "dispatch.slots": 2,
+        "heartbeat.has_work": True,
+    }
+
+
+def test_attachment_outcomes_are_recorded_and_only_the_message_goes_on(seam, monkeypatch):
+    outcomes = [{"type": "pdf", "change": "rendered", "size_bytes": 900, "details": {"pages": 2}}]
+    native = {"role": "user", "content": [{"type": "text", "text": "saved at: /x"}]}
+
+    def run(*_: Any, **__: Any) -> subprocess.CompletedProcess:
+        stdout = json.dumps({"message": native, "outcomes": outcomes})
+        return subprocess.CompletedProcess([], 0, stdout=stdout, stderr="")
+
+    monkeypatch.setattr(attachments.subprocess, "run", run)
+    message = UserMessage.model_validate(
+        {
+            "role": "user",
+            "content": [{"type": "file", "file": {"filename": "a.pdf", "file_data": "data:x"}}],
+        }
+    )
+    prepared = attachments.prepare(
+        message,
+        ws=seam.ctx.ws,
+        env={},
+        hermes_bin="hermes",
+        admission_id="op",
+        session_id="ses",
+    )
+    assert prepared.root == native
+    (record,) = _operations(seam.records(), action="attachment", stage="prepared")
+    assert (record["native_event_type"], record["outcome"]) == ("pdf", "rendered")
+    assert (record["size_bytes"], record["details"]) == (900, {"pages": 2})
+    assert (record["admission_id"], record["session_id"]) == ("op", "ses")
+
+
+def test_a_workspace_tool_subprocess_records_its_work_and_stdout_stays_its_result(tmp_path, capfd):
+    """``run_in_workspace`` takes the last stdout line of a real ``research tool`` process. The
+    child writes one completion and its commits with the call IDs. It writes no span of its own:
+    since #223 its caller's span covers the call, so its completion needs ``run_tool``'s clock."""
+    stream = tmp_path / "telemetry-stream"
+    env = {
+        **os.environ,
+        "IDE_WORKSPACE": str(tmp_path / "ws"),
+        "IDE_WORKSPACE_ENV": sys.prefix,
+        "IDE_PLATFORM": "fake",
+        "IDE_WORKSPACE_ID": "wrk-tool",
+        "IDE_ROLE": "orchestrator",
+        "IDE_SESSION_ID": "ses_1",
+        "IDE_TOOL_CALL_ID": "call_7",
+        "IDE_RUN_ID": "run_7",
+        STREAM_VARIABLE: str(stream),
+    }
+    ws = layout.from_env(env)
+    Store.open(ws.store_path, kind="workspace").close()
+    args = {"action": "update", "key": "max_researchers", "value": 2, "cites": "a test"}
+    assert json.loads(executor.run_in_workspace("settings", args, env))["ok"] is True
+    assert '"name": "execute_tool"' not in capfd.readouterr().err
+    records = stored_records(stream)
+    (record,) = _operations(records, action="workspace_tool", stage="completed")
+    assert record["producer"] == observed.COMMAND_WRITER
+    assert record["workspace_id"] == "wrk-tool"
+    assert (record["tool_call_id"], record["run_id"]) == ("call_7", "run_7")
+    assert (record["tool_name"], record["session_id"]) == ("settings", "ses_1")
+    committed = _operations(records, action="store_event")
+    assert committed
+    assert {(r["tool_call_id"], r["run_id"]) for r in committed} == {("call_7", "run_7")}
+
+    # The whole of its stdout, not only what ``run_in_workspace`` keeps of it.
+    stdout = subprocess.run(
+        [str(ws.venv_python), "-m", "research_core.cli", "tool", "settings", "--args"]
+        + [json.dumps({"action": "read"})],
+        env=executor.workspace_process_env(env, ws),
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    assert len(stdout.splitlines()) == 1
+    assert json.loads(stdout)["ok"] is True and "service" not in stdout
+
+
+def test_a_tool_of_an_actions_own_records_the_action_it_stands_for(tmp_path, monkeypatch):
+    calls = []
+    monkeypatch.setattr(observed, "record", lambda *names, **fields: calls.append((names, fields)))
+    name, spec = next((name, spec) for name, spec in _tools().items() if spec.split_from)
+    role = min(spec.roles)
+    run_tool(name, {}, ToolContext.from_env(role, {"IDE_WORKSPACE": str(tmp_path / "ws")}))
+    (fields,) = [fields for names, fields in calls if names == ("workspace_tool", "completed")]
+    assert (fields["tool_name"], fields["native_event_type"]) == spec.split_from
+
+
+def _tools() -> dict[str, Any]:
+    from research_core.tools.catalog import _load_tool_modules
+
+    _load_tool_modules()
+    return TOOLS
+
+
+def test_the_handler_passes_the_native_call_ids_to_the_subprocess(monkeypatch):
+    monkeypatch.setattr(
+        executor, "hermes_call_ids", lambda: {"run_id": "run_9", "tool_call_id": "call_9"}
+    )
+    env = executor.tool_env("researcher", "ses_9", {})
+    assert (env["IDE_RUN_ID"], env["IDE_TOOL_CALL_ID"]) == ("run_9", "call_9")
+    monkeypatch.setattr(executor, "hermes_call_ids", dict)
+    assert "IDE_TOOL_CALL_ID" not in executor.tool_env("researcher", "ses_9", {})

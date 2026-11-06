@@ -33,6 +33,10 @@ Two conveniences sit beside the contract's routes: ``GET /`` (and ``/ui``) serve
 page ``ui/index.html``, a self-contained page that exercises every route from a browser, and
 ``GET /status`` answers what ``research watcher status`` prints, read from the workspace store,
 so the page can show the watcher's liveness without a shell.
+
+The HTTP boundary also records each POST to ``RECORDED_ROUTES`` as metadata
+(``SeamServer.record_request``). A header
+carries the bridge's ID. ``agent_telemetry/CONTRACT.md`` says what is recorded and how it joins.
 """
 
 from __future__ import annotations
@@ -44,14 +48,16 @@ import json
 import logging
 import os
 import shutil
+import signal
 import subprocess
 import threading
 import time
 import traceback
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Mapping
 from concurrent.futures import ThreadPoolExecutor
 from contextlib import contextmanager
 from datetime import UTC, datetime, timedelta
+from functools import partial
 from http import HTTPStatus
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from importlib import resources
@@ -64,6 +70,7 @@ from httpx import HTTPError
 from opentelemetry import trace
 
 from research_core import attachments, contract, inference, intake, layout, profile_models
+from research_core.agent_telemetry import Producer, TelemetryWriter, observed, stream_path
 from research_core.attachments import AttachmentError
 from research_core.coordinator import Coordinator, ownership
 from research_core.messages import UserMessage
@@ -90,6 +97,8 @@ TAIL_INTERVAL_S = 0.5  # how often the stream looks for new events rows (A.11)
 KEEPALIVE_S = 10.0  # an SSE comment keeps an idle connection open through proxies
 STREAM_BATCH = 500
 DEFAULT_PORT = 8650
+SERVE_WRITER = "research-serve"
+TELEMETRY_STOP_FLUSH_S = 3.0  # ``image/processes.py`` gives this process ten seconds to stop
 WATCHER_INTERVAL_S = 60.0
 RUN_POLL_INTERVAL_S = 1.0
 DEFAULT_ACTOR = "user:local"
@@ -97,6 +106,18 @@ RETRY_AFTER_S = 1
 UI_ACTIONS = ("answer", "reaction")
 # An applied input response is its ``client.input_responded`` event, keyed by the client's op_id.
 INPUT_RESPONSE = "SELECT payload FROM events WHERE kind='client.input_responded' AND subject=?"
+# The bridge envelope's ``id``. ``Idempotency-Key`` holds its ``op_id``. Readers join this to the
+# platform's ``workspace_request_id``. It is a header because an admission's body must stay the same
+# when a request is retried, and each attempt has its own ID.
+BRIDGE_REQUEST_HEADER = "X-Bridge-Request-Id"
+RECORDED_ROUTES = {
+    "/session-open": "session_open",
+    "/message": "message",
+    "/message-cancel": "message_cancel",
+    "/ui-action": "ui_action",
+    "/store/apply": "store_apply",
+    "/models": "models",
+}
 PAGE_PATHS = ("/", "/ui")
 PAGE_FILE = resources.files("research_core").joinpath("ui", "index.html")
 
@@ -169,6 +190,36 @@ def _actor(text: str | None) -> Actor:
         raise Refused(HTTPStatus.BAD_REQUEST, error.error, problems=error.problems) from None
 
 
+def _error_name(error: BaseException) -> str:
+    """An exception's type, as a record can hold it. Its text can hold anything."""
+    return type(error).__name__.lower()
+
+
+def _accepted_fields(path: str, body: dict, result: dict) -> dict[str, Any]:
+    """What an accepted request's reply and validated body can say about it."""
+    fields: dict[str, Any] = {
+        "session_id": result.get("session_id"),
+        "run_id": result.get("run_id"),
+    }
+    if result.get("op_id"):
+        fields["admission_id"] = result["op_id"]
+    if isinstance(body.get("actor"), str):
+        fields["reported_actor"] = body["actor"]
+    if path == "/session-open":
+        scope = result["session_scope"]
+        capabilities = body.get("capabilities")
+        client_kind = result["client"]["kind"]
+        fields.update(
+            kind="chat",
+            session_scope=scope["scope"],
+            coworld_id=scope["coworld"],
+            league_id=scope["league"],
+            initiator=client_kind,
+            details={"capabilities": len(capabilities)} if capabilities else {},
+        )
+    return fields
+
+
 def _model_refusal(error: ModelError) -> Refused:
     status = HTTPStatus.NOT_FOUND if error.not_found else HTTPStatus.BAD_REQUEST
     return Refused(status, error.error, problems=error.problems)
@@ -221,6 +272,11 @@ class SeamServer:
         self._acknowledged_receipts: dict[str, str] = {}
         self._last_native_poll: dict[tuple[str, str], float] = {}
         self.stopping = threading.Event()
+        # What the coordinator records goes through here: metadata only, because it has no scanner.
+        self.telemetry = TelemetryWriter(
+            stream_path(), Producer.for_process(SERVE_WRITER, self.env)
+        )
+        observed.bind(self.telemetry)
         # Initialize the schema before the dispatcher and HTTP handlers can open it concurrently.
         with Store.open(self.ws.store_path, kind="workspace") as store:
             self.coordinator.reconcile_inputs(store)
@@ -272,6 +328,13 @@ class SeamServer:
             )
             if isinstance(result, BaseException):
                 log.error("Watcher observation failed", exc_info=result)
+                observed.record(
+                    "coordinator",
+                    "failed",
+                    native_event_type="observe",
+                    reason=_error_name(result),
+                    owner_instance=self.coordinator.instance_id,
+                )
             await asyncio.to_thread(self.stopping.wait, WATCHER_INTERVAL_S)
 
     def observe_once(self) -> None:
@@ -284,6 +347,13 @@ class SeamServer:
             )
             if isinstance(result, BaseException):
                 log.error("Coordinator workflow failed", exc_info=result)
+                observed.record(
+                    "coordinator",
+                    "failed",
+                    native_event_type="workflow",
+                    reason=_error_name(result),
+                    owner_instance=self.coordinator.instance_id,
+                )
             await asyncio.to_thread(wait_for_change, change_version(), 0.5)
 
     def coordinate_once(self) -> None:
@@ -319,6 +389,12 @@ class SeamServer:
         self.stopping.set()
         self._http.shutdown()
         self._http.server_close()
+        self.stop_telemetry()
+
+    def stop_telemetry(self) -> None:
+        """Write out what the queue holds, within a bound. Safe to call more than once."""
+        observed.unbind(self.telemetry)
+        self.telemetry.close(TELEMETRY_STOP_FLUSH_S)
 
     # --- stores ---------------------------------------------------------------------------
 
@@ -681,6 +757,8 @@ class SeamServer:
                             ws=self.ws,
                             env=self.env,
                             hermes_bin=self.hermes_bin,
+                            admission_id=row["op_id"],
+                            session_id=row["session_id"],
                         ),
                         return_exceptions=True,
                     )
@@ -692,6 +770,13 @@ class SeamServer:
                             str(prepared)
                             if isinstance(prepared, AttachmentError)
                             else type(prepared).__name__
+                        )
+                        observed.record(
+                            "attachment",
+                            "failed",
+                            admission_id=row["op_id"],
+                            session_id=row["session_id"],
+                            reason=_error_name(prepared),
                         )
                         with stores.wstore.tx(actor) as tx:
                             tx.execute(
@@ -1011,6 +1096,44 @@ class SeamServer:
     def run_status(self, run_id: str) -> dict:
         return dataclasses.asdict(self.hermes.status(run_id, profile=self.profile))
 
+    # --- what the HTTP boundary records ----------------------------------------------------
+
+    def record_request(
+        self,
+        path: str,
+        headers: Mapping[str, str],
+        body: dict,
+        status: int,
+        *,
+        result: dict | None = None,
+        reason: str | None = None,
+    ) -> None:
+        """One record per request, the only one that carries the bridge's ID. A second attempt of
+        an admission has a new ``request_id`` and writes no second ``client.accepted``."""
+        try:
+            # Only a string has its tokens masked, and a refused body can hold anything.
+            op_id = body.get("op_id")
+            fields: dict[str, Any] = {
+                "request_id": headers.get(BRIDGE_REQUEST_HEADER),
+                "operation_id": headers.get("Idempotency-Key"),
+                "admission_id": op_id if isinstance(op_id, str) else None,
+                "size_bytes": int(headers.get("Content-Length") or 0),
+                "native_event_type": RECORDED_ROUTES[path],
+            }
+            if reason is not None:
+                # What the client sent, unchecked. Only a string goes through the token mask.
+                session_id = body.get("session_id")
+                fields["session_id"] = session_id if isinstance(session_id, str) else None
+                observed.record(
+                    "admission", "refused", reason=reason, details={"status": status}, **fields
+                )
+                return
+            fields.update(_accepted_fields(path, body, result))
+            fields["details"] = {"status": status, **fields.get("details", {})}
+            observed.record("admission", "accepted", **fields)
+        except Exception as error:  # A record must never change the reply.
+            log.warning("Request not recorded: %s", type(error).__name__)
+
     # --- models ---------------------------------------------------------------------------
 
     def models(self) -> dict:
@@ -1290,20 +1413,27 @@ class _Handler(BaseHTTPRequestHandler):
             "/store/apply": seam.store_apply,
             "/models": seam.set_model,
         }
+        unrecorded = path in RECORDED_ROUTES
+        body: dict = {}
         try:
             handler = routes.get(path)
             if handler is None:
                 raise Refused(HTTPStatus.NOT_FOUND, f"no route POST {path}")
             with span("workspace.http", context=propagator.extract(self.headers)):
-                result = handler(self._body())
+                body = self._body()
+                result = handler(body)
             status = (
                 HTTPStatus.ACCEPTED
                 if path == "/store/apply" and "status" in result and result["status"] == "pending"
                 else HTTPStatus.OK
             )
+            if unrecorded:
+                unrecorded = False  # A reply that cannot be written is not a second outcome.
+                seam.record_request(path, self.headers, body, status, result=result)
             self._json(status, result)
         except Exception as error:  # noqa: BLE001 - every failure becomes a JSON error
-            self._error(error)
+            record = partial(seam.record_request, path, self.headers, body) if unrecorded else None
+            self._error(error, record)
 
     # -- bodies and replies -----------------------------------------------------------------
 
@@ -1336,28 +1466,33 @@ class _Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(data)
 
-    def _error(self, error: Exception) -> None:
+    def _error(self, error: Exception, record: Callable[..., None] | None = None) -> None:
+        """Answer with what ``error`` means. ``record`` gets the status and a reason with no free
+        text, before the reply goes out."""
         if isinstance(error, RunsError):
             error = _gateway_error(error)
+        headers = None
         if isinstance(error, Refused):
-            self._json(error.status, error.body, error.headers)
+            status, body, headers = error.status, error.body, error.headers
         elif isinstance(error, ValueError):
-            self._json(HTTPStatus.BAD_REQUEST, {"ok": False, "error": str(error), "problems": []})
+            status = HTTPStatus.BAD_REQUEST
+            body = {"ok": False, "error": str(error), "problems": []}
         elif isinstance(error, StoreError):
-            body = {"ok": False, "error": str(error), "problems": list(error.problems)}
             status = HTTPStatus.NOT_FOUND if isinstance(error, NotFound) else HTTPStatus.BAD_REQUEST
-            self._json(status, body)
+            body = {"ok": False, "error": str(error), "problems": list(error.problems)}
         else:
             log.exception("request failed: %s %s", self.command, self.path)
-            self._json(
-                HTTPStatus.INTERNAL_SERVER_ERROR,
-                {
-                    "ok": False,
-                    "error": f"{type(error).__name__}: {error}",
-                    "problems": [],
-                    "traceback": traceback.format_exc()[-2000:],
-                },
-            )
+            status = HTTPStatus.INTERNAL_SERVER_ERROR
+            body = {
+                "ok": False,
+                "error": f"{type(error).__name__}: {error}",
+                "problems": [],
+                "traceback": traceback.format_exc()[-2000:],
+            }
+        if record is not None:
+            phrase = HTTPStatus(status).phrase.lower().replace(" ", "_")
+            record(status, reason=body.get("kind") or body.get("code") or phrase)
+        self._json(status, body, headers)
 
     # -- the event stream -------------------------------------------------------------------
 
@@ -1454,6 +1589,7 @@ def run(args: argparse.Namespace) -> int:
         env=dict(env),
     )
     print(f"research serve: {server.url} (profile {args.profile}, Hermes {hermes.base_url})")
+    signal.signal(signal.SIGTERM, _flush_then_die(server))
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -1461,6 +1597,17 @@ def run(args: argparse.Namespace) -> int:
     finally:
         server.shutdown()
     return 0
+
+
+def _flush_then_die(server: SeamServer) -> Callable[[int, Any], None]:
+    """SIGTERM has always ended this process at once, and it still does, just after the flush."""
+
+    def stop(signum: int, _frame: Any) -> None:
+        server.stop_telemetry()
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    return stop
 
 
 def main(argv: list[str] | None = None) -> int:

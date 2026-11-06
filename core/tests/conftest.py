@@ -7,6 +7,7 @@ from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 
 from research_core import telemetry
+from research_core.agent_telemetry import observed
 from research_core.agent_telemetry.stream import STREAM_VARIABLE
 
 
@@ -30,3 +31,11 @@ def stream_file(tmp_path, monkeypatch):
     path = tmp_path / "telemetry-stream"
     monkeypatch.setenv(STREAM_VARIABLE, str(path))
     return path
+
+
+@pytest.fixture(autouse=True)
+def no_writer_left_bound():
+    """A process has one telemetry writer, and many tests here never shut their server down."""
+    yield
+    if observed._binding is not None:
+        observed.unbind(observed._binding.writer)
