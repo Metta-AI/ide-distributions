@@ -365,6 +365,8 @@ class Result:
     detours: list[str] = field(default_factory=list)  # other calls made before the judged one
     # Fields the judged call's reasoning names but its arguments omit (see ``reasoning_gaps``).
     reasoning_gaps: list[str] = field(default_factory=list)
+    # Outcomes of the later calls of the judged action, after an invalid one in a forced turn.
+    later_attempts: list[str] = field(default_factory=list)
 
 
 def reasoning_gaps(
@@ -466,6 +468,14 @@ def judged_rate(results: list[Result]) -> tuple[int, int]:
     return sum(r.outcome == "valid" for r in judged), len(judged)
 
 
+def _recovered_later(results: list[Result]) -> str:
+    """Of the runs whose judged call was invalid, how many sent a valid one later in the turn."""
+    invalid = [r for r in results if r.outcome == "invalid"]
+    if not invalid:
+        return "-"
+    return f"{sum('valid' in r.later_attempts for r in invalid)}/{len(invalid)}"
+
+
 def _rate(results: list[Result]) -> str:
     valid, total = judged_rate(results)
     if not total:
@@ -528,6 +538,7 @@ def summary() -> list[str]:
         footer("after 3 refusals", with_refusals(3)),
         footer("valid, all cases", _rate),
         footer("valid, no detour", lambda rs: _rate([r for r in rs if not r.detours])),
+        footer("invalid, valid later", _recovered_later),
         footer("reasoning gaps", _gap_counts),
         footer("prompt tokens", _first_prompt_tokens),
         footer("cached share", _cached),

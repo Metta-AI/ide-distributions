@@ -115,6 +115,9 @@ and the model's next call is judged. It runs like the command above, with this f
 `test_real_session.py` and `--add-host proxy.openrouter.ai:127.0.0.1` added to `docker run`: Hermes
 shapes a request by its base URL, and that name makes the proxy count as OpenRouter (about $1).
 
+The rate counts that next call alone. After a bad one, the turn runs on for up to three more calls
+of the action, and the line `invalid, valid later` shows how many got there in the end.
+
 Each request keeps only the latest of identical refused calls (`plugin/repeats.py`,
 `without_repeated_refusals`). A batch of calls stays, and so does a result carrying more than loop
 guard notes, such as a user's mid-turn message. Rates of the next call on Kimi K3.1 Pro. The first
