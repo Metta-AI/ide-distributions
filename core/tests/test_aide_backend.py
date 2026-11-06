@@ -191,13 +191,13 @@ def system(tmp_path):
     worker.join(timeout=10)
 
 
-def run(system, scenario, inference=None):
+def run(system, scenario, inference=None, seam_transport=None, gateway=None):
     ctx, hermes, server = system
-    gateway = Gateway(hermes)
+    gateway = gateway or Gateway(hermes)
 
     async def main():
         async with (
-            httpx.AsyncClient(base_url=server.url) as seam,
+            httpx.AsyncClient(base_url=server.url, transport=seam_transport) as seam,
             httpx.AsyncClient(
                 base_url="http://gateway/p/orchestrator/",
                 transport=httpx.MockTransport(gateway.handle),
@@ -437,6 +437,105 @@ def test_a_dropped_run_stream_resumes_from_its_last_sequence_without_duplicates(
         assert seqs == list(range(1, 7))
 
     run(system, scenario)
+
+
+class SeamFault(httpx.AsyncBaseTransport):
+    """The real seam, except that the ``failing``-th matching request gets no answer: it times out
+    before reaching the route, or after the route has committed and answered."""
+
+    def __init__(self, method, path, failing, *, committed):
+        self.real = httpx.AsyncHTTPTransport()
+        self.method, self.path, self.failing, self.committed = method, path, failing, committed
+        self.matched = 0
+        self.answers: list[int] = []  # the status of each matching request after the fault
+
+    async def handle_async_request(self, request):
+        if (request.method, request.url.path) != (self.method, self.path):
+            return await self.real.handle_async_request(request)
+        self.matched += 1
+        if self.matched == self.failing and not self.committed:
+            raise httpx.ReadTimeout("timed out before the route")
+        response = await self.real.handle_async_request(request)
+        if self.matched == self.failing:
+            await response.aclose()
+            raise httpx.ReadTimeout("timed out after the route committed")
+        if self.matched > self.failing:
+            self.answers.append(response.status_code)
+        return response
+
+
+@pytest.mark.parametrize("committed", [False, True], ids=["before-commit", "after-commit"])
+@pytest.mark.parametrize(
+    "failing",
+    # The second append is the merged text of a batch, with the tool call still to be sent.
+    [1, 2],
+    ids=["one-event", "first-of-two-events"],
+)
+def test_an_append_with_no_answer_ends_the_backend_and_the_next_one_resumes_the_log(
+    system, failing, committed
+):
+    _, hermes, _ = system
+    gateway = Gateway(hermes)
+    fault = SeamFault("POST", "/message-events", failing, committed=committed)
+    request_id = str(uuid4())
+
+    async def send(backend, gateway, ctx, hermes):
+        session_id = await opened(backend)
+        params = {"session_id": session_id, "messages": say("hi"), "scope": WORKSPACE}
+        await call(backend, "chat.send", params, request_id=request_id)
+        await until(lambda: backend.socket.notes("chat.finished"))
+
+    with pytest.raises(ExceptionGroup) as ended:
+        run(system, send, seam_transport=fault, gateway=gateway)
+    (refusal,) = ended.value.exceptions
+    assert isinstance(refusal, aide.Refusal) and refusal.code == "unavailable"
+    assert isinstance(refusal.__cause__, httpx.ReadTimeout)
+    # It stopped there: no later event reached the log, and the stream was not followed again.
+    assert fault.answers == [] and len(gateway.event_requests) == 1
+
+    async def resume(backend, gateway, ctx, hermes):
+        (session_id,) = hermes.sessions
+        # The reloaded frontend subscribes before the new backend's first await.
+        state = {"resource": "sessions", "id": session_id, "scope": WORKSPACE}
+        await call(backend, "state.get", state)
+        await until(lambda: backend.socket.notes("chat.finished"))
+        read = (await events_read(backend, session_id, request_id))["result"]
+        assert [cursor(e) for e in read["events"]] == [(0, n) for n in range(1, 7)]
+        assert [e["kind"] for e in read["events"]] == [
+            "reasoning",
+            "text.delta",
+            "tool.started",
+            "tool.completed",
+            "text.delta",
+            "finished",
+        ]
+        assert read["done"] is True
+        # The next backend pushes only what the log did not hold, so a push answered by a timeout
+        # stays lost; the frontend reads it with chat.events.
+        logged_before = failing if committed else failing - 1
+        pushed = [n["event"]["seq"] for n in backend.socket.notes("chat.event")]
+        assert pushed == list(range(logged_before + 1, 7))
+
+    run(system, resume, gateway=gateway)
+    assert [name for name, _ in hermes.calls].count("start") == 1
+
+
+def test_a_failed_read_for_a_push_follows_the_stream_again_and_loses_nothing(system):
+    """Unlike an append, a read leaves the log's position alone, so the consumer keeps going."""
+    fault = SeamFault("GET", "/session-pending", 2, committed=False)
+
+    async def scenario(backend, gateway, ctx, hermes):
+        session_id = await opened(backend)
+        params = {"session_id": session_id, "messages": say("hi"), "scope": WORKSPACE}
+        await call(backend, "chat.send", params)
+        await until(lambda: backend.socket.notes("chat.finished"))
+        assert len(gateway.event_requests) == 2
+        seqs = [n["event"]["seq"] for n in backend.socket.notes("chat.event")]
+        assert seqs == list(range(1, 7))
+        messages = backend.socket.notes("chat.message")
+        assert [m["message"]["role"] for m in messages] == ["assistant", "tool", "assistant"]
+
+    run(system, scenario, seam_transport=fault)
 
 
 def test_a_rebuilt_backend_resumes_pushes_for_an_open_request_without_a_new_send(system):

@@ -129,11 +129,15 @@ resume after their log's last row. A restart recycles the gateway too, so what h
 the log and pushes not yet sent are lost. A run the gateway lost ends `interrupted` once the seam
 settles it, and its logged events stay readable for as long as the request record.
 
-A session the gateway does not have reads as having no messages, so its requests still close, and
-a consumer follows a dropped run stream again. Any other failure in a consumer, or a seam error
-answer to the event watcher's `recover()` or `changed()`, ends the backend, which recycles the
-whole runtime. Nothing retries the failed call, so a failure that lasts across boots can
-crash-loop the workspace.
+A session the gateway does not have reads as having no messages, so its requests still close. A
+consumer follows its run stream again when the stream drops or a read for a push fails, since
+neither moves its place in the log. Any other failure in a consumer, or a seam error answer to the
+event watcher's `recover()` or `changed()`, ends the backend, which recycles the whole runtime.
+That includes an append with no answer, such as a timeout: it may have committed, and the consumer
+has already moved past that event, so going on would leave a gap. The next backend resumes from
+the log, so an append that committed before the timeout is not pushed again and only `chat.events`
+returns it. Nothing retries the failed call, so a failure that lasts across boots can crash-loop
+the workspace.
 
 The normal image smoke checks execute the real packaged adapter against its running
 seam, including the previously accepted-by-the-stub invalid actor field. Real model
