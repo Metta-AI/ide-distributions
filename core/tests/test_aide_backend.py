@@ -1381,6 +1381,36 @@ def test_an_unexpected_failure_answers_only_its_request(
     run(system, scenario)
 
 
+def test_a_send_that_fails_after_its_commit_still_runs_once_and_finishes(system, caplog):
+    async def scenario(backend, gateway, ctx, hermes):
+        session_id = await opened(backend)
+        real_call = backend.call
+
+        async def fails_after_committing(client, method, path, **kwargs):
+            response = await real_call(client, method, path, **kwargs)
+            if path == "/message":
+                backend.call = real_call
+                raise KeyError("a bug after the commit")
+            return response
+
+        backend.call = fails_after_committing
+        request_id = str(uuid4())
+        params = {"session_id": session_id, "messages": say("hi"), "scope": WORKSPACE}
+        failed = await call(backend, "chat.send", params, request_id=request_id)
+        assert code(failed) == "unavailable"
+        assert failed["error"]["data"]["outcome"] == "unknown"
+        assert "chat.send failed unexpectedly" in caplog.text
+
+        # The admission is committed, so the event watcher gives the run its consumer.
+        await until(lambda: backend.socket.notes("chat.finished"))
+        retried = await call(backend, "chat.send", params, request_id=request_id)
+        assert retried["result"]["accepted"] is True
+        assert len(hermes.runs) == 1
+        assert len(backend.socket.notes("chat.finished")) == 1
+
+    run(system, scenario)
+
+
 def test_history_pages_by_a_stable_boundary_reads_forward_and_bounds_each_reply(system):
     async def scenario(backend, gateway, ctx, hermes):
         session_id = await opened(backend)
