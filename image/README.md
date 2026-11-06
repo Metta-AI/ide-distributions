@@ -38,7 +38,11 @@ and handles each answer: `accepted` ends the cycle; `intent_changed` is reported
 `stale_pod` and `unknown_workspace` stop reporting. A failed report (transport error or 5xx)
 is retried with backoff; an idle sleep is undone first, so messages are served meanwhile, and a
 requested one stays prepared. A failed report never forces anything. The status `detail` names
-the `waiting_on` reasons that keep the workspace awake. Restart calls wake with the retained
+the `waiting_on` reasons that keep the workspace awake. A `wake` control (a Resume or Wake that
+reached a pod still prepared or preparing for sleep) stops the cycle, including an in-flight
+report or its retry, and runs `research workspace wake`, the same undo a refused sleep uses.
+Every status reply lists `"controls": ["status", "sleep_request", "wake"]`, so the platform can
+tell this image from older ones, which it restarts instead of sending `wake`. Restart calls wake with the retained
 filesystem.
 
 The release dispatcher passes the distribution commit to Metta's generic build workflow.

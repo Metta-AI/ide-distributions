@@ -32,6 +32,8 @@ class Workspace:
         self.answers = answers
         self.reports: list[dict] = []
         self.commands: list[str] = []
+        # While set, a report waits here: the platform has not answered yet.
+        self.gate: asyncio.Event | None = None
         self.seam = httpx.AsyncClient(
             transport=httpx.MockTransport(self.status), base_url="http://seam"
         )
@@ -56,9 +58,11 @@ class Workspace:
             },
         )
 
-    def report(self, request: httpx.Request) -> httpx.Response:
+    async def report(self, request: httpx.Request) -> httpx.Response:
         assert (request.method, request.url.path) == ("POST", f"/{ROOT}/sleep")
         self.reports.append(json.loads(request.content))
+        if self.gate is not None:
+            await self.gate.wait()
         answer = self.answers.pop(0)
         if isinstance(answer, Exception):
             raise answer
@@ -94,6 +98,7 @@ def test_the_image_reports_sleep_after_idle_and_not_while_there_is_work(monkeypa
             "ready": True,
             "ready_for_sleep": False,
             "detail": "Awake for admission:a-1:running",
+            "controls": ["status", "sleep_request", "wake"],
         }
         workspace.waiting_on = []
         async with asyncio.timeout(5):
@@ -176,6 +181,57 @@ def test_a_requested_sleep_stays_prepared_and_retries_its_report(monkeypatch):
         reply = await workspace.lifecycle.status(
             control.ControlRequest(id=uuid4(), control="status"), workspace.seam
         )
-        assert reply == {"ready": True, "ready_for_sleep": True, "detail": ""}
+        assert reply == {
+            "ready": True,
+            "ready_for_sleep": True,
+            "detail": "",
+            "controls": ["status", "sleep_request", "wake"],
+        }
+
+    asyncio.run(scenario())
+
+
+def send(workspace: Workspace, kind: str):
+    return workspace.lifecycle.status(
+        control.ControlRequest(id=uuid4(), control=kind), workspace.seam
+    )
+
+
+def test_wake_undoes_a_prepared_sleep_and_restarts_the_idle_timer():
+    """A Resume reached the pod after its Pause was reported: the image serves again."""
+
+    async def scenario():
+        workspace = Workspace([accepted()])
+        await send(workspace, "sleep_request")
+        await workspace.lifecycle.cycle
+        assert workspace.lifecycle.prepared and workspace.commands == ["sleep"]
+        before = workspace.lifecycle.last_busy
+        reply = await send(workspace, "wake")
+        assert reply["ready_for_sleep"] is False and "wake" in reply["controls"]
+        assert workspace.commands == ["sleep", "wake"]
+        assert not workspace.lifecycle.requested and not workspace.lifecycle.idle_due()
+        assert workspace.lifecycle.last_busy > before
+
+    asyncio.run(scenario())
+
+
+def test_wake_stops_an_in_flight_sleep_report():
+    """A wake that races the report cancels it and its retries: nothing reports afterwards."""
+
+    async def scenario():
+        workspace = Workspace([accepted(), accepted()])
+        workspace.gate = asyncio.Event()
+        await send(workspace, "sleep_request")
+        async with asyncio.timeout(5):
+            while not workspace.reports:
+                await asyncio.sleep(0.01)
+        cycle = workspace.lifecycle.cycle
+        reply = await send(workspace, "wake")
+        assert cycle.cancelled()
+        assert reply["ready_for_sleep"] is False
+        assert workspace.commands == ["sleep", "wake"]
+        workspace.gate.set()
+        await asyncio.sleep(0.05)
+        assert len(workspace.reports) == 1 and not workspace.lifecycle.prepared
 
     asyncio.run(scenario())

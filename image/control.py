@@ -6,7 +6,8 @@ thirty seconds, and after fifteen minutes without work it prepares for sleep
 (Metta spec 0149). The platform then releases compute or refuses with a typed reason. A failed
 report never authorizes anything: an idle sleep that cannot be reported is undone so the
 workspace keeps serving, and tried again later. The ``status`` and ``sleep_request`` control
-envelopes stay for the platform's legacy poll.
+envelopes stay for the platform's legacy poll; ``wake`` undoes a preparation when a Resume or
+Wake reaches a pod that has not been replaced.
 """
 
 import asyncio
@@ -31,12 +32,16 @@ log = logging.getLogger(__name__)
 IDLE_S = 900.0
 CHECK_S = 30.0
 REPORT_BACKOFF_S = (30.0, 60.0, 120.0, 300.0, 600.0)
+# Every status reply names the controls this image answers, so the platform can tell an image
+# that undoes sleep preparation on ``wake`` from an older one, which it restarts instead.
+CONTROLS = ("status", "sleep_request", "wake")
+DETAIL_MAX = 1024
 
 
 class ControlRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
     id: UUID
-    control: Literal["status", "sleep_request"]
+    control: Literal["status", "sleep_request", "wake"]
 
 
 class SleepAccepted(BaseModel):
@@ -83,12 +88,17 @@ class Lifecycle:
         self.stopped: str | None = None
         self.failures = 0
         self.next_attempt = 0.0
+        self.waking = asyncio.Lock()
 
     async def research(self, command: str) -> int:
         process = await asyncio.create_subprocess_exec(
             "/opt/workspace-env/bin/research", "workspace", command, env=self.env
         )
-        return await process.wait()
+        try:
+            return await process.wait()
+        finally:
+            # A cancelled cycle still lets its command finish, so a wake never races a sleep.
+            await process.wait()
 
     async def observe(self, seam: httpx.AsyncClient) -> dict:
         response = await seam.get("/status")
@@ -196,10 +206,31 @@ class Lifecycle:
         return SleepAnswer.validate_python(response.json())
 
     async def wake(self) -> None:
+        """Undo sleep preparation so the app serves again: the image's only way to un-pause,
+        used by the platform's ``wake`` (:meth:`release`) and by a sleep the platform refused."""
         code = await self.research("wake")
         if code != 0:
             raise RuntimeError(f"research workspace wake exited {code}")
         self.prepared = False
+
+    async def release(self) -> None:
+        """The platform's ``wake`` (a Resume or Wake reached this pod): stop the sleep cycle,
+        including an in-flight report or its retry, undo the preparation and restart the idle
+        timer."""
+        async with self.waking:
+            if self.cycle is not None and not self.cycle.done():
+                self.cycle.cancel()
+                (ended,) = await asyncio.gather(self.cycle, return_exceptions=True)
+                if isinstance(ended, BaseException) and not isinstance(
+                    ended, asyncio.CancelledError
+                ):
+                    raise ended
+            await self.wake()
+            self.requested = False
+            self.failures = 0
+            self.next_attempt = 0.0
+            self.last_busy = time.monotonic()
+            log.info("Woken by the platform; sleep preparation undone")
 
     def backoff(self) -> float:
         delay = REPORT_BACKOFF_S[min(self.failures, len(REPORT_BACKOFF_S) - 1)]
@@ -209,12 +240,15 @@ class Lifecycle:
         return delay
 
     async def status(self, request: ControlRequest, seam: httpx.AsyncClient) -> dict:
+        if request.control == "wake":
+            await self.release()
         activity = await self.observe(seam)
         if activity["restart_required"]:
             return {
                 "ready": True,
                 "ready_for_sleep": False,
                 "detail": "Recovering native execution",
+                "controls": list(CONTROLS),
             }
         if request.control == "sleep_request":
             self.requested = True
@@ -226,7 +260,12 @@ class Lifecycle:
             detail = "Awake for " + ", ".join(self.waiting_on)
         else:
             detail = ""
-        return {"ready": True, "ready_for_sleep": self.prepared, "detail": detail}
+        return {
+            "ready": True,
+            "ready_for_sleep": self.prepared,
+            "detail": detail[:DETAIL_MAX],
+            "controls": list(CONTROLS),
+        }
 
 
 async def reply(
