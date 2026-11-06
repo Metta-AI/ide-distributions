@@ -729,8 +729,8 @@ def complete(
     """The holder finishes the Task (B.12). ``outcome`` is ``succeeded`` or ``failed`` (A2.7).
 
     Succeeded: ``checklist`` must satisfy the type's items (``task_types.check``) and every
-    record it names must exist (claims, the Experiment, Versions, proposed Tasks of the same
-    Goal); ``commit`` and ``submission_candidate`` are folded into the checklist;
+    record it names must exist (claims, the Experiment, Versions, Tasks this Task proposed for
+    its Goal, whatever has been decided about them); ``commit`` and ``submission_candidate`` are folded into the checklist;
     ``merge_request`` ``yes`` needs the commit, ``no`` needs ``merge_reason``; ``result`` says
     what came of it. ``completed_commit`` is what the merge uses, never the branch tip. The
     lease stays with the holder so a review that reopens resumes the same Session; emits
@@ -1419,14 +1419,22 @@ def _reference_problems(
     for n in _ids(accepted.get("versions"), "version"):
         if not _exists(store, "versions", n):
             problems.append(f"{display_id('V', n)} does not exist")
+    # The Orchestrator may approve or reject a proposal before the Task completes, so what counts
+    # is who proposed it, not its status now. A Task's holders are its sessions, successors too.
+    proposers = {
+        f"session:{session['session_id']}"
+        for session in store.q(
+            "SELECT session_id FROM task_sessions WHERE task_id = ?", (row["id"],)
+        )
+    }
     for n in _ids(accepted.get("proposed_tasks"), "task"):
-        proposed = store.one("SELECT status, goal_id FROM tasks WHERE id = ?", (n,))
+        proposed = store.one("SELECT proposed_by, goal_id FROM tasks WHERE id = ?", (n,))
         if n == row["id"]:
             problems.append(f"{_t(n)} is the ideation Task itself")
         elif proposed is None:
             problems.append(f"{_t(n)} does not exist")
-        elif proposed["status"] != "proposed":
-            problems.append(f"{_t(n)} is {proposed['status']}, not proposed")
+        elif proposed["proposed_by"] not in proposers:
+            problems.append(f"{_t(n)} was not proposed by this Task")
         elif proposed["goal_id"] != row["goal_id"]:
             problems.append(f"{_t(n)} is not proposed for this Task's Goal")
     experiments = _ids(accepted.get("experiment"), "experiment")

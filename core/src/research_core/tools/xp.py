@@ -14,7 +14,9 @@ credits refusal. There is no local credits pre-check: the platform's refusal (40
 refusal, reported with the balance, the held amount and the next refill. The
 ``xp.ask_above_requests_per_experiment`` setting: above it the Orchestrator gets a warning and
 proceeds; a Researcher is refused with ``ask_orchestrator`` and a ``task_ask`` suggestion, and
-nothing is created. The Orchestrator's answer does not lift it: it sends the requests itself.
+nothing is created. The Orchestrator cannot send them for the Researcher (a Task's Experiment
+takes runs from the holder only), so it tells the Researcher to shrink the design or, with the
+user's word, raises the setting.
 
 Every create is an intent (B.13): ``intents.begin(kind="xp", key="X-<n>:<seed>:<arm>")``
 before the call, saving the exact body and a unique idempotency key locally. Recovery
@@ -343,8 +345,8 @@ def _ask_orchestrator(record: dict, counts: dict) -> dict:
     task = record.get("task_id")
     question = (
         f"{record['id']} would have {counts['total']} XP requests ({counts['new']} new), above"
-        f" the {ASK_ABOVE_KEY} setting of {counts['limit']}. I cannot send them; please send them"
-        " with xp.request, or tell me to shrink the design."
+        f" the {ASK_ABOVE_KEY} setting of {counts['limit']}. Should I shrink the design, or will you"
+        " raise the setting with the user's approval?"
     )
     return {
         "ok": False,

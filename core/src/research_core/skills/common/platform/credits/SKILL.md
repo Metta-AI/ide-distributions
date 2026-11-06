@@ -31,7 +31,7 @@ There is no local pre-check: the platform's 402 is the refusal, and the tool rep
 
 ## The per-Experiment setting
 
-`xp.ask_above_requests_per_experiment` (read with `settings.read`) bounds your own initiative and counts an Experiment's requests. Above it, the Orchestrator gets a warning and proceeds. A Researcher's `xp.request` is refused and creates nothing: `task_ask` the Orchestrator, who sends them with `xp.request` if it agrees, since its answer alone does not lift the limit.
+`xp.ask_above_requests_per_experiment` (read with `settings.read`) bounds your own initiative and counts an Experiment's requests. Above it, the Orchestrator gets a warning and proceeds. A Researcher's `xp.request` is refused and creates nothing: `task_ask` the Orchestrator, then send again as it answers: with a smaller design, or once it has the user's approval and has raised the setting (`settings_update`, citing their message). It cannot send them for you: only the Task's holder records runs on the Task's Experiment.
 
 ## Failure handling
 

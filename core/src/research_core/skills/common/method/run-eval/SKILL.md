@@ -12,7 +12,7 @@ Hosted evaluation (an Experience request) is the only oracle; local runs debug, 
 | Question | Shape |
 |---|---|
 | Did my change help? | Two matched arms (`arms: [baseline, candidate]`), identical pinned rosters (`opponents: [<policy version ids>]`), the same seeds; never sampled seats in an A/B |
-| How does V-7 do against the field? | One arm (`arms: [candidate]`), the League fills the other seats (`league: <id>`), more seeds; with no pairs, it closes `inconclusive` |
+| How does V-7 do against the field? | One arm (`arms: [candidate]`), the League fills the other seats (`league: <id>`), more seeds; with no pairs, `experiment.close` needs an explicit `verdict` with `measurements`, `interpretation` and `reason` |
 | How do we do in role X? | A role-pinned probe with a pinned roster; what can be pinned is game-specific: see the mixin's `<coworld>-eval-design` skill or docs |
 | Does the build even run? | The mixin's `check` command from `MIXIN.md` in your worktree first; then the smallest request the game allows, one seed, one episode |
 

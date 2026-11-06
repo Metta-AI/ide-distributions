@@ -374,6 +374,29 @@ def test_ask_above_warns_the_orchestrator_and_asks_the_researcher(run, ctx, uplo
     assert "4 XP requests, above the xp.ask_above_requests_per_experiment setting of 2" in warning
 
 
+def test_over_the_limit_a_task_experiment_takes_requests_after_the_user_raises_the_setting(
+    run, ctx, uploaded, researcher_task
+):
+    """The one path: the Researcher asks, the Orchestrator cannot send for it, the user raises it."""
+    make_experiment(ctx, task_id=researcher_task["id"])
+    settings.update(ctx.store, ctx.actor, xp_tool.ASK_ABOVE_KEY, 2, cites="the user said so")
+    held = {"role": "researcher", "session_id": "r1"}
+    asked = run("xp", {"action": "request", "experiment": "X-1"}, **held)
+    assert asked["ask_orchestrator"] is True and "raise the setting" in asked["suggest"]
+
+    orchestrator = run("xp", {"action": "request", "experiment": "X-1"})
+    assert orchestrator["ok"] is False and "belongs to T-1" in str(orchestrator["problems"])
+    assert ctx.platform().snapshot()["counts"]["xp_create"] == 0
+
+    raised = run(
+        "settings_update", {"key": xp_tool.ASK_ABOVE_KEY, "value": 4, "cites": "message m-1"}
+    )
+    assert raised["ok"] is True, raised
+    sent = run("xp", {"action": "request", "experiment": "X-1"}, **held)
+    assert sent["ok"] is True and len(sent["created"]) == 4
+    assert len(sent["runs"]) == 4
+
+
 def test_tool_spec(run):
     spec = xp_tool.SPEC
     assert spec.executor == "workspace" and spec.roles == {"orchestrator", "researcher"}
