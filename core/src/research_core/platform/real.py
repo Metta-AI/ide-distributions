@@ -60,6 +60,7 @@ from research_core.platform.errors import CreditsRefused, PlatformError
 from research_core.platform.protocol import (
     AutoChampion,
     Credits,
+    EpisodePage,
     Identity,
     League,
     Membership,
@@ -535,17 +536,17 @@ class RealPlatform:
         )
         return files
 
-    def episodes_for_policy(self, policy_version_id: str) -> list[dict]:
-        api = self._api()
-        policy_version = _uuid(policy_version_id)
-
-        def fetch(cursor: str | None) -> coworld_api.EpisodeRequestSummaryPage:
-            return api.list_policy_version_episode_requests(
-                policy_version, limit=PAGE_SIZE, cursor=cursor
-            )
-
+    def episodes_for_policy(
+        self, policy_version_id: str, *, limit: int = 20, cursor: str | None = None
+    ) -> EpisodePage:
         route = f"GET /v2/policy-versions/{policy_version_id}/episode-requests"
-        return [_dump(row) for row in self._pages(route, fetch)]
+        page = self._call(
+            route,
+            lambda: self._api().list_policy_version_episode_requests(
+                _uuid(policy_version_id), limit=limit, cursor=cursor
+            ),
+        )
+        return EpisodePage([_dump(row) for row in page.entries], page.next_cursor)
 
     def episode(self, episode_request_id: str) -> dict:
         row = self._call(

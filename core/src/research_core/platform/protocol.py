@@ -105,6 +105,12 @@ class Credits:
     recent_requests: list[dict] = field(default_factory=list)
 
 
+@dataclass(frozen=True)
+class EpisodePage:
+    entries: list[dict]
+    next_cursor: str | None
+
+
 class Platform(Protocol):
     def close(self) -> None: ...
 
@@ -198,7 +204,9 @@ class Platform(Protocol):
 
     def xp_download(self, xp_id: str, *, include: list[str], dest: Path) -> list[Path]: ...
 
-    def episodes_for_policy(self, policy_version_id: str) -> list[dict]: ...
+    def episodes_for_policy(
+        self, policy_version_id: str, *, limit: int = 20, cursor: str | None = None
+    ) -> EpisodePage: ...
 
     def episode(self, episode_request_id: str) -> dict: ...
 

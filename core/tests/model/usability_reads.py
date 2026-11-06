@@ -1175,12 +1175,13 @@ def _episodes(args: dict) -> dict:
     policy_version = args.get("policy_version")
     if policy_version:
         rows = [_episode(f"ereq_{seed}", seed, str(policy_version)) for seed in range(1, 6)]
-        return {"policy_version": policy_version, "episodes": rows}
+        return {"policy_version": policy_version, "episodes": rows, "next_cursor": None}
     rows = [_episode(f"ereq_{seed}", seed, "pv-7") for seed in range(1, 6)]
     return {
         "league": args.get("league") or LEAGUE,
         "policy_versions": ["pv-7", "pv-1"],
         "truncated": False,
+        "next_cursors": {},
         "episodes": rows,
     }
 

@@ -9,7 +9,7 @@ Before anyone changes the policy because of a bad score, see the cause in a repl
 
 ## Find episodes
 
-- An Experiment's episodes: `experiment.read {experiment, section: results}` lists the runs with their request ids and seeds; `platform.episodes {policy_version}` lists a Version's episodes once it is uploaded.
+- An Experiment's episodes: `experiment.read {experiment, section: results}` lists the runs with their request ids and seeds; `platform.episodes {policy_version}` lists the newest page of an uploaded Version's episodes (default 20, `limit` up to 100). Continue with `platform.episodes {policy_version, cursor: <next_cursor>}` until the evidence needed is found; do not scan the entire history for the latest episode.
 - League play: `platform.episodes {league}`, `platform.episode {episode}` (scores, participants, status).
 - Only completed episodes. A local run is for debugging, never for a decision.
 
