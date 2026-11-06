@@ -133,7 +133,8 @@ valid call or three more calls to the tool that are not reads, the turn ends, or
 (which counts the run as `ERR`). Other calls along the way have no limit of their own. The line
 `invalid, valid later` counts the runs that reached a valid call. Hermes's loop guard halts a turn
 at 5 failures of one tool, so after three forced refusals only one more bad call is possible. Only
-this test runs on, so in any other test's table that line reads 0/N, which means not measured.
+this test runs on, so in any other test's table that line reads `-`. A turn that hangs after a bad
+call still counts as invalid.
 
 Each request keeps only the latest of identical refused calls (`plugin/repeats.py`,
 `without_repeated_refusals`). A batch of calls stays, and so does a result carrying more than loop
@@ -190,8 +191,8 @@ uv run python tools/schema_drift.py /path/to/state.db --role orchestrator [--ses
 Kimi K3.1 Pro, with a session's real system prompt and tool list. It compares a run with
 `core/tests/model/usability_baseline.json` to show what a tools or skills change did;
 [`docs/reports/tool-usability-2026-11-05.md`](docs/reports/tool-usability-2026-11-05.md) is the
-latest run and what it did and did not show: 905 runs, $33.98. Ctrl-C does not stop a run, because
-queued requests keep going out until the process is killed. A change in the test's fixtures can move
+latest run and what it did and did not show: 905 runs, $33.98. Ctrl-C drops the queued requests,
+and those already running finish and are billed. A change in the test's fixtures can move
 these rates by itself, so judge a drop by running the same test code on both sides. Fixtures have
 changed since that baseline, so until it is rewritten a comparison opens by saying the two are not
 comparable, and it leaves out `r-wait-credits` and `r-hard-wait-credits-args`. The offline tests of
