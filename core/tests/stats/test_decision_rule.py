@@ -3,6 +3,7 @@
 Metric names here are fixture names only; the rule takes every name from the design.
 """
 
+import dataclasses
 import subprocess
 import sys
 
@@ -255,3 +256,19 @@ def test_importing_the_rule_does_not_load_numpy():
         " assert 'numpy' not in sys.modules"
     )
     subprocess.run([sys.executable, "-c", code], check=True)
+
+
+def test_a_performance_tolerance_allows_the_slip_it_names():
+    plain = design(delta={})
+    slip = pairs(xp_per_1k_ticks=2.0, win_rate=-0.02)
+    assert evaluate(plain, slip).reason_codes == ["performance_slip:win_rate"]
+    allowed = dataclasses.replace(
+        plain,
+        metrics=tuple(
+            dataclasses.replace(metric, tolerance=0.05) if metric.name == "win_rate" else metric
+            for metric in plain.metrics
+        ),
+    )
+    outcome = evaluate(allowed, slip)
+    assert outcome.verdict == "confirmed", outcome.reason_codes
+    assert outcome.per_metric["win_rate"]["performance"]["threshold"] == -0.05

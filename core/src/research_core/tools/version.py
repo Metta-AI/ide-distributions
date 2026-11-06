@@ -244,8 +244,17 @@ def load_mixin(tree: Path, fallback: Path) -> mixin.Mixin:
 
 
 def dirty_files_excluding(tree: Path, artifact_path: str) -> list[str]:
-    """Uncommitted paths, ignoring what the build writes (the artifact and its folder)."""
-    return [e for e in gitops.dirty_files(tree) if not is_build_output(e, artifact_path)]
+    """Uncommitted paths, ignoring what the build writes: the artifact and untracked files in its
+    folder. A tracked source file beside the artifact still counts: the build may have used it,
+    and the Version's commit would not hold the change.
+    """
+    tracked = gitops.tracked_files(tree)
+    artifact = artifact_path.strip("/")
+    return [
+        entry
+        for entry in gitops.dirty_files(tree)
+        if not is_build_output(entry, artifact_path) or (entry in tracked and entry != artifact)
+    ]
 
 
 def untracked_inputs(tree: Path, artifact_path: str) -> dict[str, list[str]]:
@@ -495,7 +504,7 @@ SPEC = tool(
             ActionSpec(
                 "create",
                 "Build a Version from the committed state of your working tree (a Researcher:"
-                " its Task's worktree; the Orchestrator: worktree orch-<n>, else code/). The"
+                " its Task's worktree; the Orchestrator: code/, or the worktree it names). The"
                 " tree must be clean. A long build returns background with a resume token.",
                 {
                     "summary": a.string("What this Version changes, in one sentence."),
@@ -514,7 +523,7 @@ SPEC = tool(
             ),
             ActionSpec(
                 "adopt",
-                "Record a policy version the user uploaded elsewhere as an adopted Version"
+                "Record a policy version this Player uploaded elsewhere as an adopted Version"
                 " (already uploaded; submit accepts it). Give policy_version or label.",
                 {
                     "policy_version": a.string("The platform's policy version id."),

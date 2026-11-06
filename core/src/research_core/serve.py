@@ -97,6 +97,16 @@ PAGE_PATHS = ("/", "/ui")
 PAGE_FILE = resources.files("research_core").joinpath("ui", "index.html")
 
 
+def _answer_text(ask_id: str, ask: dict, shown: str) -> str:
+    """The answer as a Session reads it, often not the one that asked: it carries the question."""
+    text = f"[UI action] answer to {ask_id}: {shown}"
+    if ask.get("question"):
+        text += f"\nThe question: {ask['question']}"
+    if ask.get("refs"):
+        text += f"\nAbout: {', '.join(ask['refs'])}"
+    return text
+
+
 class Refused(Exception):
     """A request the server answers with an error status and a JSON body, never a traceback."""
 
@@ -1077,7 +1087,6 @@ class SeamServer:
         value = payload["value"]
         conversation = self._ask_conversation(stores.wstore, session_id, ask_id)
         shown = value if isinstance(value, str) else json.dumps(value, sort_keys=True)
-        text = f"[UI action] answer to {ask_id}: {shown}"
         key = f"ui-answer:{session_id}:{ask_id}"
         with stores.wstore.tx(actor) as tx:
             current = ui_state.get(stores.wstore, conversation)["doc"]["asks"][ask_id]
@@ -1104,7 +1113,7 @@ class SeamServer:
                 key=key,
                 session_id=session_id,
                 profile=self._require_session(stores, session_id)["profile"],
-                text=text,
+                text=_answer_text(ask_id, current, shown),
                 origin="answer",
             )
         result = {"op_id": op_id, "session_id": session_id, "run_id": None, "delivered": "queued"}

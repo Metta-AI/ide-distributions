@@ -433,6 +433,12 @@ def claim_result(
             " lease_renewed = ?, run_id = ?, worktree = ?, branch = ?, updated = ? WHERE id = ?",
             (actor.id, epoch, tx.at, run_id, worktree, branch, tx.at, n),
         )
+        # A Task naming an existing Experiment owns it from here, so only its holder records runs.
+        tx.execute(
+            "UPDATE experiments SET task_id = ? WHERE id = ? AND (task_id IS NULL OR task_id NOT IN"
+            f" (SELECT id FROM tasks WHERE status IN {OPEN_STATUSES!r}))",
+            (n, row["experiment_id"]),
+        )
         tx.execute(
             "INSERT INTO task_sessions(task_id, session_id, kind, epoch, started)"
             " VALUES (?, ?, ?, ?, ?) ON CONFLICT(task_id, session_id) DO UPDATE SET"
@@ -564,6 +570,12 @@ def wait(
         require(
             problems, row["status"] == "in-progress", f"{_t(n)} is {row['status']}, not in-progress"
         )
+        if kind == "dependency":
+            require(
+                problems,
+                _names_a_dependency(store, n, ref),
+                "a dependency wait names the Task it waits on: ref T-n",
+            )
         if problems:
             raise StoreError(problems)
         waiting_on = {"kind": kind, "detail": detail, "ref": ref, "since": tx.at}
@@ -573,6 +585,18 @@ def wait(
         )
         tx.event("task.waiting", _t(n), {"kind": kind, "detail": detail, "ref": ref})
         return _record(store, _row(store, n))
+
+
+def _names_a_dependency(store: Store, n: int, ref: Any) -> bool:
+    """A wait on nothing would resolve on the next tick and restart the Task for no reason."""
+    if ref is None:
+        return store.one("SELECT 1 FROM task_deps WHERE task_id = ?", (n,)) is not None
+    numbers: list[str] = []
+    number = _number(ref, "task", "ref", numbers)
+    return (
+        number not in (None, n)
+        and store.one("SELECT 1 FROM tasks WHERE id = ?", (number,)) is not None
+    )
 
 
 def resolve_wait(store: Store, actor: Actor, task_id: int | str, *, note: str) -> dict[str, Any]:

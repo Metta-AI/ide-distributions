@@ -81,8 +81,9 @@ def _threshold(spec: MetricSpec, design: EvaluationDesign) -> float:
         return spec.min_effect or 0.0
     if spec.role == "guardrail":
         return -spec.tolerance if spec.tolerance else 0.0
-    # A performance metric without a delta allows no slip at all.
-    return -design.delta[spec.name] if design.delta.get(spec.name) else 0.0
+    # A performance metric with no allowance allows no slip at all.
+    allowance = spec.tolerance or design.delta.get(spec.name)
+    return -allowance if allowance else 0.0
 
 
 def evaluate(design: EvaluationDesign, pairs: list[tuple[EpisodeRow, EpisodeRow]]) -> Verdict:

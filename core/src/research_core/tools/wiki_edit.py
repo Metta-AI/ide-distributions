@@ -23,15 +23,15 @@ def handle(call: ToolCall) -> dict:
     if intent.get("existing") and intent.get("state") == "done":
         return {"edit": intent.get("result"), "reconciled": True, "identity": identity}
     if intent.get("existing") and intent.get("state") == "pending":
-        # A crash after the platform accepted the edit: look for our body in the history.
+        # A crash after the platform accepted the edit: the page shows our title and body.
         try:
             current = call_platform(
                 ctx, f"GET /v2/wikis/{wiki}/pages/{page}", lambda: platform.wiki_read(wiki, page)
             )
             revision = (current.get("current_revision") or {}) if isinstance(current, dict) else {}
-            if revision.get("body") == body:
+            if revision.get("body") == body and current.get("title") == title:
                 result = {"conflict": False, "page": current, "reconciled": True}
-                w.finish_intent(call, intent, state="done", result=result)
+                _record_edit(call, intent, identity, wiki, page, result)
                 return {"edit": result, "reconciled": True, "identity": identity}
         except Exception:
             pass  # fall through and try the edit
@@ -66,13 +66,17 @@ def handle(call: ToolCall) -> dict:
             "current_revision_id": edit.get("current_revision_id"),
             "current_body": edit.get("current_body"),
         }
+    _record_edit(call, intent, identity, wiki, page, edit)
+    return {"edit": edit, "identity": identity}
+
+
+def _record_edit(call: ToolCall, intent: dict, identity: str, wiki: str, page: str, edit: dict):
     what = f"wiki edit {wiki}/{page}"
-    with ctx.store.tx(ctx.actor) as tx:
+    with call.ctx.store.tx(call.ctx.actor) as tx:
         tx.event("platform.wiki_edit", what, {"identity": identity, "cites": call.get("cites")})
     # Last: a crash before it leaves the intent pending, so the retry still tells the user.
     w.notice_user_write(call, identity, what)
     w.finish_intent(call, intent, state="done", result=edit)
-    return {"edit": edit, "identity": identity}
 
 
 SPEC = tool(
