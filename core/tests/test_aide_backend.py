@@ -216,13 +216,17 @@ def run(system, scenario, inference=None, seam_transport=None, gateway=None):
             def tasks():
                 return watchers + [task for old in backends for task in old.consumers.values()]
 
-            def stop():
-                for task in tasks():
-                    task.cancel()
+            async def stop():
+                # A cancel can be lost while a task reads the seam stream. Keep cancelling
+                # until every old worker exits before another backend can write its logs.
+                while not all(task.done() for task in tasks()):
+                    for task in tasks():
+                        task.cancel()
+                    await asyncio.sleep(0.05)
 
-            def restart():
-                """A new backend process: nothing of the last one's memory survives."""
-                stop()
+            async def restart():
+                """A new backend process: every worker of the previous one has exited."""
+                await stop()
                 backend = aide.Backend(seam, native, inference or Availability(), work)
                 backend.socket = Socket()
                 backend.restart = restart
@@ -232,13 +236,9 @@ def run(system, scenario, inference=None, seam_transport=None, gateway=None):
 
             try:
                 async with asyncio.timeout(SCENARIO_LIMIT_S):
-                    await scenario(restart(), gateway, ctx, hermes)
+                    await scenario(await restart(), gateway, ctx, hermes)
             finally:
-                # A cancel can be lost while a task reads the seam stream (cause not yet
-                # known), and the task group would then wait forever. Repeat it until it lands.
-                while not all(task.done() for task in tasks()):
-                    stop()
-                    await asyncio.sleep(0.05)
+                await stop()
 
     asyncio.run(main())
 
@@ -402,7 +402,7 @@ def test_chat_round_trip_pushes_what_the_reads_return_to_every_subscriber(system
 
         # A new backend process reads the same records, events and seqs from durable state.
         requested = len(gateway.event_requests)
-        restarted = backend.restart()
+        restarted = await backend.restart()
         assert (await events_read(restarted, session_id, request_id))["result"] == read
         reread = await call(
             restarted, "state.get", {"resource": "requests", "id": request_id, "scope": WORKSPACE}
@@ -564,7 +564,7 @@ def test_a_rebuilt_backend_resumes_pushes_for_an_open_request_without_a_new_send
         assert [(e["seq"], e["delta"]) for e in live["events"]] == [(1, "Hel")]
         assert live["done"] is False
 
-        restarted = backend.restart()
+        restarted = await backend.restart()
         await until(lambda: list(restarted.consumers) == [request_id])
         # A replayed send attaches to the open request and starts nothing.
         await call(restarted, "chat.send", params, request_id=request_id)
@@ -716,7 +716,7 @@ def test_a_held_request_reads_waiting_then_stitches_its_next_attempt(system):
         while (await status())["status"] != "waiting":
             await asyncio.sleep(0.05)
         # A new backend reads the hold, its reason and its resume time from the store.
-        restarted = backend.restart()
+        restarted = await backend.restart()
         held = (await call(restarted, "state.get", get))["result"]["item"]
         assert held["waiting"]["reason"] == "rate_limited" and held["waiting"]["until"]
         assert (held["error"], held["attempt"], held["in_history"]) == (None, 0, True)
@@ -757,7 +757,7 @@ def test_failed_and_unstarted_requests_stay_readable_after_a_restart(system):
         assert (await call(backend, "chat.cancel", cancel))["result"] == {"requested": True}
         await until(lambda: len(backend.socket.notes("chat.finished")) == 2)
 
-        restarted = backend.restart()
+        restarted = await backend.restart()
         listing = (
             await call(
                 restarted,
@@ -826,7 +826,7 @@ def test_a_backend_restart_mid_run_keeps_every_logged_event_and_finishes_the_run
         await until(lambda: started(backend))
         before = [n["event"] for n in backend.socket.notes("chat.event")]
 
-        restarted = backend.restart()
+        restarted = await backend.restart()
         live = (await events_read(restarted, session_id, request_id))["result"]
         assert live["events"] == before and live["done"] is False
         assert [e["kind"] for e in before] == ["reasoning", "text.delta", "tool.started"]
@@ -856,7 +856,7 @@ def test_a_run_gone_after_a_full_restart_ends_interrupted_with_its_events_readab
         (run_id,) = hermes.runs
         del hermes.runs[run_id]
         gateway.restart()
-        restarted = backend.restart()
+        restarted = await backend.restart()
         # The reloaded frontend subscribes before the new backend's first await.
         state = {"resource": "sessions", "id": session_id, "scope": WORKSPACE}
         await call(restarted, "state.get", state)
@@ -1150,7 +1150,7 @@ def test_a_wrong_scope_is_refused_to_that_request_alone_and_is_not_recorded(syst
         )
         ids = [await opened(backend) for _ in wrong_scope_requests]
         read_only_by_get = await opened(backend)
-        backend = backend.restart()  # nothing is subscribed to any of them now
+        backend = await backend.restart()  # nothing is subscribed to any of them now
         for session_id, (method, params) in zip(ids, wrong_scope_requests, strict=True):
             reply = await call(
                 backend, method, {"session_id": session_id, "scope": LEAGUE, **params}
@@ -1262,7 +1262,7 @@ def test_a_change_made_while_a_request_read_subscribes_is_in_its_reply(system):
         request_id = str(uuid4())
         params = {"session_id": session_id, "messages": say("later"), "scope": WORKSPACE}
         await call(backend, "chat.send", params, request_id=request_id)
-        backend = backend.restart()  # nothing is subscribed to the session now
+        backend = await backend.restart()  # nothing is subscribed to the session now
 
         async def cancel_and_let_the_watcher_consume_it():
             body = {"op_id": request_id, "actor": "user:aide"}
@@ -1339,7 +1339,7 @@ def test_a_request_whose_session_the_gateway_does_not_have_closes_its_log(system
         )
         assert history["result"]["items"] == []
         # The next backend finds the log closed and starts nothing for it.
-        restarted = backend.restart()
+        restarted = await backend.restart()
         await until(lambda: restarted.start.done())
         assert not restarted.consumers
 
@@ -1577,7 +1577,7 @@ def test_tasks_goals_cancellation_and_pending_input(system):
         # the resolved prompt again; other input under that id is refused.
         again = await call(backend, "input.respond", once, request_id=respond_id)
         assert again["result"] == {"applied": True}
-        backend = backend.restart()
+        backend = await backend.restart()
         again = await call(backend, "input.respond", once, request_id=respond_id)
         assert again["result"] == {"applied": True}
         deny = answer | {"response": {"kind": "approval", "choice": "deny"}}
