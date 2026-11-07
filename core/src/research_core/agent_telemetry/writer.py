@@ -32,6 +32,13 @@ MAX_QUEUED_OBSERVATIONS = 4096
 MAX_QUEUED_BYTES = 64 * 1024 * 1024
 
 
+def _charged_bytes(blob: bytes) -> int:
+    """What a capture counts for against the byte limit. One over the limit, which goes out only
+    when nothing is queued, counts for nothing: its reply comes microseconds later, often before
+    the thread has taken it, and would find the queue full."""
+    return 0 if len(blob) > MAX_QUEUED_BYTES else len(blob)
+
+
 class TelemetryWriter:
     """One bounded queue and one background writer thread.
 
@@ -69,12 +76,12 @@ class TelemetryWriter:
             if (
                 blob is None
                 or len(self._queue) >= MAX_QUEUED_OBSERVATIONS
-                or (self._queued_bytes and self._queued_bytes + len(blob) > MAX_QUEUED_BYTES)
+                or (self._queue and self._queued_bytes + len(blob) > MAX_QUEUED_BYTES)
             ):
                 self._dropped += 1
             else:
                 self._queue.append((kind, occurred, blob))
-                self._queued_bytes += len(blob)
+                self._queued_bytes += _charged_bytes(blob)
             self._ready.notify()
 
     def capture_operation(
@@ -203,6 +210,8 @@ class TelemetryWriter:
                     self._ready.wait()
                 dropped = self._dropped
                 item = self._queue.popleft() if self._queue else None
+                if isinstance(item, tuple):
+                    self._queued_bytes -= _charged_bytes(item[2])
             if dropped != reported:
                 reported = dropped
                 logger.warning("telemetry: %d records dropped so far", dropped)
@@ -210,8 +219,6 @@ class TelemetryWriter:
                 item.set()
             elif item is not None:
                 self._write(*item)
-                with self._ready:
-                    self._queued_bytes -= len(item[2])
             elif self._closing.is_set():
                 break
         self._encoder.close()

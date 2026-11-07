@@ -333,15 +333,31 @@ def test_callers_do_not_wait_or_log_when_the_stream_is_stuck_and_a_full_queue_dr
 
 
 def test_the_queue_is_also_bounded_by_size(tmp_path, producer, redactor, monkeypatch):
+    """What the thread has taken no longer counts, so "x" leaves room for "y" and not for "z"."""
+    monkeypatch.setattr(writer_module, "MAX_QUEUED_BYTES", 500)
+    stuck = StuckStream(tmp_path)
+    writer = TelemetryWriter(stuck.path, producer, redactor=redactor)
+    writer.capture_operation("tool", "completed", content={"text": "x" * 80})
+    time.sleep(0.05)
+    writer.capture_operation("tool", "completed", content={"text": "y" * 80})
+    writer.capture_operation("tool", "completed", content={"text": "z" * 300})
+    bodies = [r.get("body") for r in stuck.release(writer)]
+    assert "x" * 80 in bodies and "y" * 80 in bodies and "z" * 300 not in bodies
+
+
+def test_only_one_capture_over_the_byte_limit_waits_at_a_time(
+    tmp_path, producer, redactor, monkeypatch
+):
+    """It counts for nothing against the limit, so what bounds it is that the queue is empty."""
     monkeypatch.setattr(writer_module, "MAX_QUEUED_BYTES", 600)
     stuck = StuckStream(tmp_path)
     writer = TelemetryWriter(stuck.path, producer, redactor=redactor)
     writer.capture_operation("tool", "completed", content={"text": "x" * 80})
-    writer.capture_operation("tool", "completed", content={"text": "y" * 80})
     time.sleep(0.05)
-    writer.capture_operation("tool", "completed", content={"text": "z" * 300})
-    bodies = [r.get("body") for r in stuck.release(writer)]
-    assert "x" * 80 in bodies and "z" * 300 not in bodies
+    writer.capture_operation("tool", "completed", content={"text": "y" * 3000})
+    writer.capture_operation("tool", "completed", content={"text": "z" * 3000})
+    bodies = "".join(r.get("body", "") for r in stuck.release(writer))
+    assert "y" * 3000 in bodies and "z" not in bodies
 
 
 def test_one_capture_over_the_byte_limit_still_goes_out_when_nothing_is_queued(
@@ -354,6 +370,24 @@ def test_one_capture_over_the_byte_limit_still_goes_out_when_nothing_is_queued(
     writer.capture_operation("tool", "completed", content={"text": "z" * 3000})
     assert writer.close(5.0)
     assert "z" * 3000 in [r.get("body") for r in stored_records(stream_file)]
+
+
+def test_a_request_over_the_byte_limit_does_not_cost_its_reply(
+    stream_file, producer, redactor, monkeypatch
+):
+    """The reply comes microseconds after its request, often before the thread has taken it."""
+    monkeypatch.setattr(writer_module, "MAX_QUEUED_BYTES", 600)
+    writer = TelemetryWriter(stream_file, producer, redactor=redactor)
+    for turn in range(20):
+        attempt = {**ATTEMPT, "model_attempt_id": f"att_{turn}"}
+        writer.capture_request(
+            request_with({"role": "user", "content": f"{turn} " * 2000}), **attempt
+        )
+        writer.capture_response({"role": "assistant", "content": f"reply {turn}"}, **attempt)
+        # True means both were processed already, so both are on the stream by now.
+        assert writer.flush(5.0)
+        replies = [r for r in stored_records(stream_file) if r.get("stage") == "response"]
+        assert len(replies) == turn + 1
 
 
 def test_flush_covers_what_was_captured_before_it(writer, stream_file):
