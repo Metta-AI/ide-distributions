@@ -106,7 +106,8 @@ def test_the_session_did_what_this_proof_claims(proof):
 
 def test_every_line_on_the_stream_is_one_whole_record_within_the_limit(proof):
     lines = raw_lines(proof.gateway.stream)
-    assert max(len(line) for line in lines) <= MAX_LINE_BYTES
+    # ``raw_lines`` leaves out each line's leading newline, which counts toward the limit.
+    assert max(len(b"\n" + line) for line in lines) <= MAX_LINE_BYTES
     records = [json.loads(line) for line in lines]
     assert {record["service"] for record in records} == {SERVICE}
     assert {record["workspace_id"] for record in records} == {"wrk-proof"}
