@@ -217,6 +217,14 @@ for body, key in [({"messages": []}, "max_tokens"), ({"input": []}, "max_output_
     request = {"model": "proof", **body}
     bounded = apply_llm_request_middleware(request, provider="openrouter").payload
     assert bounded == {**request, key: 16384}, bounded
+from agent.prompt_builder import execution_guidance_text
+guidance = execution_guidance_text()
+assert "<mandatory_tool_use>" in guidance and "</mandatory_tool_use>" in guidance
+request = {"model": "proof", "messages": [{"role": "system", "content": guidance}]}
+sent = apply_llm_request_middleware(request, provider="openrouter").payload
+sent = sent["messages"][0]["content"]
+assert "mandatory_tool_use" not in sent and "NEVER answer" not in sent, sent
+assert "<tool_persistence>" in sent and "<act_dont_ask>" in sent, sent
 captured = []
 class Provider(BaseHTTPRequestHandler):
     def do_POST(self):

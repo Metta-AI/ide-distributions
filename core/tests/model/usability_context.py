@@ -19,7 +19,8 @@ disabled_toolsets=["browser", "connections", "cronjob", "todo"])`` run inside th
 ``memory`` (the profiles turn it off) and with ``vision_analyze`` (it appears only with a vision
 provider; its schema is from the same capture). ``delegate_task`` has the text a real session
 froze, which leaves out the sentence on what children may call. The ``Execution discipline`` section is the one Hermes adds only for Kimi models, so it
-is here for both roles because the test model is Kimi.
+is here for both roles because the test model is Kimi; its ``<mandatory_tool_use>`` block goes, as
+the plugin's middleware drops it from every request.
 
 What is not real: the workspace itself. :data:`BRIEFING` and the session context describe a made
 up Coworld, in the format the plugin renders, and no tool touches a store;
@@ -37,6 +38,7 @@ from pathlib import Path
 import yaml
 
 import research_core
+from research_core.plugin.hermes_prompt import drop_mandatory_tool_use
 from research_core.plugin.session_context import AUTHORITY, OPENING_GOAL, no_client_text
 from research_core.prompts import build
 from research_core.tools.catalog import Role
@@ -238,7 +240,7 @@ def system_prompt(
     return "\n\n".join(
         [
             build.render(role).strip(),
-            HERMES["before_skills"].strip(),
+            drop_mandatory_tool_use(HERMES["before_skills"]).strip(),
             HERMES["skills_intro"] + skill_index(role) + HERMES["skills_outro"],
             _plugin_section("ide-briefing", briefing),
             _plugin_section("ide-session-context", context),
