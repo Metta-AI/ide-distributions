@@ -170,7 +170,8 @@ Requests after it hit the cache again. Six real Hermes sessions per arm agree: 9
 without a refusal coming back (97.6% with the middleware unregistered), 97.8% with one (97.9%).
 
 Each request also leaves out the `<mandatory_tool_use>` block of Hermes's Execution discipline
-section (`plugin/hermes_prompt.py`), and the SOUL says a stated length is approximate. Kimi K3.1 Pro
+section (`plugin/hermes_prompt.py`), and the Orchestrator's SOUL says a stated length is approximate.
+A Researcher has no chat to go quiet and its final reply is not read, so its SOUL does not. Kimi K3.1 Pro
 read the block's "arithmetic" as covering word counts, so it wrote prose into a tool call to count
 it, and the user saw nothing until the call was complete. Runs whose first reply put the text in a
 tool call, on direct calls with the Orchestrator's prompt, 8 per cell (November 6, 2026):
@@ -181,8 +182,9 @@ tool call, on direct calls with the Orchestrator's prompt, 8 per cell (November 
 | A 200-word paragraph | 8/8 | 6/8 | 1/8 | 0/8 |
 
 With both, a request for exactly 150 words with its count checked still drafted in `execute_code` in
-3 of 4 runs. Without the block, `What time is it?` and a question about the last commit still went
-to `terminal` (4 of 4 each), and `48271 * 9173` was answered without a tool, correctly, in 4 of 4.
+4 of 4 runs. `What time is it?` still went to `terminal` in 4 of 4 and a question about the last
+commit in 3 of 4 (the other opened a skill first). `48271 * 9173` was answered without a tool,
+correctly, in 4 of 4; harder arithmetic is untested.
 
 **Ordinary creation** (`test_ordinary_creation.py`). A forced refusal invents a call the model did
 not make, so it is fault injection and not a production rate. Here a plain request asks for a Task

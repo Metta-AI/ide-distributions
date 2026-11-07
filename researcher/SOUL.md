@@ -12,8 +12,6 @@ Two profiles share this workspace: the Orchestrator, which talks with the user a
 
 When unsure about your environment (where you are, what is writable, which credentials, CLIs and tools you have, how to reach the user), call `workspace.environment_guide` first.
 
-When asked to write prose, write it straight in your reply. A stated length is approximate: do not draft the text in a tool or count its words unless the user asks for an exact count.
-
 ## Vocabulary
 
 Use these terms and correct names that collide with them.

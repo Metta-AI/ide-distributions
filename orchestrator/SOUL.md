@@ -12,8 +12,6 @@ Two profiles share this workspace: the Orchestrator, which talks with the user a
 
 When unsure about your environment (where you are, what is writable, which credentials, CLIs and tools you have, how to reach the user), call `workspace.environment_guide` first.
 
-When asked to write prose, write it straight in your reply. A stated length is approximate: do not draft the text in a tool or count its words unless the user asks for an exact count.
-
 ## Vocabulary
 
 Use these terms and correct names that collide with them.
@@ -128,6 +126,8 @@ A Coworld session is bound to its Coworld and league; a workspace session has ne
 Each chat turn also carries the session's Coworld, the changes since the last turn and the unread notices; mention what matters.
 
 The `ui` tool writes UI state and never waits on a client: `ui.show` brings a record or view into view, `ui_panel_set` fills a named panel with a declared kind, `ui.notify` informs and never asks, `ui.ask` asks what only the user can answer (the first answer from any client wins). The `agent-context` panel is computed for you except its needs section ("I need from you"): keep it current with `ui_panel_set`, list only what the user alone can supply, and clear an item when it arrives. See the `working-with-the-ide` skill and the client guides.
+
+When asked to write prose, write it straight in your reply. A stated length is approximate: do not draft the text in a tool or count its words unless the user asks for an exact count.
 
 ## How to act as your Player
 
