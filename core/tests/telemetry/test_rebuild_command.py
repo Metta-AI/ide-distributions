@@ -604,6 +604,66 @@ def test_a_reused_tool_call_id_does_not_join_two_rows(writer, stream_file, datad
     assert "rewritten_to" not in by_row["10"] and "rewritten_to" not in by_row["77"]
 
 
+def _result(writer, row, call, text):
+    writer.capture_operation(
+        "tool",
+        "result",
+        session_id="ses_1",
+        run_id="run_1",
+        tool_call_id=call,
+        **({"hermes_message_id": row} if row else {}),
+        content={"result": text},
+    )
+
+
+def test_a_new_row_with_a_reused_call_id_keeps_its_own_result(writer, stream_file, datadog):
+    """Only an older row's listing has this call ID, with no row ID, and no request lists the new
+    row. Its own result tells it from the older row."""
+    old = {"role": "tool", "tool_call_id": "call_1", "content": "OLD result"}
+    writer.capture_request(
+        request_body([{"role": "user", "content": "Go"}, old]),
+        session_id="ses_1",
+        provider="moonshot",
+        model_attempt_id="att_1",
+        run_id="run_1",
+    )
+    _result(writer, "10", "call_1", "OLD result")
+    committed(writer, "10", tool_call_id="call_1")
+    _result(writer, "77", "call_1", "NEW result")
+    committed(writer, "77", tool_call_id="call_1")
+    sent(writer, stream_file, datadog)
+
+    report = rebuild_session(search_of(datadog), "ses_1")
+    by_row = {row["hermes_message_id"]: row["message"] for row in report["rows"]}
+    assert by_row["10"] == old
+    assert by_row["77"] == {**old, "content": "NEW result"}
+    assert report["missing"] == []
+
+
+def test_results_sharing_a_call_id_stay_apart_by_row(writer, stream_file, datadog):
+    """No request lists either row, as when the process dies before the next call."""
+    for row, text in (("10", "first"), ("11", "second")):
+        _result(writer, row, "call_1", text)
+        committed(writer, row, tool_call_id="call_1")
+    sent(writer, stream_file, datadog)
+
+    report = rebuild_session(search_of(datadog), "ses_1")
+    assert [row["message"]["content"] for row in report["rows"]] == ["first", "second"]
+    assert report["missing"] == []
+
+
+def test_results_with_no_row_id_sharing_a_call_id_stand_in_for_no_row(writer, stream_file, datadog):
+    """Nothing says which is whose, so the rebuild says so rather than choosing."""
+    for row, text in (("10", "first"), ("11", "second")):
+        _result(writer, None, "call_1", text)
+        committed(writer, row, tool_call_id="call_1")
+    sent(writer, stream_file, datadog)
+
+    report = rebuild_session(search_of(datadog), "ses_1")
+    assert [row["message"] for row in report["rows"]] == [None, None]
+    assert {"kind": "row_without_text", "row": "10"} in report["missing"]
+
+
 @pytest.mark.parametrize(
     "second_parts",
     [

@@ -111,7 +111,8 @@ no meaning. Two messages that are the same on the wire are one object, in any Se
 - `hermes_message_ids` maps a position in the whole history to the native message ID. It sits beside the list because the
   provider never saw it. It names each ID the manifests before it in the chain did not, so it can name a message listed earlier
   if Hermes gave that message its ID later. Hermes gives an ID only to rows committed since its last prune or restart. A
-  reader joins a row by this ID first. A listing with none joins through `tool_call_id`.
+  reader joins a row by this ID first. A listing with none joins through `tool_call_id`, unless the row's own `tool` / `result`
+  has other text, because a call ID can come back on a new row.
 - `cache_markers` says where the cache markers of this request go, for the whole history. Unlike the messages it is never
   inherited: only the manifest being rebuilt counts. Hermes moves its markers to the last messages at each request, and a
   marked string becomes a list of one part. A stored message has no marker, so it is the same object at every request and an
