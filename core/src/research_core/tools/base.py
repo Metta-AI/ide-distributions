@@ -24,6 +24,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 import traceback
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field, replace
@@ -31,6 +32,7 @@ from functools import cached_property
 from typing import TYPE_CHECKING, Any, Literal
 
 from research_core import layout
+from research_core.agent_telemetry import observed
 from research_core.store.actors import Actor
 from research_core.store.errors import StoreError
 from research_core.tools.catalog import TOOLS, Role, register
@@ -605,6 +607,7 @@ def run_tool(name: str, args: Mapping[str, Any], ctx: ToolContext) -> str:
         if trace.get_current_span().get_span_context().is_valid
         else telemetry.process_context(os.environ)
     )
+    started = time.monotonic()
     with telemetry.span("execute_tool", context=parent) as span:
         tool_name = "unknown"
         action = None
@@ -670,3 +673,16 @@ def run_tool(name: str, args: Mapping[str, Any], ctx: ToolContext) -> str:
                 span.set_attribute("tool.action", reported_action)
             if outcome != "succeeded":
                 span.set_status(StatusCode.ERROR)
+            # The completion for agent telemetry, written by the process that ran the tool.
+            observed.record(
+                "workspace_tool",
+                "completed",
+                session_id=ctx.hermes_session_id() or None,
+                initiator=ctx.role,
+                tool_name=tool_name,
+                native_event_type=reported_action,
+                outcome=outcome,
+                duration_ms=round((time.monotonic() - started) * 1000, 3),
+                tool_call_id=ctx.env.get("IDE_TOOL_CALL_ID"),
+                run_id=ctx.env.get("IDE_RUN_ID"),
+            )

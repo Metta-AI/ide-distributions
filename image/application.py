@@ -24,7 +24,10 @@ from contract import (
     Run,
     Snapshot,
 )
+from research_core.agent_telemetry import Producer, TelemetryWriter, stream_path
 from research_core.telemetry import propagator, span
+
+_telemetry: TelemetryWriter | None = None
 
 
 class Operation(BaseModel):
@@ -42,6 +45,29 @@ class PendingSession(BaseModel):
     pending: bool
 
 
+def _record_refusal(
+    operation: Operation, status: int, reason: str, session_id: str | None = None
+) -> None:
+    """A request the seam will never see, recorded here so that it reaches the agent's records.
+
+    A name we do not know is a client's free text, so it stays out.
+    """
+    global _telemetry
+    if _telemetry is None:
+        _telemetry = TelemetryWriter(stream_path(), Producer.for_process("bridge"))
+    _telemetry.capture_operation(
+        "admission",
+        "refused",
+        request_id=str(operation.id),
+        operation_id=str(operation.op_id),
+        admission_id=str(operation.op_id),
+        native_event_type=operation.name if operation.name in NAMES else "unknown",
+        session_id=session_id,
+        reason=reason,
+        details={"status": status},
+    )
+
+
 @asynccontextmanager
 async def response(
     operation: Operation,
@@ -51,6 +77,7 @@ async def response(
 ):
     """Forward native replies, including the gateway's resumable run event stream."""
     if operation.name not in NAMES:
+        _record_refusal(operation, 501, "unsupported")
         yield httpx.Response(501, json={"kind": "unsupported", "name": operation.name})
         return
     # Invalid client arguments are refusals, not failures of the workspace process.
@@ -63,6 +90,7 @@ async def response(
 
     (args,) = await asyncio.gather(validate(), return_exceptions=True)
     if isinstance(args, ValidationError):
+        _record_refusal(operation, 422, "invalid")
         yield httpx.Response(422, json={"kind": "invalid", "detail": str(args)})
         return
     if isinstance(args, BaseException):
@@ -73,6 +101,7 @@ async def response(
             reason=blocking.blocked if blocking else None,
             until=blocking.until if blocking else None,
         )
+        _record_refusal(operation, 503, "inference_unavailable", args.session_id)
         yield httpx.Response(503, json=refusal.model_dump(mode="json", exclude={"detail"}))
         return
     if isinstance(args, Messages | Message):
@@ -85,6 +114,8 @@ async def response(
             timeout=10,
         )
         if selected.status_code != 200:
+            # The selection failed, so this ``session_id`` names no Session.
+            _record_refusal(operation, selected.status_code, "session_selection")
             yield selected
             return
     if isinstance(args, Messages):
@@ -145,6 +176,8 @@ async def response(
                 method = "POST"
         case _:
             raise AssertionError(type(args))
+    if client is seam:
+        headers["X-Bridge-Request-Id"] = str(operation.id)
     with span(
         "workspace.request",
         context=propagator.extract(operation.trace_context),

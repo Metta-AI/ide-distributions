@@ -6,6 +6,7 @@ transaction stamps its own rows with its token, so any NULL token left after a c
 made outside the library (``unmarked_changes``). ``open`` applies pending migrations and refuses
 a file whose schema differs from the migrations (``SchemaMismatch``) or that a newer release
 wrote (``SchemaNewer``). ``read_tx`` gives several reads one consistent view of the store.
+``observe_commits`` names who sees a transaction's events, only after its COMMIT has succeeded.
 
 Error messages never name the store path (B.10).
 """
@@ -16,7 +17,7 @@ import json
 import secrets
 import sqlite3
 import threading
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -32,6 +33,17 @@ from research_core.store.events import Event
 # In-process wakeups are hints. SQLite event cursors remain the durable source of truth.
 _changes = threading.Condition()
 _change_version = 0
+
+
+# ``agent_telemetry.observed`` while a process has a telemetry writer. It must not raise.
+_commit_observer: Callable[[Store, Actor, list[tuple[int, str, str, dict]]], None] | None = None
+
+
+def observe_commits(
+    observer: Callable[[Store, Actor, list[tuple[int, str, str, dict]]], None] | None,
+) -> None:
+    global _commit_observer
+    _commit_observer = observer
 
 
 def change_version() -> int:
@@ -290,6 +302,7 @@ class Tx:
         self._open = False
         self._start_id = 0
         self._start_event = 0
+        self._events: list[tuple[int, str, str, dict]] = []
 
     def __enter__(self) -> Tx:
         if self.store._tx is not None:
@@ -326,6 +339,8 @@ class Tx:
         finally:
             self._open = False
             self.store._tx = None
+        if exc_type is None and self._events and _commit_observer is not None:
+            _commit_observer(self.store, self.actor, self._events)
         return False
 
     def _check_open(self) -> None:
@@ -350,4 +365,5 @@ class Tx:
             "INSERT INTO events(at, actor, kind, subject, payload) VALUES (?, ?, ?, ?, ?)",
             (self.at, str(self.actor), kind, subject, json_field(payload)),
         )
+        self._events.append((cursor.lastrowid, kind, subject, payload))
         return cursor.lastrowid

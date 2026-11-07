@@ -13,6 +13,7 @@ import httpx
 from pydantic import BaseModel
 
 from research_core import layout, platform
+from research_core.agent_telemetry import observed
 from research_core.messages import UserMessage
 
 MAX_BYTES = 25 * 1024 * 1024
@@ -30,8 +31,14 @@ class Artifact(BaseModel):
 
 
 def prepare(
-    message: UserMessage, *, ws: layout.Workspace, env: dict, hermes_bin: str
+    message: UserMessage,
+    *,
+    ws: layout.Workspace,
+    env: dict,
+    hermes_bin: str,
+    **record_fields: str,
 ) -> UserMessage:
+    """The message as the model will get it. ``record_fields`` join each file's outcome record."""
     content = message.root["content"]
     if isinstance(content, str) or all(p["type"] in {"text", "image_url"} for p in content):
         return message
@@ -92,4 +99,15 @@ def prepare(
     )
     if result.returncode:
         raise AttachmentError(result.stderr[-2000:])
-    return UserMessage.model_validate_json(result.stdout)
+    prepared = json.loads(result.stdout)
+    for outcome in prepared["outcomes"]:
+        observed.record(
+            "attachment",
+            "prepared",
+            native_event_type=outcome["type"],
+            outcome=outcome["change"],
+            size_bytes=outcome["size_bytes"],
+            details=outcome["details"],
+            **record_fields,
+        )
+    return UserMessage.model_validate(prepared["message"])

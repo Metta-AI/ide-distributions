@@ -54,11 +54,31 @@ def _profile_scope() -> dict[str, str]:
     }
 
 
+def hermes_call_ids() -> dict[str, str]:
+    """The run and native tool call being executed here, as Hermes bound them; empty outside it.
+
+    Hermes hands a handler no tool-call ID. It binds one in a context variable for approvals, which
+    has no public reader. ``core/tests/hermes`` holds this to the pinned image.
+    """
+    try:
+        from hermes_cli.middleware import current_run_id
+        from tools.approval_context import _approval_tool_call_id
+    except ImportError:  # outside Hermes: tests and the CLI
+        return {}
+    known = {"run_id": current_run_id.get(), "tool_call_id": _approval_tool_call_id.get()}
+    return {name: value for name, value in known.items() if value}
+
+
 def tool_env(role: Role, session_id: str, env: dict[str, str] | None = None) -> dict[str, str]:
     merged = profile_env() if env is None else dict(env)
     merged["IDE_ROLE"] = role
     if session_id:
         merged["IDE_SESSION_ID"] = session_id
+    call_ids = hermes_call_ids()
+    if "run_id" in call_ids:
+        merged["IDE_RUN_ID"] = call_ids["run_id"]
+    if "tool_call_id" in call_ids:
+        merged["IDE_TOOL_CALL_ID"] = call_ids["tool_call_id"]
     return merged
 
 
