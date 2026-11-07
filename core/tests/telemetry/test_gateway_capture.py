@@ -317,7 +317,7 @@ def test_commits_name_native_ids_and_times(capture, writer, stream_file):
     assert first["hermes_message_id"] == "3" and first["kind"] == "assistant"
     assert first["occurred_at"] == "2026-11-04T18:31:14.000Z"
     assert second["tool_call_id"] == "c"
-    # An assistant row carries its own text, scanned. A later request or a tool result has the rest.
+    # A row carries its own text, scanned. A tool row's is on its result.
     assert HERMES_STYLE_SECRET not in json.dumps(records)
     assert json.loads(objects_of(records)[_digest(first, "message")]) == {
         "role": "assistant",
@@ -325,8 +325,11 @@ def test_commits_name_native_ids_and_times(capture, writer, stream_file):
         "reasoning_content": "because",
         "tool_calls": [call],
     }
-    assert "content_refs" not in second and "content_refs" not in third
-    assert "user text" not in json.dumps(records) and '"result"' not in json.dumps(records)
+    assert "content_refs" not in second and '"result"' not in json.dumps(records)
+    assert json.loads(objects_of(records)[_digest(third, "message")]) == {
+        "role": "user",
+        "content": "user text",
+    }
 
 
 def test_prompt_sections_are_byte_ranges_of_the_redacted_prompt(capture, writer, stream_file):

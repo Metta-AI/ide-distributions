@@ -386,13 +386,26 @@ def _attach_tools(finder: _Finder, operations: list[dict], requests: list[dict])
     return unattached
 
 
-def _unlisted_message(finder: _Finder, row: dict, results: dict) -> dict | None:
-    """A row no request lists: an assistant row's commit holds its own text, and a tool row takes
-    the result recorded for its call. ``None`` when that text is lost or was never recorded."""
+def _results_of_rows(operations: list[dict]) -> dict:
+    """Each tool result by its row ID. One with none goes by ``(run_id, tool_call_id)``, and when
+    several share that nothing says which is whose, so it holds ``None``."""
+    results: dict = {}
+    for record in operations:
+        if (record["action"], record["stage"]) == ("tool", "result"):
+            call = (record.get("run_id"), record.get("tool_call_id"))
+            if row := record.get("hermes_message_id"):
+                results[row] = record
+            else:
+                results[call] = None if call in results else record
+    return results
+
+
+def _unlisted_message(finder: _Finder, row: dict, result: dict | None) -> dict | None:
+    """A row no request lists: its commit holds its own text, and a tool row takes the result
+    recorded for it. ``None`` when that text is lost or was never recorded."""
     own = _ref(row, "message")
     if own:
         return finder.json(own)
-    result = results.get((row.get("run_id"), row.get("tool_call_id")))
     text = finder.text(_ref(result, "result")) if result else None
     if text is None:
         return None
@@ -404,8 +417,9 @@ def _rows(finder: _Finder, operations: list[dict], requests: list[dict]) -> list
 
     A row joins by its row ID first. Hermes gives a row ID only to rows committed since its last
     prune or restart, so a listing with none joins through its tool call ID: to the row that last
-    held that ID, or by the ID alone. A row no request lists never reached a model, such as a turn's
-    last reply or the text Hermes's tool guard ends a turn with: see ``_unlisted_message``.
+    held that ID, or by the ID alone, unless the row's own result says otherwise, because a call ID
+    can come back on a new row. A row no request lists never reached a model, such as a turn's last
+    reply or the text Hermes's tool guard ends a turn with: see ``_unlisted_message``.
     """
     first: dict[tuple[str, str], tuple[str, dict]] = {}
     last: dict[tuple[str, str], tuple[str, dict]] = {}
@@ -423,24 +437,25 @@ def _rows(finder: _Finder, operations: list[dict], requests: list[dict]) -> list
             if key[1]:
                 first.setdefault(key, listed)
                 last[key] = listed
-    results = {
-        (r.get("run_id"), r.get("tool_call_id")): r
-        for r in operations
-        if (r["action"], r["stage"]) == ("tool", "result")
-    }
+    results = _results_of_rows(operations)
     rows = []
     for record in operations:
         if record["action"] != "message":
             continue
         row_id = record.get("hermes_message_id")
         entry = {**record, "hermes_message_id": row_id}
-        key = ("row", row_id) if ("row", row_id) in first else ("call", record.get("tool_call_id"))
+        call = record.get("tool_call_id")
+        result = results.get(row_id) or results.get((record.get("run_id"), call))
+        key = ("row", row_id) if ("row", row_id) in first else ("call", call)
+        if key[0] == "call" and key in first and result:
+            if message_text(first[key][1]) != finder.text(_ref(result, "result")):
+                key = None
         if key in first:
             entry["message"] = first[key][1]
             if last[key][0] != first[key][0]:
                 entry["rewritten_to"] = last[key][1]
         else:
-            entry["message"] = _unlisted_message(finder, record, results)
+            entry["message"] = _unlisted_message(finder, record, result)
             if entry["message"] is None:
                 finder.missing[f"row-{row_id}"] = [{"kind": "row_without_text", "row": row_id}]
         rows.append(entry)

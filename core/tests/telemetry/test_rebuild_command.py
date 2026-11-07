@@ -18,7 +18,7 @@ from research_core.agent_telemetry.rebuild import AmbiguousSession, LogsSearch, 
 from research_core.agent_telemetry.records import canonical_bytes
 from research_core.plugin.capture import GatewayCapture
 
-from .conftest import raw_lines, stored_records
+from .conftest import HERMES_STYLE_SECRET, raw_lines, scrub, stored_records
 from .fake_datadog import FakeDatadog
 
 SYSTEM = "You are a researcher. Be careful."
@@ -503,18 +503,18 @@ def test_a_normal_final_reply_rebuilds_from_its_commit(writer, stream_file, data
     assert report["missing"] == []
 
 
-def test_a_row_with_no_text_of_its_own_takes_no_reply(writer, stream_file, datadog):
-    """A crash between a commit and the next call leaves a user row no request lists, and a tool row
-    whose result was never written. The last reply belongs to neither."""
+def test_a_row_takes_its_own_text_and_never_the_last_reply(writer, stream_file, datadog):
+    """A crash between a commit and the next call leaves a user row no request lists, with its text
+    on its commit, and a tool row whose result was never written. The last reply is neither's."""
     asked(writer, "att_1", {"role": "assistant", "content": "A reply"})
-    committed(writer, "10", kind="user")
+    user = {"role": "user", "content": "Next question"}
+    committed(writer, "10", kind="user", content={"message": user})
     committed(writer, "11", kind="tool", tool_call_id="call_gone")
     sent(writer, stream_file, datadog)
 
     report = rebuild_session(search_of(datadog), "ses_1")
-    assert [row["message"] for row in report["rows"]] == [None, None]
-    assert {"kind": "row_without_text", "row": "10"} in report["missing"]
-    assert {"kind": "row_without_text", "row": "11"} in report["missing"]
+    assert [row["message"] for row in report["rows"]] == [user, None]
+    assert report["missing"] == [{"kind": "row_without_text", "row": "11"}]
 
 
 @pytest.mark.parametrize("kind", ["assistant", "tool"])
@@ -603,6 +603,66 @@ def test_a_reused_tool_call_id_does_not_join_two_rows(writer, stream_file, datad
     assert by_row["10"]["message"]["content"] == "OLD result"
     assert by_row["77"]["message"]["content"] == "NEW result"
     assert "rewritten_to" not in by_row["10"] and "rewritten_to" not in by_row["77"]
+
+
+def _result(writer, row, call, text):
+    writer.capture_operation(
+        "tool",
+        "result",
+        session_id="ses_1",
+        run_id="run_1",
+        tool_call_id=call,
+        **({"hermes_message_id": row} if row else {}),
+        content={"result": text},
+    )
+
+
+def test_a_new_row_with_a_reused_call_id_keeps_its_own_result(writer, stream_file, datadog):
+    """Only an older row's listing has this call ID, with no row ID, and no request lists the new
+    row. Its own result tells it from the older row."""
+    old = {"role": "tool", "tool_call_id": "call_1", "content": "OLD result"}
+    writer.capture_request(
+        request_body([{"role": "user", "content": "Go"}, old]),
+        session_id="ses_1",
+        provider="moonshot",
+        model_attempt_id="att_1",
+        run_id="run_1",
+    )
+    _result(writer, "10", "call_1", "OLD result")
+    committed(writer, "10", tool_call_id="call_1")
+    _result(writer, "77", "call_1", "NEW result")
+    committed(writer, "77", tool_call_id="call_1")
+    sent(writer, stream_file, datadog)
+
+    report = rebuild_session(search_of(datadog), "ses_1")
+    by_row = {row["hermes_message_id"]: row["message"] for row in report["rows"]}
+    assert by_row["10"] == old
+    assert by_row["77"] == {**old, "content": "NEW result"}
+    assert report["missing"] == []
+
+
+def test_results_sharing_a_call_id_stay_apart_by_row(writer, stream_file, datadog):
+    """No request lists either row, as when the process dies before the next call."""
+    for row, text in (("10", "first"), ("11", "second")):
+        _result(writer, row, "call_1", text)
+        committed(writer, row, tool_call_id="call_1")
+    sent(writer, stream_file, datadog)
+
+    report = rebuild_session(search_of(datadog), "ses_1")
+    assert [row["message"]["content"] for row in report["rows"]] == ["first", "second"]
+    assert report["missing"] == []
+
+
+def test_results_with_no_row_id_sharing_a_call_id_stand_in_for_no_row(writer, stream_file, datadog):
+    """Nothing says which is whose, so the rebuild says so rather than choosing."""
+    for row, text in (("10", "first"), ("11", "second")):
+        _result(writer, None, "call_1", text)
+        committed(writer, row, tool_call_id="call_1")
+    sent(writer, stream_file, datadog)
+
+    report = rebuild_session(search_of(datadog), "ses_1")
+    assert [row["message"] for row in report["rows"]] == [None, None]
+    assert {"kind": "row_without_text", "row": "10"} in report["missing"]
 
 
 @pytest.mark.parametrize(
@@ -713,6 +773,49 @@ def test_hermes_classification_of_a_failed_call_stays_in_the_report(writer, stre
     assert set(stages) == {"started", "error"}
     assert stages["error"]["reason"] == "rate_limit"
     assert stages["error"]["details"] == {"status_code": 429}
+
+
+def test_a_users_message_survives_a_kill_during_its_first_call(writer, stream_file, datadog):
+    """Request content is written when the attempt ends, so only the commit holds this text."""
+    capture = GatewayCapture(writer, "researcher")
+    text = f"My key is {HERMES_STYLE_SECRET}"
+    capture.pre_api_request(session_id="ses_1", api_request_id="t:api:1", run_id="run_1")
+    capture.on_messages_committed(
+        session_id="ses_1", rows=[{"_row_id": 10, "role": "user", "content": text}], run_id="run_1"
+    )
+    sent(writer, stream_file, datadog)
+
+    assert HERMES_STYLE_SECRET.encode() not in stream_file.read_bytes()
+    report = rebuild_session(search_of(datadog), "ses_1")
+    assert report["rows"][0]["message"] == {"role": "user", "content": scrub(text)}
+    assert [problem["kind"] for problem in report["missing"]] == ["call_with_no_attempt"]
+
+
+@pytest.mark.parametrize(
+    ("listed_row", "expected"),
+    [(10, "What the model got"), (None, "The row")],
+    ids=["a listing with its row ID wins", "a listing with none, as after a restart"],
+)
+def test_a_user_row_joins_its_listing_by_row_id_or_keeps_its_commit(
+    writer, stream_file, datadog, listed_row, expected
+):
+    capture = GatewayCapture(writer, "researcher")
+    listing = {"role": "user", "content": "What the model got"}
+    if listed_row:
+        listing["_row_id"] = listed_row
+    writer.capture_request(
+        request_body([listing]), session_id="ses_1", provider="moonshot", model_attempt_id="att_1"
+    )
+    capture.on_messages_committed(
+        session_id="ses_1",
+        rows=[{"_row_id": 10, "role": "user", "content": "The row"}],
+        run_id="run_1",
+    )
+    sent(writer, stream_file, datadog)
+
+    report = rebuild_session(search_of(datadog), "ses_1")
+    assert report["rows"][0]["message"] == {"role": "user", "content": expected}
+    assert report["missing"] == []
 
 
 def test_content_past_retention_is_reported_missing(writer, stream_file, datadog):

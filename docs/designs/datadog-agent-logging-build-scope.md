@@ -23,7 +23,7 @@ be rebuilt from Datadog alone. [`docs/agent-telemetry.md`](../agent-telemetry.md
 |---|---|
 | Pod logs, not an outbox, exporter and Worker | The Agent already collects container output. The pod test below lost nothing. |
 | Lines are at most 4,096 bytes, with 3,000-byte chunks, written to `/proc/1/fd/1` | `CONTRACT.md`, "Lines", says why. |
-| Each line starts with a newline of its own | Anything else on the stream can leave a line open, which would join the next telemetry line. Removing `PYTHONUNBUFFERED=1` would not end that, and would bring back the exit abort #223 removed. `agent-telemetry.md`, "How it reaches Datadog", gives the measurements. |
+| Each line starts with a newline of its own | Anything else on the stream can leave a line open, which would join the next telemetry line. Removing `PYTHONUNBUFFERED=1` would not end that, and would bring back the exit abort #223 removed. `stream.py` says why. |
 | Stdout's stream, not stderr | Canary stderr lines arrived with `status:error`. |
 | Each line names its workspace, from `bootstrap.json` | Pod tags do not identify the owner. |
 | One queued writer for every process. A caller pickles and enqueues, and one thread writes | A caller never waits. The direct writer this replaces could stall a tool past its commit on a stuck stream. |
@@ -32,7 +32,7 @@ be rebuilt from Datadog alone. [`docs/agent-telemetry.md`](../agent-telemetry.md
 | A full queue counts its drops, and the writer's thread logs each new count | Logging on a caller's thread can block on the same full pipe. |
 | Writers outside the gateway mask Softmax tokens in metadata strings | A client chooses `actor` and `client.kind`. The patterns are plain regexes, so this needs no Hermes. |
 | The bridge writes its own refusal records | 501, 422, 503 and a failed selection never reach the seam. A hop to it waited up to 2 s per refusal. |
-| `on_model_attempt` is the one source of bodies | Middleware sees a request before stream options, and cannot see retries. A process killed during a call leaves only `model_request` / `started`. |
+| `on_model_attempt` is the one source of bodies | Middleware sees a request before stream options, and cannot see retries. A process killed during a call leaves `model_request` / `started` and what it had committed. |
 | Messages are native JSON addressed by digest, with cache markers in the manifest | Markers move at every request. In the manifest, 95.5% of manifests stayed `append` over 100 real turns, against 0.5%. |
 | Content stays in `main` at 15 days, sent once per process | A separate 30-day index was refused with 403 "Out of contract retentions are not authorized", and Flex is not on this org. James chose `main`. `agent-telemetry.md`, "Retention", says what this promises. |
 | Store events are observed after COMMIT, with allowed metadata listed per event | A transaction can roll back, and payloads hold exception text. |
@@ -40,8 +40,8 @@ be rebuilt from Datadog alone. [`docs/agent-telemetry.md`](../agent-telemetry.md
 | The bridge's request ID is a header, not a body field | `admissions.read` refuses a replay whose body differs, and each attempt has its own ID. |
 | aiohttp's access lines are sent, except the seam's own successful `GET /p/<profile>/v1/runs/<id>` | They are the only record of a direct bridge-to-gateway call and its status. The poll runs once a second per live run and says nothing the seam's records lack. |
 | Rebuild orders by process, then time, then `sequence` | An attempt is written when it ends, and an auxiliary call when it starts. |
-| A row's text comes from its first listing, `rewritten_to` from its last. Join by row ID first | Hermes's prune rewrites a row in place and drops row IDs after it. A call ID can come back on another row. |
-| A row no request lists takes its own text: an assistant row's from its commit record, a tool row's from its result. Nothing else stands in | A turn's last rows reach no later request, and Hermes's tool guard writes its text with no model call, so "the last reply" was the wrong row. |
+| A row's text comes from its first listing, `rewritten_to` from its last. Join by row ID first, and a listing with none only if the row's own result agrees | Hermes's prune rewrites a row in place and drops row IDs after it. A call ID can come back on another row. |
+| A row no request lists takes its own text: from its commit record, or a tool row's from its result. Nothing else stands in | A turn's last rows reach no later request, Hermes's tool guard writes its text with no model call, and a kill during a turn's first call leaves a user's message only on its commit, so "the last reply" was the wrong row. |
 | The package is `research_core/agent_telemetry`, not `telemetry` | `research_core/telemetry.py` is #186's OpenTelemetry module. A package of that name would hide it, and git reports no conflict. |
 
 ## Measured on James's workspace, 2026-11-05 (raw results are not in the repo)
