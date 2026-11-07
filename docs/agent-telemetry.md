@@ -35,7 +35,7 @@ These exit flushes are this path's own: "no process exit waits for a telemetry f
 `research_core/telemetry.py` moves the root logger's handlers behind its own queue at a process's first span. The gateway's
 log handler stays on the root logger, so a stuck handler cannot hold its records and an exit flush covers them.
 
-Other output shares this stream, and can leave a line open at any moment. In the image `print` writes its text and its newline separately, because `PYTHONUNBUFFERED=1` is set by both the Hermes image and ours, a child can leave a line unfinished, and a pipe splits a line over 4,096 bytes. So each telemetry line starts with a newline of its own, and that output can no longer join it (`test_real_prints_beside_telemetry_lines_on_one_pipe_lose_no_line`). The price is a blank line on the stream for each telemetry line: see "Proof and cost". Line buffering would not do: it covers neither those children nor those long lines, and buffered stdout makes an interpreter abort at exit when a thread is stuck on a full pipe, which is why #223 set `PYTHONUNBUFFERED=1`.
+Other output shares this stream and can leave a line open at any moment, so each telemetry line starts with a newline of its own, and that output cannot join it (`test_real_prints_beside_telemetry_lines_on_one_pipe_lose_no_line`). The price is a blank line on the stream for each telemetry line: see "Proof and cost". [`stream.py`](../core/src/research_core/agent_telemetry/stream.py) says why buffering would not do.
 
 The Agent reads the pod's log files, so a line written just before a pod goes away still arrives: real sleep and default delete
 each lost nothing with no wait, one run each. A line is searchable 12 to 27 seconds after it is written.
@@ -47,7 +47,7 @@ each lost nothing with no wait, one run each. A line is searchable 12 to 27 seco
 | Nothing confirms delivery. A line that never arrives is not noticed, a stream that cannot be opened stays closed for the life of that process, and `flush` answers true regardless | There is no sender to tell. Rebuild reports what a surviving record refers to |
 | A crash, a SIGKILL, a watchdog exit, or a SIGTERM to a short command loses what the memory queue still holds. A process killed during a call leaves `model_request` / `started` and what it had committed, because request content is written when the attempt ends. So a user's message survives through its commit, and rebuild names the call `call_with_no_attempt` (`test_a_kill_during_a_call_leaves_only_the_started_record`, `test_a_kill_during_the_first_call_keeps_the_users_message`) | The queue empties as records arrive. Exit flushes cover a normal exit, and SIGTERM on the gateway and `research serve` |
 | The Agent falling behind by more than the retained log files would lose lines. Untested | 240 MB over about 15 rotations lost nothing with the Agent keeping up |
-| A full queue drops records, which a stream that has stopped soon causes. The writer's thread logs the count each time it changes | A caller must never wait |
+| A full queue drops records, which a stream that has stopped soon causes. The writer's thread logs the count each time it changes. A capture over the 64 MiB byte limit goes in only when nothing is queued, so a request that large captured just after another record, such as its own context parts, is dropped, and rebuild shows `call_with_no_attempt` | A caller must never wait |
 | Any process in the workspace can write a line that looks like ours | James: restriction work matters very little here |
 
 ## Read a Session

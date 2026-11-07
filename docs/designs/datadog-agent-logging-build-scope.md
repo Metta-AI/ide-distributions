@@ -23,7 +23,7 @@ be rebuilt from Datadog alone. [`docs/agent-telemetry.md`](../agent-telemetry.md
 |---|---|
 | Pod logs, not an outbox, exporter and Worker | The Agent already collects container output. The pod test below lost nothing. |
 | Lines are at most 4,096 bytes, with 3,000-byte chunks, written to `/proc/1/fd/1` | `CONTRACT.md`, "Lines", says why. |
-| Each line starts with a newline of its own | Anything else on the stream can leave a line open, which would join the next telemetry line. Removing `PYTHONUNBUFFERED=1` would not end that, and would bring back the exit abort #223 removed. `agent-telemetry.md`, "How it reaches Datadog", gives the measurements. |
+| Each line starts with a newline of its own | Anything else on the stream can leave a line open, which would join the next telemetry line. Removing `PYTHONUNBUFFERED=1` would not end that, and would bring back the exit abort #223 removed. `stream.py` says why. |
 | Stdout's stream, not stderr | Canary stderr lines arrived with `status:error`. |
 | Each line names its workspace, from `bootstrap.json` | Pod tags do not identify the owner. |
 | One queued writer for every process. A caller pickles and enqueues, and one thread writes | A caller never waits. The direct writer this replaces could stall a tool past its commit on a stuck stream. |
