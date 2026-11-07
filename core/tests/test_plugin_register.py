@@ -25,7 +25,7 @@ def test_make_register_builds_a_callable_per_role():
     for role in ("orchestrator", "researcher"):
         ctx = FakeContext()
         register.make_register(role)(ctx)
-        assert [name for name, _ in ctx.middleware] == ["llm_request", "llm_request"]
+        assert [name for name, _ in ctx.middleware] == ["llm_request"] * 3
         for tool in ctx.tools:
             assert tool["toolset"] == f"ide-{role}"
             assert set(tool["schema"]) >= {"name", "description", "parameters"}

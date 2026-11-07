@@ -311,3 +311,7 @@ failures retain the budget gate. The platform owns daily allowance and owner tea
 The same middleware point sends only the latest of identical refused calls in each Chat Completions
 request; `plugin/repeats.py` lists what stays regardless. The stored history keeps them all, so a
 Session's transcript shows more calls than the model was last sent.
+
+It also removes the `<mandatory_tool_use>` block of Hermes's Execution discipline section from the
+system message of each request (`plugin/hermes_prompt.py`). The stored prompt keeps the block, so a
+Session's stored system prompt differs from what the model is sent by that block.
