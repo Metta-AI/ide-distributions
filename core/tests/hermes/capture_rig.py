@@ -138,6 +138,8 @@ class StubModel:
         self.repeat_tool_calls = False
         # When set, a request that follows a tool result gets no answer until this is set.
         self.hang_tool_followups: threading.Event | None = None
+        # When set, a request that follows a user's message gets no answer until this is set.
+        self.hang_user_requests: threading.Event | None = None
         self.lock = threading.Lock()
         self.bodies: list[bytes] = []
         # When each request that follows a tool result arrived.
@@ -166,6 +168,9 @@ class StubModel:
                 self.tool_followups_at.append(arrived)
         if self.hang_tool_followups is not None and messages[-1]["role"] == "tool":
             self.hang_tool_followups.wait(120)
+            return
+        if self.hang_user_requests is not None and messages[-1]["role"] == "user":
+            self.hang_user_requests.wait(120)
             return
         usage = STUB_USAGE
         if self.usage_from_size:

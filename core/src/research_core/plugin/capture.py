@@ -49,7 +49,7 @@ EXIT_FLUSH_S = 2.0
 NO_SESSION = "no-session"
 _NOT_A_NAME = re.compile(r"[^a-z0-9_.-]+")
 _WIRE_ONLY_FIELDS = ("extra_body", "extra_headers", "extra_query")
-_ASSISTANT_ROW_FIELDS = ("role", "content", "tool_calls", "reasoning_content")
+_ROW_TEXT_FIELDS = ("role", "content", "tool_calls", "reasoning_content")
 # What aiohttp logs each HTTP request under, as Hermes's ``web.AppRunner(app)`` leaves it.
 ACCESS_LOGGER = "aiohttp.access"
 # The whole of a successful poll by the seam's urllib client, in aiohttp's default format.
@@ -612,18 +612,19 @@ class GatewayCapture:
         run_id: str | None = None,
         **_: Any,
     ) -> None:
-        """Metadata, and an assistant row's own text. The last rows of a turn reach no later
-        request, and Hermes's tool guard writes its text with no model call at all. A tool row's
-        text is on its ``tool`` / ``result`` record. This runs with the session's persistence lock
-        held, and only enqueues."""
+        """Metadata, and each row's own text. The last rows of a turn reach no later request,
+        Hermes's tool guard writes its text with no model call at all, and a user's message is on no
+        finished request if the process dies during that turn's first call. A tool row's text is on
+        its ``tool`` / ``result`` record. This runs with the session's persistence lock held, and
+        only enqueues."""
         for row in rows:
             row_id = row.get("_row_id")
-            message = {name: row[name] for name in _ASSISTANT_ROW_FIELDS if row.get(name)}
+            message = {name: row[name] for name in _ROW_TEXT_FIELDS if row.get(name)}
             self._writer.capture_operation(
                 "message",
                 "committed",
                 occurred_at=committed_at,
-                content={"message": message} if row.get("role") == "assistant" else None,
+                content={"message": message} if row.get("role") != "tool" else None,
                 kind=row.get("role"),
                 tool_name=row.get("tool_name"),
                 finish_reason=row.get("finish_reason"),

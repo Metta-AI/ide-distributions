@@ -11,7 +11,7 @@ a Session from Datadog alone. Capture is always on, and there is no setting.
 
 | Source | What |
 |---|---|
-| Gateway plugin | Each physical model request and reply, with reasoning, usage and cost. System prompt sections and context parts. Tool calls as proposed, what ran, and each result as the model got it. Every committed row's ID, and an assistant row's own text. Approvals, compaction, subagents, lifecycle, and each log line but the access line of a successful seam poll (a 200 for `GET /p/<profile>/v1/runs/<id>` from its urllib client), which comes once a second per live run. A failed poll and the bridge's `run.get` are sent. All text goes through Hermes's secret scanner first. |
+| Gateway plugin | Each physical model request and reply, with reasoning, usage and cost. System prompt sections and context parts. Tool calls as proposed, what ran, and each result as the model got it. Every committed row's ID and its text, except a tool row's, which is on its result. Approvals, compaction, subagents, lifecycle, and each log line but the access line of a successful seam poll (a 200 for `GET /p/<profile>/v1/runs/<id>` from its urllib client), which comes once a second per live run. A failed poll and the bridge's `run.get` are sent. All text goes through Hermes's secret scanner first. |
 | `research serve` | Each POST to a route in `RECORDED_ROUTES`, whatever its outcome: `/session-open`, `/message`, `/message-cancel`, `/ui-action`, `/store/apply`, `/models`. Also committed store events, coordinator passes, attachment outcomes, wakes and successors. Metadata only, with Softmax tokens masked. |
 | Other `research` commands | Their committed store events and tool completions. Metadata only, with Softmax tokens masked. |
 | The bridge (`image/application.py`) | Each request it refuses itself, including a failed Session selection. Metadata only, with Softmax tokens masked. |
@@ -45,7 +45,7 @@ each lost nothing with no wait, one run each. A line is searchable 12 to 27 seco
 | Loss | Why it is accepted |
 |---|---|
 | Nothing confirms delivery. A line that never arrives is not noticed, a stream that cannot be opened stays closed for the life of that process, and `flush` answers true regardless | There is no sender to tell. Rebuild reports what a surviving record refers to |
-| A crash, a SIGKILL, a watchdog exit, or a SIGTERM to a short command loses what the memory queue still holds. A process killed during a call leaves only `model_request` / `started`, because request content is written when the attempt ends, and rebuild names it `call_with_no_attempt` (`test_a_kill_during_a_call_leaves_only_the_started_record`) | The queue empties as records arrive. Exit flushes cover a normal exit, and SIGTERM on the gateway and `research serve` |
+| A crash, a SIGKILL, a watchdog exit, or a SIGTERM to a short command loses what the memory queue still holds. A process killed during a call leaves `model_request` / `started` and what it had committed, because request content is written when the attempt ends. So a user's message survives through its commit, and rebuild names the call `call_with_no_attempt` (`test_a_kill_during_a_call_leaves_only_the_started_record`, `test_a_kill_during_the_first_call_keeps_the_users_message`) | The queue empties as records arrive. Exit flushes cover a normal exit, and SIGTERM on the gateway and `research serve` |
 | The Agent falling behind by more than the retained log files would lose lines. Untested | 240 MB over about 15 rotations lost nothing with the Agent keeping up |
 | A full queue drops records, which a stream that has stopped soon causes. The writer's thread logs the count each time it changes | A caller must never wait |
 | Any process in the workspace can write a line that looks like ours | James: restriction work matters very little here |
@@ -78,8 +78,8 @@ each reference's name:
 - `rows`: each committed native row, with `message` as it was first sent and `rewritten_to` if a prune
   later changed it. `message` means "first sent" only when `missing` is empty: if a row's original was
   lost, it shows the first form that survived. A row no request lists never reached a model, such as a
-  turn's last reply or the text Hermes's tool guard ends a turn with. An assistant row of that kind shows
-  the text its commit recorded, and a tool row the result recorded for its call.
+  turn's last reply or the text Hermes's tool guard ends a turn with. It shows the text its commit
+  recorded, and a tool row the result recorded for it.
 - `events`: admissions, model calls started and Hermes's classification of failed ones, store events, approvals, lifecycle, compaction, log lines and everything else. Each
   holds its own IDs, and `CONTRACT.md`, "How to join them", says how they join.
 - `context`: where each piece of a user message came from.
@@ -100,7 +100,7 @@ characters only.
 | `no_content` | A reference names a digest with no log entries |
 | `chunk_gap` | Entries exist, but no sending of the object supplied these chunks: `missing_chunks` names them |
 | `digest_failure` | The joined chunks do not match the digest or size |
-| `row_without_text` | A committed row that no request lists and whose own text is unknown: an assistant row's commit text or a tool row's result was lost, or it is another kind of row |
+| `row_without_text` | A committed row that no request lists and whose own text is unknown: its commit text or a tool row's result was lost, or two results with no row ID share its call ID |
 | `call_with_no_attempt` | A call started and no attempt was written: the process probably died during it |
 
 A missing object blocks each request that needs it, and that request shows `blocked_by`. Nothing is guessed.
@@ -137,7 +137,7 @@ Each was checked on 2026-11-05 against the pinned, patched Hermes.
 | `extra_headers` and `extra_query` are not captured, because they are not part of the request body. | `plugin/capture.py`, `wire_request` |
 | After a restart prompt sections are lost, because Hermes reuses the stored prompt and reports nothing. That text shows as `system_unattributed`. | `test_after_a_restart_prompt_sections_are_lost` |
 | After a restart the first Session ID is lost too. Rebuild follows `parent_session_id` on `compaction` records. | `test_compaction_is_followed_in_both_directions_after_a_restart` |
-| Hermes gives a row ID only to rows committed since its last prune or restart, so a `full` manifest after one names few rows. Text is not lost: rebuild joins by row ID first, and a listing with none through its tool call ID. | `test_each_committed_row_equals_state_db` |
+| Hermes gives a row ID only to rows committed since its last prune or restart, so a `full` manifest after one names few rows. Text is not lost: rebuild joins by row ID first, and a listing with none through its tool call ID, unless the row's own result has other text. | `test_each_committed_row_equals_state_db` |
 | The row Hermes makes to keep a pruned original has no commit record, and neither does a `session_meta` row. The original's text is the first form of the pruned row. | `test_each_committed_row_equals_state_db` |
 | A Session's report does not name its subagents' Sessions, because their records have another Session's ID. Search `service:ide-agent-telemetry @parent_session_id:<id>`, then rebuild each. | `agent_telemetry/rebuild.py`, `_Finder.owned` |
 | An auxiliary call outside a turn has session ID `no-session`, and a log line with no Session tag has none, so a Session's report does not show them. | `plugin/capture.py` |

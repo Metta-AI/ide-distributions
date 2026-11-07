@@ -18,7 +18,7 @@ from research_core.agent_telemetry.rebuild import AmbiguousSession, LogsSearch, 
 from research_core.agent_telemetry.records import canonical_bytes
 from research_core.plugin.capture import GatewayCapture
 
-from .conftest import raw_lines, stored_records
+from .conftest import HERMES_STYLE_SECRET, raw_lines, scrub, stored_records
 from .fake_datadog import FakeDatadog
 
 SYSTEM = "You are a researcher. Be careful."
@@ -773,6 +773,49 @@ def test_hermes_classification_of_a_failed_call_stays_in_the_report(writer, stre
     assert set(stages) == {"started", "error"}
     assert stages["error"]["reason"] == "rate_limit"
     assert stages["error"]["details"] == {"status_code": 429}
+
+
+def test_a_users_message_survives_a_kill_during_its_first_call(writer, stream_file, datadog):
+    """Request content is written when the attempt ends, so only the commit holds this text."""
+    capture = GatewayCapture(writer, "researcher")
+    text = f"My key is {HERMES_STYLE_SECRET}"
+    capture.pre_api_request(session_id="ses_1", api_request_id="t:api:1", run_id="run_1")
+    capture.on_messages_committed(
+        session_id="ses_1", rows=[{"_row_id": 10, "role": "user", "content": text}], run_id="run_1"
+    )
+    sent(writer, stream_file, datadog)
+
+    assert HERMES_STYLE_SECRET.encode() not in stream_file.read_bytes()
+    report = rebuild_session(search_of(datadog), "ses_1")
+    assert report["rows"][0]["message"] == {"role": "user", "content": scrub(text)}
+    assert [problem["kind"] for problem in report["missing"]] == ["call_with_no_attempt"]
+
+
+@pytest.mark.parametrize(
+    ("listed_row", "expected"),
+    [(10, "What the model got"), (None, "The row")],
+    ids=["a listing with its row ID wins", "a listing with none, as after a restart"],
+)
+def test_a_user_row_joins_its_listing_by_row_id_or_keeps_its_commit(
+    writer, stream_file, datadog, listed_row, expected
+):
+    capture = GatewayCapture(writer, "researcher")
+    listing = {"role": "user", "content": "What the model got"}
+    if listed_row:
+        listing["_row_id"] = listed_row
+    writer.capture_request(
+        request_body([listing]), session_id="ses_1", provider="moonshot", model_attempt_id="att_1"
+    )
+    capture.on_messages_committed(
+        session_id="ses_1",
+        rows=[{"_row_id": 10, "role": "user", "content": "The row"}],
+        run_id="run_1",
+    )
+    sent(writer, stream_file, datadog)
+
+    report = rebuild_session(search_of(datadog), "ses_1")
+    assert report["rows"][0]["message"] == {"role": "user", "content": expected}
+    assert report["missing"] == []
 
 
 def test_content_past_retention_is_reported_missing(writer, stream_file, datadog):

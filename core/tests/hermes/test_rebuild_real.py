@@ -500,3 +500,39 @@ def test_a_kill_during_a_call_leaves_only_the_started_record(hermes_bin, tmp_pat
     assert len(main_requests(report)) == 1
     [gap] = [problem for problem in report["missing"] if problem["kind"] == "call_with_no_attempt"]
     assert gap["api_request_id"].endswith(":api:2")
+
+
+def test_a_kill_during_the_first_call_keeps_the_users_message(hermes_bin, tmp_path):
+    """Hermes commits the user's row before it calls the model, and only that commit has the text
+    until the attempt ends."""
+    stub = StubModel([])
+    stub.hang_user_requests = threading.Event()
+    gateway = start_gateway(tmp_path, hermes_python(hermes_bin), stub.url, free_port())
+    session_id = mint_session_id()
+    started = b'"action":"model_request","stage":"started"'
+    committed = b'"action":"message","stage":"committed"'
+    try:
+        gateway.request("POST", "researcher", "/api/sessions", {"id": session_id})
+        gateway.request(
+            "POST", "researcher", "/v1/runs", {"input": "keep this", "session_id": session_id}
+        )
+        deadline = time.monotonic() + 60
+        while time.monotonic() < deadline:
+            lines = raw_lines(gateway.stream)
+            if any(started in line for line in lines) and any(committed in line for line in lines):
+                break
+            time.sleep(0.05)
+        gateway.process.send_signal(signal.SIGKILL)
+        gateway.process.wait(timeout=30)
+    finally:
+        stub.hang_user_requests.set()
+        stub.close()
+    datadog = FakeDatadog()
+    datadog.take_lines(raw_lines(gateway.stream))
+
+    report = rebuild_session(LogsSearch(datadog.url, "a", "b"), session_id)
+    datadog.close()
+    assert not main_requests(report)
+    [row] = report["rows"]
+    assert row["kind"] == "user" and "keep this" in row["message"]["content"]
+    assert [problem["kind"] for problem in report["missing"]] == ["call_with_no_attempt"]
