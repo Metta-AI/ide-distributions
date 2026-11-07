@@ -144,9 +144,9 @@ def test_a_real_rewrite_under_moving_markers_stays_full(writer, stream_file):
 
 
 def test_a_growing_conversation_stores_only_new_messages(writer, stream_file):
-    turns = 10
-    grow(writer, turns)
-    writer.flush(5.0)
+    turns = 60
+    history = grow(writer, turns)
+    writer.flush(10.0)
     records = stored_records(stream_file)
 
     parts = [r for r in records if r.get("content_kind") == "part"]
@@ -163,15 +163,10 @@ def test_a_growing_conversation_stores_only_new_messages(writer, stream_file):
     assert [m["message_count"] for m in manifests] == [2 + 2 * n for n in range(turns)]
 
     last = [r for r in records if r.get("content_kind") == "request_manifest"][-1]
-    history = [
-        {"role": role, "content": f"{word} {n}"}
-        for n in range(turns)
-        for role, word in (("user", "question"), ("assistant", "answer"))
-    ][:-1]
     assert rebuild_request(last["content_digest"], objects_of(records)) == {
         "model": MODEL,
         "temperature": 0.5,
-        "messages": [{"role": "system", "content": "You are a researcher."}, *history],
+        "messages": [{"role": "system", "content": "You are a researcher."}, *history[:-1]],
     }
 
 
@@ -285,18 +280,6 @@ def test_a_row_id_is_named_once(writer, stream_file):
     writer.flush(5.0)
     _, second = manifests_of(stored_records(stream_file))
     assert second["hermes_message_ids"] == {"1": "2"}
-
-
-def test_a_long_conversation_stays_appended_and_its_last_request_rebuilds(writer, stream_file):
-    turns = 60
-    history = grow(writer, turns)
-    writer.flush(10.0)
-    records = stored_records(stream_file)
-    manifests = manifests_of(records)
-    assert [m["operation"] for m in manifests] == ["full"] + ["append"] * (turns - 1)
-    last = [r for r in records if r.get("content_kind") == "request_manifest"][-1]
-    rebuilt = rebuild_request(last["content_digest"], objects_of(records))
-    assert rebuilt["messages"][1:] == history[:-1]
 
 
 def test_histories_are_kept_apart(writer, stream_file):
