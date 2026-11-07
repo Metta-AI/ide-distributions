@@ -502,18 +502,18 @@ def test_a_normal_final_reply_rebuilds_from_its_commit(writer, stream_file, data
     assert report["missing"] == []
 
 
-def test_a_row_with_no_text_of_its_own_takes_no_reply(writer, stream_file, datadog):
-    """A crash between a commit and the next call leaves a user row no request lists, and a tool row
-    whose result was never written. The last reply belongs to neither."""
+def test_a_row_takes_its_own_text_and_never_the_last_reply(writer, stream_file, datadog):
+    """A crash between a commit and the next call leaves a user row no request lists, with its text
+    on its commit, and a tool row whose result was never written. The last reply is neither's."""
     asked(writer, "att_1", {"role": "assistant", "content": "A reply"})
-    committed(writer, "10", kind="user")
+    user = {"role": "user", "content": "Next question"}
+    committed(writer, "10", kind="user", content={"message": user})
     committed(writer, "11", kind="tool", tool_call_id="call_gone")
     sent(writer, stream_file, datadog)
 
     report = rebuild_session(search_of(datadog), "ses_1")
-    assert [row["message"] for row in report["rows"]] == [None, None]
-    assert {"kind": "row_without_text", "row": "10"} in report["missing"]
-    assert {"kind": "row_without_text", "row": "11"} in report["missing"]
+    assert [row["message"] for row in report["rows"]] == [user, None]
+    assert report["missing"] == [{"kind": "row_without_text", "row": "11"}]
 
 
 @pytest.mark.parametrize("kind", ["assistant", "tool"])
