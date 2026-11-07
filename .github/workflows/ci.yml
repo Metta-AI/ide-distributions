@@ -51,6 +51,12 @@ jobs:
         run: echo "No change in this pull request affects core/ or the profiles; skipping."
       - uses: actions/checkout@v4
         if: env.RUN_TESTS == 'true'
+      - name: Patch Hermes as image/Dockerfile does
+        if: env.RUN_TESTS == 'true'
+        run: |
+          for patch in "$GITHUB_WORKSPACE"/image/hermes-patches/*.patch; do
+            git -C /opt/hermes apply --whitespace=nowarn "$patch"
+          done
       - name: Install the hosted image's native PDF dependency
         if: env.RUN_TESTS == 'true'
         run: apt-get update && apt-get install -y --no-install-recommends poppler-utils ffmpeg

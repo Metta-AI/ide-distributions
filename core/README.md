@@ -14,6 +14,7 @@ decisions is `docs/plans/ide-profile-refactor/`.
   `plugin/*`, `tools/base.py` and the in-process tools (`goal`, `task`, `directive`, `claim`,
   `settings`, `ui`, and those split from their actions; `experiment_create` is not, as `experiment`
   is not). `core/tests/test_package.py` imports the plugin and catalog without the Softmax client.
+  `agent_telemetry/` and `plugin/capture.py` import only the standard library.
   The catalog imports every tool module, and a module that fails to import stops whatever asked for the tools: the prompt build,
   the tests or, on a gateway, the plugin (`test_broken_tool_module_real.py`: Hermes logs "Failed to
   load plugin" and serves on, with none of that profile's tools or hooks).
@@ -49,6 +50,7 @@ decisions is `docs/plans/ide-profile-refactor/`.
 | `task_types/` | The four Task types with their completion checklists and Researcher instructions. |
 | `prepare.py` | Profile preparation after install or update: core path marker, protected and retired config keys, the profile's skill and trusted-project directories, shipped values over earlier defaults (not the model settings, but for one Orchestrator migration off `kimi-k3`), stores, retiring the watcher job, the workspace environment. |
 | `frozen_sessions.py` | Called by `prepare.py`: when a release changes the tool schemas or the instructions, open chats drop their stored copies and take the new ones on their next turn (`docs/hosting.md`, "Open chats after a release"). |
+| `agent_telemetry/` | Captures agent operations as JSON lines on the container's stream, which the Datadog Agent collects, and rebuilds a Session from Datadog (`research telemetry rebuild`). See [`docs/agent-telemetry.md`](../docs/agent-telemetry.md) and `agent_telemetry/CONTRACT.md`. |
 | `cli.py` | The `research` command; each subcommand module registers itself. |
 
 ## Run the tests

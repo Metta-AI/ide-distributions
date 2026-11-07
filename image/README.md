@@ -17,6 +17,9 @@ Build from the repository root:
 docker build --platform linux/amd64 -f image/Dockerfile -t ide-distribution:local .
 ```
 
+The build applies our patches to the pinned Hermes; [`hermes-patches/README.md`](hermes-patches/README.md)
+lists them and the plugin hooks they add.
+
 The host supplies a durable `/workspace`, writable `/tmp`, and a read-only
 `/run/workspace/bootstrap.json` containing `workspace_id`, `platform_url`, and
 `credential`. Run the image entrypoint as its declared numeric user, with a read-only
@@ -27,6 +30,12 @@ The hosted image selects its bundled plugins through Hermes's supported
 `HERMES_BUNDLED_PLUGINS` setting. It preserves the base image's plugins except
 messaging-platform adapters: hosted traffic uses the built-in API transport.
 Standalone orchestrator and researcher installations retain their normal plugin selection.
+
+Agent telemetry goes through the container's own output to the Datadog Agent, and holds content
+([`docs/agent-telemetry.md`](../docs/agent-telemetry.md)). The [OpenTelemetry](#opentelemetry) spans
+below are separate: payload-free timing on stderr. Their rule that no process exit waits for a
+telemetry flush does not cover agent telemetry, which has its own bounded exit flushes
+([build scope](../docs/designs/datadog-agent-logging-build-scope.md)).
 
 The lifecycle adapter sends replies over the platform's authenticated outbound workspace
 connection. Explicit sleep starts the distribution command asynchronously; status reports
@@ -261,7 +270,8 @@ handlers retain their nested distribution span. A tool of an action's own still 
 grouped tool/action, such as `claim_write` as `claim` / `write`.
 
 Application logs and SDK self-diagnostics use Python's standard bounded `QueueHandler` and
-`QueueListener`. Existing root handlers run on the listener thread. Production logging
+`QueueListener`. Existing root handlers run on the listener thread, except agent telemetry's,
+which only enqueues. Production logging
 failure handling (`logging.raiseExceptions=false`) drops records if that queue is full.
 The image sets `PYTHONUNBUFFERED=1` for both interpreters, so a blocked background write
 cannot hold the standard stream's buffered-writer lock during interpreter exit.

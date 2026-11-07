@@ -125,6 +125,9 @@ The Hermes behaviour this depends on is listed in the module's docstring and exe
 | `API_SERVER_KEY`, `API_SERVER_HOST`, `API_SERVER_PORT` | `image/runtime.py` | The Hermes API server. The watcher reads them from the Orchestrator profile's `.env`. **Every profile must carry the same `API_SERVER_KEY`**: Hermes authenticates `/p/<profile>/v1/runs` with that profile's key. |
 | `OPENROUTER_API_KEY` | the image (`image/inference.py`) | The OpenRouter key both profiles use. The image leases a spend-capped key from the platform (`PUT /v2/workspaces/{id}/inference`) and writes it into each profile's `.env`; outside the image, whoever runs the profiles supplies it. The model itself is not the host's concern: each profile's `config.yaml` names it, and the user changes it through `research serve` (`core/src/research_core/contract/CONTRACT.md`, "Profile models"). |
 | `IDE_INFERENCE_LEASE_FILE` | the image (`image/runtime.py`) | The lease file: the installed key's expiry, fingerprint and when it changed. Beside it, `.inference-state` records why model work is blocked and until when (`budget_exhausted` until the lease file names a new key after the daily refill, or `provider_unavailable` for a few minutes after repeated outages), plus the last failed model call. Every run start (chat, wakes, Researchers) waits while the lease is missing or the state blocks; see `core/src/research_core/inference.py`. A chat message whose run fails mid-way on the budget, a rate limit or a provider outage waits (admission status `waiting`) and resumes with a continuation prompt when the gate opens (`core/src/research_core/run_failures.py`, `core/src/research_core/contract/CONTRACT.md` "Message admissions"). Unset outside the image: always available. |
+| `IDE_WORKSPACE_ID` | the image (`image/runtime.py`) | Names the workspace on every telemetry line, from `/run/workspace/bootstrap.json`. `unknown` outside the image. |
+| `IDE_TELEMETRY_STREAM` | tests and local runs only | A file or pipe to write telemetry lines to, instead of `/proc/1/fd/1`. |
+| `IDE_IMAGE` | the image (`image/runtime.py`) | Names the image on every telemetry record: `distribution-` and a hash of the sources it was built from, which the Dockerfile writes to `/opt/distribution/image-id`. `unknown` outside the image. |
 | `IDE_PLATFORM`, `IDE_FAKE_FAULTS` | tests only | `fake` selects the platform test double. |
 
 ## Gateway, sleep and drain
@@ -203,6 +206,13 @@ itself, which the workspace image runs: it reads each profile's `config.yaml` (`
 IDE reaches `research serve` only through the operations in `image/contract.py`, and that list
 has no model operations yet, so `/ide-next` cannot show or change a model until they are added.
 Nothing that starts a run may put a `model` in the run request.
+
+## Agent telemetry
+
+Capture is always on in the image, with no setting. Every process
+writes JSON lines to `/proc/1/fd/1`, and the Datadog Agent collects them. Nothing about telemetry is on the volume. Under
+`tools/local_stack.py` no Agent collects the lines, and outside a container nothing is written unless
+`IDE_TELEMETRY_STREAM` names a file or pipe. See [`agent-telemetry.md`](agent-telemetry.md).
 
 ## Storage and backup
 

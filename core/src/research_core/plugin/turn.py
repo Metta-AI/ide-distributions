@@ -127,10 +127,18 @@ def _reaction_lines(event: Any, session_id: str) -> list[str]:
 
 def render_turn(ctx: Any, session_id: str, *, is_first_turn: bool, now: datetime) -> str:
     """Notices, the changed-since note, the session's Coworld and the away summary, as text."""
+    parts = render_turn_parts(ctx, session_id, is_first_turn=is_first_turn, now=now)
+    return "\n\n".join(text for _source, text in parts)
+
+
+def render_turn_parts(
+    ctx: Any, session_id: str, *, is_first_turn: bool, now: datetime
+) -> list[tuple[str, str]]:
+    """What ``render_turn`` joins, each with the name of its source for telemetry."""
     from research_core.store import notices
 
     wstore = ctx.wstore
-    parts: list[str] = []
+    parts: list[tuple[str, str]] = []
 
     last = wstore.one(
         "SELECT seq, at, payload FROM events WHERE kind = 'turn.rendered' AND subject = ?"
@@ -160,7 +168,7 @@ def render_turn(ctx: Any, session_id: str, *, is_first_turn: bool, now: datetime
             f"- {n['text']}" + (f" ({', '.join(n['refs'])})" if n.get("refs") else "")
             for n in unread
         ]
-        parts.append("[notices since your last turn]\n" + "\n".join(lines))
+        parts.append(("notices", "[notices since your last turn]\n" + "\n".join(lines)))
         ids = [int(str(n["id"]).split("-")[-1]) for n in unread]
         notices.mark_read(wstore, ctx.actor, ids, by=f"session:{session_id}")
 
@@ -179,20 +187,22 @@ def render_turn(ctx: Any, session_id: str, *, is_first_turn: bool, now: datetime
             changed[event.kind] += 1
     if last is not None and changed:
         top = ", ".join(f"{kind} ×{n}" for kind, n in changed.most_common(MAX_CHANGED_KINDS))
-        parts.append(f"[changed since your last turn] {top}")
+        parts.append(("changed_since", f"[changed since your last turn] {top}"))
     if reactions:
-        parts.append("[reactions since your last turn]\n" + "\n".join(reactions[-MAX_NOTICES:]))
+        shown = "\n".join(reactions[-MAX_NOTICES:])
+        parts.append(("reactions", f"[reactions since your last turn]\n{shown}"))
 
     away_from = _parse_time(last_any["at"]) if last_any else None
     if is_first_turn and last is None and away_from is not None and now - away_from >= AWAY_AFTER:
         summary = _away_summary(wstore, coworld_store, away_from, now)
         if summary:
-            parts.append(summary)
+            parts.append(("away_summary", summary))
 
     if coworld is not None:
-        parts.append(f"[session Coworld] {coworld.coworld_id}")
+        parts.append(("session_coworld", f"[session Coworld] {coworld.coworld_id}"))
     else:
-        parts.append("[session Coworld] none; the client must open a session for a Coworld")
+        none = "[session Coworld] none; the client must open a session for a Coworld"
+        parts.append(("session_coworld", none))
 
     wseq, cseq = wstore.last_seq(), (coworld_store.last_seq() if coworld_store else 0)
     with wstore.tx(ctx.actor) as tx:
@@ -201,7 +211,7 @@ def render_turn(ctx: Any, session_id: str, *, is_first_turn: bool, now: datetime
             session_id,
             {"wseq": wseq, "cseq": cseq, "first": is_first_turn, "coworld_id": coworld_id},
         )
-    return "\n\n".join(parts)
+    return parts
 
 
 def _away_summary(wstore: Any, coworld_store: Any, since: datetime, now: datetime) -> str:
@@ -228,7 +238,11 @@ def _away_summary(wstore: Any, coworld_store: Any, since: datetime, now: datetim
 _bound_terminals: set[tuple[str, str]] = set()
 
 
-def make_pre_llm_call(role: Role) -> Callable[..., dict | None]:
+def make_pre_llm_call(
+    role: Role, on_context: Callable[[str, Any, list[tuple[str, str]]], None] | None = None
+) -> Callable[..., dict | None]:
+    """``on_context`` hears each source added to a user message, for telemetry."""
+
     def pre_llm_call(
         session_id: str = "",
         task_id: str = "",
@@ -268,7 +282,7 @@ def make_pre_llm_call(role: Role) -> Callable[..., dict | None]:
                     profile=env.get("HERMES_PROFILE_NAME") or "orchestrator",
                     kind="chat",
                 )
-            parts = []
+            parts: list[tuple[str, str]] = []
             import json
 
             admission = ctx.wstore.one(
@@ -281,11 +295,15 @@ def make_pre_llm_call(role: Role) -> Callable[..., dict | None]:
                 json.loads(admission["payload"])["context"] if admission else {}
             )
             if block:
-                parts.append(block)
-            parts.append(
-                render_turn(ctx, session_id, is_first_turn=is_first_turn, now=datetime.now(UTC))
+                parts.append(("client_context", block))
+            parts.extend(
+                render_turn_parts(
+                    ctx, session_id, is_first_turn=is_first_turn, now=datetime.now(UTC)
+                )
             )
-            return {"context": "\n\n".join(p for p in parts if p)}
+            if on_context is not None:
+                on_context(session_id, user_message, parts)
+            return {"context": "\n\n".join(text for _source, text in parts)}
         except Exception as error:  # never fail a turn
             log.debug("turn hook failed: %s", error)
             return None
