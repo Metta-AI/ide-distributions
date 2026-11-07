@@ -16,10 +16,12 @@ def record_native_message(
     conversation_history: list,
     span_for_session: Callable[[str], Span],
     user_message: object = None,
+    run_id: str | None = None,
     **_,
 ) -> None:
     """Bind application metadata to the native row ID supplied by the pinned observer hook."""
     from research_core import layout
+    from research_core.agent_telemetry import observed
     from research_core.plugin.executor import profile_env
     from research_core.store.actors import Actor
     from research_core.store.db import Store
@@ -51,6 +53,15 @@ def record_native_message(
                     " AND native_message_id IS NULL",
                     (native_id, admission["op_id"]),
                 )
+            # The one place that sees an admission beside its native row and the run Hermes bound.
+            observed.record(
+                "admission",
+                "bound",
+                admission_id=admission["op_id"],
+                session_id=session_id,
+                run_id=run_id,
+                hermes_message_id=str(native_id),
+            )
     finally:
         store.close()
 

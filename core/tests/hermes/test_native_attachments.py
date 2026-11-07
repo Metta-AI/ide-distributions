@@ -13,8 +13,22 @@ from pathlib import Path
 import pytest
 
 from research_core import layout
+from research_core.agent_telemetry import observed
 from research_core.attachments import prepare
 from research_core.messages import UserMessage
+
+
+def _record_outcomes() -> list[dict]:
+    """What ``prepare`` records, through a stand-in for the process's writer."""
+    outcomes: list[dict] = []
+
+    class Writer:
+        def capture_operation(self, action: str, stage: str, **fields: object) -> None:
+            assert (action, stage) == ("attachment", "prepared")
+            outcomes.append(fields)
+
+    observed.bind(Writer())
+    return outcomes
 
 
 def test_public_message_schema_matches_pinned_hermes(hermes_bin):
@@ -58,12 +72,23 @@ def test_openai_file_parts_use_native_ingestion(hermes_bin, tmp_path, prefix):
             ],
         }
     )
+    outcomes = _record_outcomes()
     prepared = prepare(
         message,
         ws=layout.Workspace(workspace, tmp_path / "env"),
         env=env,
         hermes_bin=str(hermes_bin),
+        admission_id="op_1",
     )
+    assert outcomes == [
+        {
+            "native_event_type": "document",
+            "outcome": "staged",
+            "size_bytes": len(b"retained-file-marker"),
+            "details": {},
+            "admission_id": "op_1",
+        }
+    ]
     assert prepared.root["content"][0] == {"type": "text", "text": "Read the attachment"}
     assert "saved at:" in prepared.root["content"][1]["text"]
     assert next(workspace.rglob("notes with spaces.txt")).read_text() == "retained-file-marker"
@@ -93,6 +118,7 @@ def test_openai_audio_uses_native_transcription(hermes_bin, tmp_path):
             ],
         }
     )
+    outcomes = _record_outcomes()
     prepared = prepare(
         message,
         ws=layout.Workspace(tmp_path / "workspace", tmp_path / "env"),
@@ -101,6 +127,11 @@ def test_openai_audio_uses_native_transcription(hermes_bin, tmp_path):
     )
     transcript = prepared.root["content"][-1]["text"].lower()
     assert "hello world" in transcript and "secret number" in transcript, prepared.root
+    # No transcript text, no file name: its size and what was done to it.
+    (outcome,) = outcomes
+    assert (outcome["native_event_type"], outcome["outcome"]) == ("audio", "transcribed")
+    assert outcome["size_bytes"] == audio.stat().st_size
+    assert outcome["details"]["transcript_bytes"] == len(transcript.encode("utf-8"))
 
 
 def test_pinned_hermes_stages_and_reads_native_attachment(hermes_bin, tmp_path):

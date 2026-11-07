@@ -61,9 +61,11 @@ def make_register(role: Role) -> Callable[[Any], None]:
         ctx.register_system_prompt_section(
             "ide-briefing", make_briefing_section(role), max_chars=SECTION_MAX_CHARS
         )
+        from research_core.plugin.capture import register_capture
         from research_core.plugin.turn import make_pre_llm_call
 
-        ctx.register_hook("pre_llm_call", make_pre_llm_call(role))
+        on_context = register_capture(ctx)
+        ctx.register_hook("pre_llm_call", make_pre_llm_call(role, on_context))
         from research_core.plugin.session_context import make_section
 
         ctx.register_system_prompt_section(

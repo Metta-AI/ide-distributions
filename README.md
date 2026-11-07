@@ -5,7 +5,7 @@ package.
 
 | Folder | What it is |
 |---|---|
-| [`core/`](core/) | `research-core`, the shared package: the record store, the record and platform tools, the Hermes plugin wiring, the watcher, the platform client (real and fake), the `research` CLI, the prompt parts and the skills. |
+| [`core/`](core/) | `research-core`, the shared package: the record store, the record and platform tools, the Hermes plugin wiring, the watcher, the platform client (real and fake), the `research` CLI, the prompt parts, the skills and the agent telemetry library. |
 | [`orchestrator/`](orchestrator/README.md) | The research lead: the profile the user talks to. Plans Goals and Tasks, answers the Researchers, makes and submits policy Versions. |
 | [`researcher/`](researcher/README.md) | A research worker. Each Session does one Task in the background and speaks only to the Orchestrator. |
 
@@ -31,6 +31,9 @@ under `docs/` carry a banner saying so.
   root `pyproject.toml` and `uv.lock` define that environment; `prepare.py` builds it.
 - Every profile of one sandbox shares one workspace (`IDE_WORKSPACE`): a workspace store, and one
   folder per Coworld with the policy repository, worktrees, documents and the Coworld's store.
+- `research_core/agent_telemetry/` captures agent operations for Datadog, and
+  `research telemetry rebuild --session <id>` rebuilds a Session from Datadog alone. See
+  [`docs/agent-telemetry.md`](docs/agent-telemetry.md).
 
 ## Install
 
@@ -59,7 +62,13 @@ uv run pytest -q        # unit and scenario tests; the fake platform needs no ne
 HERMES_BIN=/path/to/hermes uv run pytest -q -m hermes core/tests/hermes   # against a real Hermes
 ```
 
-CI runs the same inside the hosted Hermes image. A daily workflow
+`core/tests/hermes/test_telemetry_redaction.py` also needs `HERMES_PYTHON` or `IDE_HERMES_SRC`, to
+reach Hermes's secret scanner. `core/tests/hermes/test_rebuild_real.py` needs the patched Hermes, and it
+holds the comparison the telemetry rests on: a Session rebuilt from a fake Datadog against the bytes a
+stub model received and `state.db`.
+
+CI runs the same inside the hosted Hermes image with `image/hermes-patches/` applied.
+`core/tests/hermes/test_hermes_patches.py` fails on an unpatched Hermes. A daily workflow
 refreshes the `coworld` and `softmax-cli` pins in `uv.lock`.
 
 The model tool-call tests in `core/tests/model` call models through OpenRouter and spend real

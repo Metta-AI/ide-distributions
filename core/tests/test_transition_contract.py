@@ -1,5 +1,6 @@
 """Refinement tests: real SQLite transitions with lost replies and crash-cut transactions."""
 
+import itertools
 import json
 import sqlite3
 from concurrent.futures import ThreadPoolExecutor
@@ -836,7 +837,7 @@ def test_accepted_worker_report_survives_exit_before_application(tmp_path, monke
         }[action]
     )
     with monkeypatch.context() as patch:
-        ticks = iter([0, 16])
+        ticks = itertools.count(0, 16)  # Other code reads this clock too.
         patch.setattr(transitions.time, "monotonic", lambda: next(ticks))
         accepted = transitions.request(tool_ctx, "task", args, "report")
     assert accepted["kind"] == "transition_pending"
@@ -917,7 +918,7 @@ def test_release_retirement_serializes_with_worker_report_acceptance(
     args = {"action": "wait", "task": "T-1", "kind": "platform", "detail": "Unavailable"}
     if accepted_first:
         with monkeypatch.context() as patch:
-            ticks = iter([0, 16])
+            ticks = itertools.count(0, 16)  # Other code reads this clock too.
             patch.setattr(transitions.time, "monotonic", lambda: next(ticks))
             pending = transitions.request(worker, "task", args, "report")
     Coordinator.request_release(worker, 1, "Done")

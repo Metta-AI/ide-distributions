@@ -100,6 +100,30 @@ def test_pre_llm_call_only_for_orchestrator_chat_sessions(tmp_path, monkeypatch)
     assert turn.make_pre_llm_call("researcher")(session_id="chat9", user_message="x") is None
 
 
+def test_pre_llm_call_reports_each_source_it_adds(tmp_path, monkeypatch):
+    monkeypatch.setenv("IDE_WORKSPACE", str(tmp_path))
+    ctx = make_ctx(tmp_path)
+    sessions.register(
+        ctx.wstore,
+        Actor.harness(),
+        session_id="chat9",
+        profile="orchestrator",
+        kind="chat",
+        coworld_id="cow_fake",
+    )
+    notices.add(ctx.wstore, Actor.parse("harness"), text="a notice", coworld_id="cow_fake")
+    heard = []
+    hook = turn.make_pre_llm_call(
+        "orchestrator", lambda session, typed, parts: heard.append((session, typed, parts))
+    )
+    result = hook(session_id="chat9", user_message="hello", is_first_turn=True)
+    ((session, typed, parts),) = heard
+    assert (session, typed) == ("chat9", "hello")
+    assert [source for source, _text in parts] == ["notices", "session_coworld"]
+    # What telemetry hears is exactly what joins the message.
+    assert "\n\n".join(text for _source, text in parts) == result["context"]
+
+
 def test_session_context_section(tmp_path, monkeypatch):
     ctx = make_ctx(tmp_path, coworld=False)
     sessions.register(

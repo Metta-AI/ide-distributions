@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import importlib
+import os
 import sys
 
 from research_core import __version__
@@ -25,6 +26,7 @@ COMMAND_MODULES: dict[str, str] = {
     "watcher": "research_core.watcher.cli",
     "workspace": "research_core.watcher.cli",
     "serve": "research_core.serve",
+    "telemetry": "research_core.agent_telemetry.cli",
 }
 
 
@@ -51,7 +53,15 @@ def main(argv: list[str] | None = None) -> int:
     if run is None:
         parser.print_usage(sys.stderr)
         return 2
-    return int(run(args) or 0)
+    # A long-running command replaces this writer with its own. Imported here to stay import-light.
+    from research_core.agent_telemetry import observed
+
+    writer = observed.bind_command(os.environ)
+    try:
+        return int(run(args) or 0)
+    finally:
+        observed.unbind(writer)
+        writer.close(observed.COMMAND_EXIT_FLUSH_S)
 
 
 if __name__ == "__main__":  # pragma: no cover - exercised through subprocesses

@@ -1,7 +1,9 @@
 """Run in Hermes's interpreter: stage files using its public attachment RPC.
 
-The input and output are OpenAI user messages. Hermes owns file names, storage,
-PDF rendering and document annotations; the profile supplies no file parser.
+The input is an OpenAI user message. The output is ``{message, outcomes}``: the changed message,
+and for each file its type, original size and what was done to it, with no file name or text. Only
+``message`` goes on to the model. Hermes owns file names, storage, PDF rendering and document
+annotations; the profile supplies no file parser.
 """
 
 import base64
@@ -29,6 +31,7 @@ def main() -> None:
 
     session = call("session.create", {"cwd": str(workspace)})["session_id"]
     content = []
+    outcomes = []
     try:
         for part in request["message"]["content"]:
             if part["type"] not in {"file", "input_audio"}:
@@ -54,6 +57,13 @@ def main() -> None:
                 },
             )
             path = Path(staged["path"])
+            outcome = {
+                "type": "document",
+                "change": "staged",
+                "size_bytes": path.stat().st_size,
+                "details": {},
+            }
+            outcomes.append(outcome)
             content.append(
                 {
                     "type": "text",
@@ -64,6 +74,7 @@ def main() -> None:
             )
             if path.suffix.lower() == ".pdf":
                 pdf = call("pdf.attach", {"session_id": session, "path": str(path)})
+                outcome.update(type="pdf", change="rendered", details={"pages": len(pdf["pages"])})
                 for page in pdf["pages"]:
                     data = base64.b64encode(Path(page["path"]).read_bytes()).decode()
                     content.append(
@@ -76,6 +87,7 @@ def main() -> None:
                     )
             elif path.suffix.lower() in {".png", ".jpg", ".jpeg", ".webp", ".gif"}:
                 call("image.attach", {"session_id": session, "path": str(path)})
+                outcome.update(type="image", change="inlined")
                 mime = (
                     "image/jpeg"
                     if path.suffix.lower() in {".jpg", ".jpeg"}
@@ -108,9 +120,15 @@ def main() -> None:
                 if not transcript["success"]:
                     raise RuntimeError(transcript)
                 content.append({"type": "text", "text": transcript["transcript"]})
+                outcome.update(
+                    type="audio",
+                    change="transcribed",
+                    details={"transcript_bytes": len(transcript["transcript"].encode("utf-8"))},
+                )
     finally:
         call("session.close", {"session_id": session})
-    sys.__stdout__.write(json.dumps({**request["message"], "content": content}))
+    message = {**request["message"], "content": content}
+    sys.__stdout__.write(json.dumps({"message": message, "outcomes": outcomes}))
 
 
 if __name__ == "__main__":
